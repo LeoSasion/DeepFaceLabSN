@@ -1,0 +1,15 @@
+@echo off
+chcp 65001 > nul
+cd /d "%~dp0"
+attrib +h "5)———————————[ 模型 训练 —— Train Models ]———————————————————————————————.bat"
+attrib -h "5)++++++++++++++++[ 模型 训练 —— Train Models ]++++++++++++++++++++++++++++++++++++++++++++.bat"
+attrib -h "5.0)--- 转换 SAEHD 模型格式 ---------------------- transfer SAEHD format.bat"
+attrib -h "5.2)--- 训练 ME 模型 ------------------------------- train ME.bat"
+attrib -h "5.2)--- 训练 ME 模型 WEB实时 -------------------- train ME.bat"
+attrib -h "5.2)--- 训练 ME 模型 WEB统计 -------------------- train ME.bat"
+attrib -h "5.2)--- 训练 Quick512 模型 ------------------------ train Quick512.bat"
+attrib -h "5.2)--- 训练 Quick384 模型 ------------------------ train Quick384.bat"
+attrib -h "5.2)--- 训练 ME 指定预设文件 --------------------- train ME with conf.bat"
+attrib -h "5.3)--- 训练 ME 模型 导出loss -------------------- train ME with snapshot&lossdata.bat"
+attrib -h "5.4)--- 训练 SAEHD 继续上次 --------------------- train Recent SAEHD.bat"
+attrib -h "5.4)--- 训练 SAEHD 原版模型 --------------------- train SAEHD.bat"

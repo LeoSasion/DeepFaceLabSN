@@ -166,7 +166,10 @@ class ModelBase(object):
         if self.is_first_run():
             io.log_info ("\n新模型创建后的首次训练开始.")
             
-        if silent_start:
+        if force_gpu_idxs is not None:
+            gpu_idxs = force_gpu_idxs
+            self.options['gpu_idxs'] = force_gpu_idxs
+        elif silent_start:
             try:
                 gpu_idxs=self.options['gpu_idxs']
             except:
@@ -174,7 +177,7 @@ class ModelBase(object):
         else:
             gpu_idxs=self.options['gpu_idxs']=nn.ask_choose_device_idxs(suggest_best_multi_gpu=True)
             
-        self.device_config = nn.DeviceConfig.GPUIndexes(force_gpu_idxs or gpu_idxs) if not cpu_only else nn.DeviceConfig.CPU()
+        self.device_config = nn.DeviceConfig.GPUIndexes(gpu_idxs) if not cpu_only else nn.DeviceConfig.CPU()
         nn.initialize(self.device_config)  # 初始化神经网络，使用设备配置
 
         ####

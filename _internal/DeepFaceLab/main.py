@@ -578,7 +578,9 @@ if __name__ == "__main__":
             if arguments.aligned_dir is not None
             else None,
             pak_name=arguments.pak_name,
-            force_gpu_idxs=arguments.force_gpu_idxs,
+            force_gpu_idxs=[int(x) for x in arguments.force_gpu_idxs.split(",")]
+            if arguments.force_gpu_idxs is not None
+            else None,
             xseg_models_path=Path(arguments.xseg_dir),
             cpu_only=arguments.cpu_only,
         )
