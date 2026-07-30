@@ -1,5 +1,7 @@
 import math
 import multiprocessing
+import json
+import os
 import traceback
 from pathlib import Path
 
@@ -73,13 +75,52 @@ def main (model_class_name=None,
                                                     place_model_on_cpu=True,
                                                     run_on_cpu=run_on_cpu)
 
-        is_interactive = io.input_bool ("使用交互式合成器?", True) if not io.is_colab() else False # 是否使用交互式合并器
+        web_merge_config = None
+        web_merge_config_raw = os.environ.get("DFL_WEB_MERGE_CONFIG", "").strip()
+        if web_merge_config_raw:
+            try:
+                web_merge_config = json.loads(web_merge_config_raw)
+            except Exception as error:
+                raise ValueError(f"DFL_WEB_MERGE_CONFIG 无效: {error}")
 
-        if not is_interactive:  # 如果不是交互式的
-            cfg.ask_settings()  # 请求配置设置
-            
-        subprocess_count = io.input_int("工作线程数?", max(8, multiprocessing.cpu_count()), 
-                                        valid_range=[1, multiprocessing.cpu_count()], help_message="指定要处理的线程数。低值可能影响性能。高值可能导致内存错误。该值不能大于CPU核心数" )
+        if web_merge_config is not None:
+            is_interactive = False
+            color_transfer_modes = {
+                "none": 0, "rct": 1, "lct": 2, "mkl": 3, "mkl-m": 4,
+                "idt": 5, "idt-m": 6, "sot-m": 7, "mix-m": 8,
+            }
+            if hasattr(cfg, "mode"):
+                cfg.mode = str(web_merge_config.get("mode", "overlay"))
+            if hasattr(cfg, "mask_mode"):
+                cfg.mask_mode = int(np.clip(web_merge_config.get("maskMode", 7), 1, 9))
+                cfg.erode_mask_modifier = int(np.clip(web_merge_config.get("erodeMask", 0), -400, 400))
+                cfg.blur_mask_modifier = int(np.clip(web_merge_config.get("blurMask", 0), 0, 400))
+                cfg.motion_blur_power = int(np.clip(web_merge_config.get("motionBlur", 0), 0, 100))
+                cfg.output_face_scale = int(np.clip(web_merge_config.get("faceScale", 0), -50, 50))
+                cfg.color_transfer_mode = color_transfer_modes.get(
+                    str(web_merge_config.get("colorTransfer", "none")),
+                    0,
+                )
+                cfg.super_resolution_power = int(np.clip(web_merge_config.get("superResolution", 0), 0, 100))
+                cfg.image_denoise_power = int(np.clip(web_merge_config.get("imageDenoise", 0), 0, 500))
+                cfg.bicubic_degrade_power = int(np.clip(web_merge_config.get("bicubicDegrade", 0), 0, 100))
+                cfg.color_degrade_power = int(np.clip(web_merge_config.get("colorDegrade", 0), 0, 100))
+            cfg.sharpen_mode = int(np.clip(web_merge_config.get("sharpenMode", 0), 0, 2))
+            cfg.blursharpen_amount = int(np.clip(web_merge_config.get("sharpenAmount", 0), -100, 100))
+            subprocess_count = int(np.clip(
+                web_merge_config.get("workers", max(8, multiprocessing.cpu_count())),
+                1,
+                multiprocessing.cpu_count(),
+            ))
+            io.log_info("已应用 Web 合成参数；不会打开 Merger 窗口。")
+        else:
+            is_interactive = io.input_bool ("使用交互式合成器?", True) if not io.is_colab() else False # 是否使用交互式合并器
+
+            if not is_interactive:  # 如果不是交互式的
+                cfg.ask_settings()  # 请求配置设置
+
+            subprocess_count = io.input_int("工作线程数?", max(8, multiprocessing.cpu_count()),
+                                            valid_range=[1, multiprocessing.cpu_count()], help_message="指定要处理的线程数。低值可能影响性能。高值可能导致内存错误。该值不能大于CPU核心数" )
 
         input_path_image_paths = pathex.get_image_paths(input_path)  # 获取输入路径下的图片路径
 

@@ -1,0 +1,257 @@
+diff --git a/.gitignore b/.gitignore
+index f801b34da897237950ed8fb151879f882bc7f34b..859214758450024d6284acf0d66659ec293e1e4d 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -6,6 +6,7 @@ _internal/EbSynth/
+ _internal/ffmpeg/
+ _internal/model_generic_xseg/
+ _internal/pretrain_Quick224/
++_internal/pretrain_Quick384/
+ _internal/pretrain_Quick512/
+ _internal/python_common/
+ _internal/XnViewMP/
+diff --git a/0)———————————[ 你能看见我，说明你还没【初始化】，点我！ —— Initialize ]———————————————————.bat b/0)———————————[ 你能看见我，说明你还没【初始化】，点我！ —— Initialize ]———————————————————.bat
+index 92dd1eb2bfdf12bd654b02d7f1b1c59fc9128ce9..8150cde7a1b1487add3ff1b34672f6f253bd1a7d 100644
+--- a/0)———————————[ 你能看见我，说明你还没【初始化】，点我！ —— Initialize ]———————————————————.bat
++++ b/0)———————————[ 你能看见我，说明你还没【初始化】，点我！ —— Initialize ]———————————————————.bat
+@@ -46,7 +46,7 @@ attrib +h *.*
+ echo ok!
+ echo 正在显示需要的文件
+ attrib -h "0)———————————[ 展开 全部 —— Expand All ]————————————————————————————————.bat"
+-attrib -h "0)++++++++++++++++[ 最近 使用 —— Recent Tse ]+++++++++++++++++++++++++++++++++++++++++++++.bat"
++attrib -h "0)++++++++++++++++[ 最近 使用 —— Recent Use ]+++++++++++++++++++++++++++++++++++++++++++++.bat"
+ attrib -h "0)———————————[ 显卡 设置 —— RG 开关 ]—————————————————————————————————.bat"
+ attrib -h "1)———————————[ 视频 处理 —— Video Tools ]———————————————————————————————.bat"
+ attrib -h "2)———————————[ SRC 处理 —— Data_src Tools ]——————————————————————————————.bat"
+@@ -86,7 +86,7 @@ echo 6. 最终解释权
+ echo.
+ echo 对于本免责声明的解释及其修改权归本项目的维护者所有。如果本免责声明的中英文版本出现冲突，以英文版本为准。
+ echo.
+-echo 汉化版：https://github.com/curios-city/DeepFaceLab
++echo 汉化版：https://github.com/curios-city/DeepFaceLabSN
+ echo 英文版：https://github.com/MachineEditor/DeepFaceLab
+ echo.
+ echo 请选择是否开启欢迎界面：
+diff --git a/5.1)--- 训练 AMP 指定预设文件 -------------------- train AMP with conf.bat b/5.1)--- 训练 AMP 指定预设文件 -------------------- train AMP with conf.bat
+deleted file mode 100644
+index dd455855b58bbec9f4476b880424fba818b0d4c6..0000000000000000000000000000000000000000
+--- a/5.1)--- 训练 AMP 指定预设文件 -------------------- train AMP with conf.bat
++++ /dev/null
+@@ -1,26 +0,0 @@
+-@echo off
+-
+-chcp 65001 > nul
+-
+-title ---【训练 AMP 指定预设文件】---【神农汉化】---【QQ交流群 747439134】
+-
+-set "filename=%~nx0"
+-
+-if not "%filename:~0,2%"=="0-" (
+-    copy "%~nx0" "0-%~nx0" > nul
+-    echo [最近使用] 已写入，如果需要清空历史请手动删除！
+-)
+-
+-echo.
+-
+-call _internal\setenv.bat
+-
+-"%PYTHON_EXECUTABLE%" "%DFL_ROOT%\main.py" train ^
+-    --training-data-src-dir "%WORKSPACE%\data_src\aligned" ^
+-    --training-data-dst-dir "%WORKSPACE%\data_dst\aligned" ^
+-    --pretraining-data-dir "%WORKSPACE%\pretrain_faces" ^
+-    --model-dir "%WORKSPACE%\model" ^
+-    --model AMP ^
+-    --config-training-file "%WORKSPACE%\config-file"
+-
+-pause
+diff --git a/5.1)--- 训练 AMP 模型 ----------------------------- train AMP.bat b/5.1)--- 训练 AMP 模型 ----------------------------- train AMP.bat
+deleted file mode 100644
+index c64840ba9936f85bb59503bd3b832fa6179542da..0000000000000000000000000000000000000000
+--- a/5.1)--- 训练 AMP 模型 ----------------------------- train AMP.bat
++++ /dev/null
+@@ -1,26 +0,0 @@
+-@echo off
+-
+-chcp 65001 > nul
+-
+-title ---【训练 AMP 模型】---【神农汉化】---【QQ交流群 747439134】
+-
+-set "filename=%~nx0"
+-
+-if not "%filename:~0,2%"=="0-" (
+-    copy "%~nx0" "0-%~nx0" > nul
+-    echo [最近使用] 已写入，如果需要清空历史请手动删除！
+-)
+-
+-echo.
+-
+-call _internal\setenv.bat
+-
+-"%PYTHON_EXECUTABLE%" "%DFL_ROOT%\main.py" train ^
+-    --training-data-src-dir "%WORKSPACE%\data_src\aligned" ^
+-    --training-data-dst-dir "%WORKSPACE%\data_dst\aligned" ^
+-    --pretraining-data-dir "%WORKSPACE%\pretrain_faces" ^
+-    --model-dir "%WORKSPACE%\model" ^
+-    --model AMP ^
+-    --auto-gen-config
+-
+-pause
+diff --git a/5.2)--- 训练 Quick224 模型 ------------------------ train Quick224.bat b/5.2)--- 训练 Quick224 模型 ------------------------ train Quick224.bat
+deleted file mode 100644
+index d8844a7967a7fc6f85b0c9ca2aac477fd2ac2f46..0000000000000000000000000000000000000000
+--- a/5.2)--- 训练 Quick224 模型 ------------------------ train Quick224.bat
++++ /dev/null
+@@ -1,28 +0,0 @@
+-@echo off
+-
+-chcp 65001 > nul
+-
+-title ---【训练 Quick224 原版模型】---【神农汉化】---【QQ交流群 747439134】
+-
+-set "filename=%~nx0"
+-
+-if not "%filename:~0,2%"=="0-" (
+-    copy "%~nx0" "0-%~nx0" > nul
+-    echo [最近使用] 已写入，如果需要清空历史请手动删除！
+-)
+-
+-echo.
+-
+-call _internal\setenv_old.bat
+-
+-"%PYTHON_EXECUTABLE%" "%DFL_ROOT%\main.py" train ^
+-    --training-data-src-dir "%WORKSPACE%\data_src\aligned" ^
+-    --training-data-dst-dir "%WORKSPACE%\data_dst\aligned" ^
+-    --pretraining-data-dir "%WORKSPACE%\pretrain_faces" ^
+-    --pretrained-model-dir "%INTERNAL%\pretrain_Quick224" ^
+-    --model-dir "%WORKSPACE%\model" ^
+-    --model Quick224
+-
+-:end
+-echo 如果有问题请在 QQ群:747439134 反馈
+-pause
+diff --git a/5.2)--- 训练 Quick512 模型 ------------------------ train Quick512.bat b/5.2)--- 训练 Quick512 模型 ------------------------ train Quick512.bat
+index 71d17fb9b0e561469d27f752630579d16a150844..0d823d841f4f04986f7202a73a10989177d61670 100644
+--- a/5.2)--- 训练 Quick512 模型 ------------------------ train Quick512.bat
++++ b/5.2)--- 训练 Quick512 模型 ------------------------ train Quick512.bat
+@@ -28,8 +28,7 @@ call _internal\setenv.bat
+     --pretrained-model-dir "%INTERNAL%\pretrain_Quick512" ^
+     --model-dir "%WORKSPACE%\model" ^
+     --model Q512 ^
+-    --flask-preview ^
+-    --silent-start
++    --flask-preview
+ 
+ :end
+ echo 如果有问题请在 QQ群:747439134 反馈
+diff --git a/6.1)--- 导出 AMP 直播模型 ------------------------ export AMP as dfm.bat b/6.1)--- 导出 AMP 直播模型 ------------------------ export AMP as dfm.bat
+deleted file mode 100644
+index 48de7eb669644101cd78c124508b889c67a51689..0000000000000000000000000000000000000000
+--- a/6.1)--- 导出 AMP 直播模型 ------------------------ export AMP as dfm.bat
++++ /dev/null
+@@ -1,22 +0,0 @@
+-@echo off
+-
+-chcp 65001 > nul
+-
+-title ---【导出 AMP 直播模型】---【神农汉化】---【QQ交流群 747439134】
+-
+-set "filename=%~nx0"
+-
+-if not "%filename:~0,2%"=="0-" (
+-    copy "%~nx0" "0-%~nx0" > nul
+-    echo [最近使用] 已写入，如果需要清空历史请手动删除！
+-)
+-
+-echo.
+-
+-call _internal\setenv.bat
+-
+-"%PYTHON_EXECUTABLE%" "%DFL_ROOT%\main.py" exportdfm ^
+-    --model-dir "%WORKSPACE%\model" ^
+-    --model AMP
+-
+-pause
+diff --git a/6.1)--- 导出 Quick224 直播模型 ------------------- export Quick224 as dfm.bat b/6.1)--- 导出 Quick224 直播模型 ------------------- export Quick224 as dfm.bat
+deleted file mode 100644
+index 4bc9d57481740e3f75cda2641fa6158439247438..0000000000000000000000000000000000000000
+--- a/6.1)--- 导出 Quick224 直播模型 ------------------- export Quick224 as dfm.bat
++++ /dev/null
+@@ -1,22 +0,0 @@
+-@echo off
+-
+-chcp 65001 > nul
+-
+-title ---【导出 Quick224 直播模型】---【神农汉化】---【QQ交流群 747439134】
+-
+-set "filename=%~nx0"
+-
+-if not "%filename:~0,2%"=="0-" (
+-    copy "%~nx0" "0-%~nx0" > nul
+-    echo [最近使用] 已写入，如果需要清空历史请手动删除！
+-)
+-
+-echo.
+-
+-call _internal\setenv_old.bat
+-
+-"%PYTHON_EXECUTABLE%" "%DFL_ROOT%\main.py" exportdfm ^
+-    --model-dir "%WORKSPACE%\model" ^
+-    --model Quick224
+-
+-pause
+diff --git a/6.2)--- 模型 Quick224 合成人脸 ------------------- merge Quick224.bat b/6.2)--- 模型 Quick224 合成人脸 ------------------- merge Quick224.bat
+deleted file mode 100644
+index 2cea6a3347ce5a4fb5e486ddf4b0b60e961708d1..0000000000000000000000000000000000000000
+--- a/6.2)--- 模型 Quick224 合成人脸 ------------------- merge Quick224.bat
++++ /dev/null
+@@ -1,27 +0,0 @@
+-@echo off
+-
+-chcp 65001 > nul
+-
+-title ---【模型 Quick224 合成人脸】---【神农汉化】---【QQ交流群 747439134】
+-
+-set "filename=%~nx0"
+-
+-if not "%filename:~0,2%"=="0-" (
+-    copy "%~nx0" "0-%~nx0" > nul
+-    echo [最近使用] 已写入，如果需要清空历史请手动删除！
+-)
+-
+-echo.
+-
+-call _internal\setenv_old.bat
+-
+-"%PYTHON_EXECUTABLE%" "%DFL_ROOT%\main.py" merge ^
+-    --input-dir "%WORKSPACE%\data_dst" ^
+-    --output-dir "%WORKSPACE%\data_dst\merged" ^
+-    --output-mask-dir "%WORKSPACE%\data_dst\merged_mask" ^
+-    --aligned-dir "%WORKSPACE%\data_dst\aligned" ^
+-    --model-dir "%WORKSPACE%\model" ^
+-    --xseg-dir "%INTERNAL%\model_generic_xseg" ^
+-    --model Quick224
+-    
+-pause
+diff --git a/_internal/DeepFaceLab/models/Model_Q384/Model.py b/_internal/DeepFaceLab/models/Model_Q384/Model.py
+index 13c107c48a6cbb42c9b6c7fa3ee6555ae0c30554..e3b11ab80038c2967f4cea5d5d5036262f391b92 100644
+--- a/_internal/DeepFaceLab/models/Model_Q384/Model.py
++++ b/_internal/DeepFaceLab/models/Model_Q384/Model.py
+@@ -157,7 +157,7 @@ class MEModel(ModelBase):
+             use_fp16 = io.input_bool(
+                 "使用量化导出?",
+                 True,
+-                help_message="更轻更快，但是可能会一片黑。",
++                help_message="建议开启量化，更轻更快。",
+             )
+ 
+         # 设置相关参数 （已解锁预训练的所有锁定，除了GAN）
+@@ -173,7 +173,7 @@ class MEModel(ModelBase):
+         random_hsv_power = 0.0
+         blur_out_mask = False
+         
+-        ct_mode = "none" if self.quick_opt else "fs-aug"
++        ct_mode = None if self.quick_opt else "fs-aug"
+ 
+         # 设置模型优化选项
+         models_opt_on_gpu = (

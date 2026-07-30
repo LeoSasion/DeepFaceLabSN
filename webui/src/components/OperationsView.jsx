@@ -1,0 +1,638 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  IconAlertTriangle,
+  IconArchive,
+  IconArrowLeft,
+  IconArrowRight,
+  IconBoxModel2,
+  IconCheck,
+  IconDeviceFloppy,
+  IconPhoto,
+  IconPlayerPlay,
+  IconRefresh,
+  IconRestore,
+  IconRotateClockwise,
+  IconShieldCheck,
+  IconTrash,
+  IconX,
+} from "@tabler/icons-react";
+import { runtimeApi } from "../runtime/api.js";
+
+const categoryLabels = {
+  dataset: "数据集工具",
+  encode: "视频封装",
+  extract: "提取",
+  mask: "XSeg 遮罩",
+  merge: "模型应用",
+  model: "模型导出",
+  sort: "排序清洗",
+  training: "模型训练",
+  video: "视频处理",
+};
+
+const terminalStates = new Set(["succeeded", "failed", "cancelled", "orphaned"]);
+
+function profileLabel(profile) {
+  return profile === "legacy" ? "DFL legacy" : "DFL current";
+}
+
+function CommandRows({ commands, onOpenCommand }) {
+  const groups = useMemo(() => {
+    const result = new Map();
+    for (const command of commands) {
+      const key = command.category ?? "other";
+      if (!result.has(key)) result.set(key, []);
+      result.get(key).push(command);
+    }
+    return [...result.entries()];
+  }, [commands]);
+
+  if (!commands.length) {
+    return <div className="operation-empty">当前分区没有可运行的源码命令。</div>;
+  }
+
+  return (
+    <div className="command-groups">
+      {groups.map(([category, items]) => (
+        <section className="command-group" key={category}>
+          <header>
+            <h3>{categoryLabels[category] ?? category}</h3>
+            <span>{items.length} 项</span>
+          </header>
+          <div className="command-rows">
+            {items.map((command) => (
+              <button
+                className="command-row"
+                key={command.id}
+                type="button"
+                onClick={() => onOpenCommand(command.id)}
+              >
+                <span className="command-row-state"><IconPlayerPlay size={15} /></span>
+                <span className="command-row-copy">
+                  <strong>{command.label}</strong>
+                  <small>{command.description}</small>
+                </span>
+                <span className="command-row-meta">
+                  <span>{profileLabel(command.profile)}</span>
+                  <span>{command.parameters?.length ?? 0} 个参数</span>
+                </span>
+                <IconArrowRight size={17} />
+              </button>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+export function CommandCenterView({
+  title,
+  description,
+  commands,
+  filter,
+  onOpenCommand,
+  aside,
+}) {
+  const visibleCommands = useMemo(
+    () => commands.filter(filter),
+    [commands, filter],
+  );
+  return (
+    <section className="operation-view">
+      <header className="operation-header">
+        <div>
+          <h2>{title}</h2>
+          <p>{description}</p>
+        </div>
+        <span className="operation-count">{visibleCommands.length} 个已接入功能</span>
+      </header>
+      <div className={`operation-layout ${aside ? "has-aside" : ""}`}>
+        <CommandRows commands={visibleCommands} onOpenCommand={onOpenCommand} />
+        {aside}
+      </div>
+    </section>
+  );
+}
+
+function imagePoint(svg, event, width, height) {
+  const rect = svg.getBoundingClientRect();
+  return [
+    Math.max(0, Math.min(width, ((event.clientX - rect.left) / rect.width) * width)),
+    Math.max(0, Math.min(height, ((event.clientY - rect.top) / rect.height) * height)),
+  ];
+}
+
+function AnnotationCanvas({ side, item, annotation, onSaved, onError }) {
+  const svgRef = useRef(null);
+  const [polygons, setPolygons] = useState([]);
+  const [draft, setDraft] = useState([]);
+  const [polygonType, setPolygonType] = useState("include");
+  const [saving, setSaving] = useState(false);
+  const [dragging, setDragging] = useState(null);
+
+  useEffect(() => {
+    setPolygons(annotation?.polygons ?? []);
+    setDraft([]);
+    setDragging(null);
+  }, [annotation]);
+
+  if (!annotation) {
+    return <div className="asset-detail-loading">正在读取 DFL 标注元数据…</div>;
+  }
+
+  const addPoint = (event) => {
+    if (dragging || event.button !== 0) return;
+    const svg = svgRef.current;
+    if (!svg) return;
+    setDraft((current) => [
+      ...current,
+      imagePoint(svg, event, annotation.width, annotation.height),
+    ]);
+  };
+
+  const finishPolygon = () => {
+    if (draft.length < 3) {
+      onError(new Error("至少需要 3 个点才能闭合多边形"));
+      return;
+    }
+    setPolygons((current) => [...current, { type: polygonType, points: draft }]);
+    setDraft([]);
+  };
+
+  const movePoint = (event) => {
+    if (!dragging || !svgRef.current) return;
+    const point = imagePoint(svgRef.current, event, annotation.width, annotation.height);
+    setPolygons((current) => current.map((polygon, polygonIndex) => (
+      polygonIndex !== dragging.polygonIndex
+        ? polygon
+        : {
+          ...polygon,
+          points: polygon.points.map((candidate, pointIndex) => (
+            pointIndex === dragging.pointIndex ? point : candidate
+          )),
+        }
+    )));
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const result = await runtimeApi.saveAlignedAnnotation(side, item.name, polygons);
+      onSaved(result);
+    } catch (error) {
+      onError(error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const colors = {
+    include: { stroke: "#42d89a", fill: "rgba(52, 211, 153, 0.22)" },
+    exclude: { stroke: "#ff7a7a", fill: "rgba(255, 92, 92, 0.18)" },
+  };
+
+  return (
+    <div className="annotation-editor">
+      <div className="annotation-toolbar">
+        <div className="seg-type-switch" aria-label="多边形类型">
+          <button
+            className={polygonType === "include" ? "is-active" : ""}
+            type="button"
+            onClick={() => setPolygonType("include")}
+          >
+            <span className="seg-swatch include" />保留区
+          </button>
+          <button
+            className={polygonType === "exclude" ? "is-active" : ""}
+            type="button"
+            onClick={() => setPolygonType("exclude")}
+          >
+            <span className="seg-swatch exclude" />排除区
+          </button>
+        </div>
+        <div className="annotation-actions">
+          <button className="button secondary" type="button" onClick={() => setDraft((value) => value.slice(0, -1))} disabled={!draft.length}>
+            <IconRotateClockwise size={15} />撤销点
+          </button>
+          <button className="button secondary" type="button" onClick={finishPolygon} disabled={draft.length < 3}>
+            <IconCheck size={15} />闭合
+          </button>
+          <button className="button secondary" type="button" onClick={() => setPolygons((value) => value.slice(0, -1))} disabled={!polygons.length}>
+            <IconTrash size={15} />移除末项
+          </button>
+          <button className="button primary" type="button" onClick={() => void save()} disabled={saving || draft.length > 0}>
+            <IconDeviceFloppy size={15} />{saving ? "保存中" : "写入 JPG"}
+          </button>
+        </div>
+      </div>
+      <div className="annotation-canvas-wrap">
+        <svg
+          ref={svgRef}
+          className="annotation-canvas"
+          viewBox={`0 0 ${annotation.width} ${annotation.height}`}
+          role="img"
+          aria-label={`${item.name} XSeg 多边形编辑器`}
+          onPointerDown={addPoint}
+          onPointerMove={movePoint}
+          onPointerUp={() => setDragging(null)}
+          onPointerCancel={() => setDragging(null)}
+        >
+          <image
+            href={item.imageUrl}
+            x="0"
+            y="0"
+            width={annotation.width}
+            height={annotation.height}
+            preserveAspectRatio="none"
+          />
+          {polygons.map((polygon, polygonIndex) => (
+            <g key={`${polygon.type}-${polygonIndex}`}>
+              <polygon
+                points={polygon.points.map((point) => point.join(",")).join(" ")}
+                stroke={colors[polygon.type].stroke}
+                fill={colors[polygon.type].fill}
+                strokeWidth="2"
+                vectorEffect="non-scaling-stroke"
+              />
+              {polygon.points.map((point, pointIndex) => (
+                <circle
+                  key={`${polygonIndex}-${pointIndex}`}
+                  className="annotation-handle"
+                  cx={point[0]}
+                  cy={point[1]}
+                  r="4"
+                  fill={colors[polygon.type].stroke}
+                  stroke="#07110e"
+                  strokeWidth="1.5"
+                  onPointerDown={(event) => {
+                    event.stopPropagation();
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    setDragging({ polygonIndex, pointIndex });
+                  }}
+                />
+              ))}
+            </g>
+          ))}
+          {draft.length > 0 && (
+            <g>
+              <polyline
+                points={draft.map((point) => point.join(",")).join(" ")}
+                stroke={colors[polygonType].stroke}
+                fill="none"
+                strokeWidth="2"
+                strokeDasharray="7 5"
+                vectorEffect="non-scaling-stroke"
+              />
+              {draft.map((point, index) => (
+                <circle
+                  key={`draft-${index}`}
+                  cx={point[0]}
+                  cy={point[1]}
+                  r="4"
+                  fill={colors[polygonType].stroke}
+                />
+              ))}
+            </g>
+          )}
+        </svg>
+      </div>
+      <p className="annotation-help">
+        点击图片添加点，闭合后可拖动顶点微调。红色“排除区”会从绿色“保留区”中扣除；保存会直接更新 DFL JPG 元数据。
+      </p>
+    </div>
+  );
+}
+
+export function DatasetView({
+  side,
+  commands,
+  onOpenCommand,
+  onError,
+  onNotice,
+  editMasks = false,
+  onSideChange,
+}) {
+  const [assets, setAssets] = useState(null);
+  const [quarantine, setQuarantine] = useState([]);
+  const [selectedName, setSelectedName] = useState(null);
+  const [annotation, setAnnotation] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [nextAssets, nextQuarantine] = await Promise.all([
+        runtimeApi.alignedAssets(side, { limit: 200 }),
+        runtimeApi.alignedQuarantine(side),
+      ]);
+      setAssets(nextAssets);
+      setQuarantine(nextQuarantine);
+      setSelectedName((current) => (
+        current && nextAssets.items.some((item) => item.name === current)
+          ? current
+          : nextAssets.items[0]?.name ?? null
+      ));
+    } catch (error) {
+      onError(error);
+    } finally {
+      setLoading(false);
+    }
+  }, [onError, side]);
+
+  useEffect(() => {
+    setAssets(null);
+    setSelectedName(null);
+    setAnnotation(null);
+    void refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    if (
+      !selectedName
+      || !editMasks
+      || assets?.side !== side
+      || !assets.items.some((item) => item.name === selectedName)
+    ) {
+      setAnnotation(null);
+      return;
+    }
+    let cancelled = false;
+    setAnnotation(null);
+    void runtimeApi.alignedAnnotation(side, selectedName)
+      .then((value) => {
+        if (!cancelled) setAnnotation(value);
+      })
+      .catch(onError);
+    return () => {
+      cancelled = true;
+    };
+  }, [assets, editMasks, onError, selectedName, side]);
+
+  const selected = assets?.items.find((item) => item.name === selectedName) ?? null;
+  const sideCommands = commands.filter((command) => (
+    command.side === side
+    && (command.category === "dataset" || command.category === "extract" || command.category === "sort")
+  ));
+
+  const quarantineSelected = async () => {
+    if (!selected || !window.confirm(`把 ${selected.name} 移入可恢复隔离区吗？`)) return;
+    try {
+      await runtimeApi.quarantineAligned(side, selected.name);
+      onNotice(`${selected.name} 已移入隔离区，可随时恢复`);
+      await refresh();
+    } catch (error) {
+      onError(error);
+    }
+  };
+
+  const restore = async (item) => {
+    try {
+      await runtimeApi.restoreAligned(side, item.token, item.name);
+      onNotice(`${item.name} 已恢复到 ${side.toUpperCase()} aligned`);
+      await refresh();
+    } catch (error) {
+      onError(error);
+    }
+  };
+
+  return (
+    <section className="dataset-view">
+      <header className="operation-header dataset-header">
+        <div>
+          <h2>{editMasks ? "XSeg Web 遮罩编辑器" : `${side.toUpperCase()} 数据集`}</h2>
+          <p>
+            {editMasks
+              ? "在浏览器中直接读写 DFL aligned JPG 的 include / exclude 多边形。"
+              : "浏览 aligned 人脸、检查元数据，并通过可恢复隔离完成素材清洗。"}
+          </p>
+        </div>
+        <div className="dataset-header-actions">
+          {editMasks && (
+            <div className="side-switch">
+              {["src", "dst"].map((value) => (
+                <button
+                  className={side === value ? "is-active" : ""}
+                  key={value}
+                  type="button"
+                  onClick={() => onSideChange(value)}
+                >
+                  {value.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          )}
+          <button className="button secondary" type="button" onClick={() => void refresh()} disabled={loading}>
+            <IconRefresh size={15} />{loading ? "扫描中" : "刷新"}
+          </button>
+        </div>
+      </header>
+
+      {!editMasks && sideCommands.length > 0 && (
+        <div className="dataset-command-strip">
+          {sideCommands.slice(0, 6).map((command) => (
+            <button type="button" key={command.id} onClick={() => onOpenCommand(command.id)}>
+              <IconPlayerPlay size={14} />{command.shortLabel}
+            </button>
+          ))}
+          <span>{sideCommands.length} 个数据集命令已接入</span>
+        </div>
+      )}
+
+      <div className="dataset-layout">
+        <aside className="asset-browser">
+          <div className="asset-browser-heading">
+            <div>
+              <IconPhoto size={18} />
+              <strong>aligned 人脸</strong>
+            </div>
+            <span>{assets?.total ?? 0}</span>
+          </div>
+          <div className="asset-thumbnails">
+            {assets?.items.map((item) => (
+              <button
+                className={`asset-thumbnail ${selectedName === item.name ? "is-active" : ""}`}
+                key={item.name}
+                type="button"
+                onClick={() => setSelectedName(item.name)}
+                title={item.sourceFilename ?? item.name}
+              >
+                <img src={item.imageUrl} alt="" loading="lazy" />
+                <span>{item.name}</span>
+                <small>
+                  {item.polygonCount ? `${item.polygonCount} 个标注` : item.hasAppliedMask ? "已有应用遮罩" : "未标注"}
+                </small>
+              </button>
+            ))}
+            {!loading && !assets?.items.length && (
+              <div className="asset-browser-empty">尚未生成 aligned JPG。</div>
+            )}
+          </div>
+          <div className="asset-browser-pager">
+            <button type="button" disabled><IconArrowLeft size={15} />上一页</button>
+            <span>{assets?.total ? `1–${assets.items.length} / ${assets.total}` : "0 / 0"}</span>
+            <button type="button" disabled={assets?.items.length >= assets?.total}>下一页<IconArrowRight size={15} /></button>
+          </div>
+        </aside>
+
+        <section className="asset-detail">
+          {selected ? (
+            <>
+              <header className="asset-detail-heading">
+                <div>
+                  <strong>{selected.name}</strong>
+                  <small>{selected.sourceFilename ?? "没有源文件名元数据"}</small>
+                </div>
+                {!editMasks && (
+                  <button className="button danger" type="button" onClick={() => void quarantineSelected()}>
+                    <IconArchive size={15} />隔离
+                  </button>
+                )}
+              </header>
+              {editMasks ? (
+                <AnnotationCanvas
+                  side={side}
+                  item={selected}
+                  annotation={annotation}
+                  onError={onError}
+                  onSaved={(result) => {
+                    onNotice(`已写入 ${result.polygonCount} 个多边形标注`);
+                    void refresh();
+                  }}
+                />
+              ) : (
+                <div className="asset-inspector">
+                  <img src={selected.imageUrl} alt={`${selected.name} aligned 人脸`} />
+                  <dl>
+                    <div><dt>DFL 元数据</dt><dd>{selected.hasDflMetadata ? "有效" : "无效"}</dd></div>
+                    <div><dt>手绘多边形</dt><dd>{selected.polygonCount}</dd></div>
+                    <div><dt>标注点</dt><dd>{selected.pointCount}</dd></div>
+                    <div><dt>应用遮罩</dt><dd>{selected.hasAppliedMask ? "已写入" : "未写入"}</dd></div>
+                  </dl>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="asset-detail-empty"><IconPhoto size={28} />选择一张 aligned 人脸查看。</div>
+          )}
+        </section>
+      </div>
+
+      {quarantine.length > 0 && (
+        <section className="quarantine-section">
+          <header>
+            <div>
+              <IconShieldCheck size={18} />
+              <h3>可恢复隔离区</h3>
+            </div>
+            <span>{quarantine.length} 项</span>
+          </header>
+          <div className="quarantine-rows">
+            {quarantine.map((item) => (
+              <div key={`${item.token}-${item.name}`}>
+                <span>{item.name}</span>
+                <small>{item.token.slice(0, 8)} {item.token.slice(8, 14)}</small>
+                <button className="button secondary" type="button" onClick={() => void restore(item)}>
+                  <IconRestore size={15} />恢复
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </section>
+  );
+}
+
+export function ModelSummaryAside({ workspace }) {
+  return (
+    <aside className="model-summary-aside">
+      <div className="model-summary-heading">
+        <IconBoxModel2 size={19} />
+        <h3>已检测模型</h3>
+      </div>
+      {workspace?.models?.length ? workspace.models.map((model) => (
+        <div className="model-summary-row" key={`${model.type}-${model.name}`}>
+          <span>{model.type}</span>
+          <div>
+            <strong>{model.name}</strong>
+            <small>{model.fileCount} 个文件</small>
+          </div>
+        </div>
+      )) : <div className="operation-empty">尚未检测到模型。</div>}
+    </aside>
+  );
+}
+
+export function SettingsView({ health, jobs, onRetry, onError, onNotice }) {
+  const recoverable = jobs.filter((job) => terminalStates.has(job.state));
+  return (
+    <section className="operation-view settings-view">
+      <header className="operation-header">
+        <div>
+          <h2>运行时与恢复</h2>
+          <p>检查固定执行环境，并从已结束或服务重启后失联的任务重新创建安全副本。</p>
+        </div>
+        <span className="operation-count">{health?.loopbackOnly ? "仅本机访问" : "状态未知"}</span>
+      </header>
+      <div className="settings-runtime">
+        {["current", "legacy"].map((profile) => (
+          <section key={profile}>
+            <span>{profileLabel(profile)}</span>
+            <strong>{health?.runtime?.[profile]?.dflRoot ?? "未检测"}</strong>
+            <code>{health?.runtime?.[profile]?.python ?? "Python 未检测"}</code>
+          </section>
+        ))}
+        <section>
+          <span>安全边界</span>
+          <strong>固定命令注册表 + ConPTY</strong>
+          <code>不执行、不解析 BAT；写操作需要本机会话</code>
+        </section>
+      </div>
+      <section className="recovery-section">
+        <header>
+          <div>
+            <IconRestore size={19} />
+            <h3>任务恢复</h3>
+          </div>
+          <span>{recoverable.length} 个可重试记录</span>
+        </header>
+        <div className="recovery-rows">
+          {recoverable.slice(0, 20).map((job) => (
+            <div key={job.id}>
+              <span className={`recovery-state is-${job.state}`}>
+                {job.state === "orphaned" ? <IconAlertTriangle size={15} /> : <IconCheck size={15} />}
+              </span>
+              <div>
+                <strong>{job.label}</strong>
+                <small>{job.id} · {job.state}</small>
+              </div>
+              <button
+                className="button secondary"
+                type="button"
+                onClick={async () => {
+                  try {
+                    const next = await onRetry(job.id);
+                    onNotice(`已从 ${job.id} 创建新任务 ${next.id}`);
+                  } catch (error) {
+                    onError(error);
+                  }
+                }}
+              >
+                <IconRefresh size={15} />重试
+              </button>
+            </div>
+          ))}
+          {!recoverable.length && <div className="operation-empty">没有可恢复的历史任务。</div>}
+        </div>
+      </section>
+      <section className="deferred-section">
+        <IconX size={18} />
+        <div>
+          <strong>本轮明确不接入</strong>
+          <p>独立闭源 EXE、EBSynth 与第三方角度工具保持外部运行；不会在 Web 中伪造控制或状态。</p>
+        </div>
+      </section>
+    </section>
+  );
+}

@@ -157,7 +157,7 @@ class MEModel(ModelBase):
             use_fp16 = io.input_bool(
                 "使用量化导出?",
                 True,
-                help_message="更轻更快，但是可能会一片黑。",
+                help_message="建议开启量化，更轻更快。",
             )
 
         # 设置相关参数 （已解锁预训练的所有锁定，除了GAN）
@@ -173,7 +173,7 @@ class MEModel(ModelBase):
         random_hsv_power = 0.0
         blur_out_mask = False
         
-        ct_mode = "none" if self.quick_opt else "fs-aug"
+        ct_mode = None if self.quick_opt else "fs-aug"
 
         # 设置模型优化选项
         models_opt_on_gpu = (

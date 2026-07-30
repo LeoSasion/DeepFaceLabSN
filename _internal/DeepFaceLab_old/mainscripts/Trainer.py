@@ -4,6 +4,7 @@ import traceback
 import queue
 import threading
 import time
+import json
 import numpy as np
 import itertools
 from pathlib import Path
@@ -24,6 +25,63 @@ class GlobalMeanLoss:
 global global_mean_loss
 global_mean_loss = GlobalMeanLoss()
 
+
+class WebTrainerBridge:
+    """Optional file bridge used by the loopback Web manager.
+
+    The bridge is inactive unless the launcher provides both paths. Keeping it
+    in the UI thread means all operations still pass through Trainer's original
+    s2c queue and model-save code.
+    """
+
+    allowed_operations = {'save', 'backup', 'preview', 'close'}
+
+    def __init__(self):
+        control_path = os.environ.get('DFL_WEB_CONTROL_FILE', '').strip()
+        preview_path = os.environ.get('DFL_WEB_PREVIEW_FILE', '').strip()
+        self.control_path = Path(control_path) if control_path else None
+        self.preview_path = Path(preview_path) if preview_path else None
+        self.control_offset = 0
+
+    def poll_operations(self):
+        if self.control_path is None or not self.control_path.exists():
+            return []
+
+        operations = []
+        try:
+            with self.control_path.open('r', encoding='utf-8') as control_file:
+                control_file.seek(self.control_offset)
+                for line in control_file:
+                    try:
+                        operation = json.loads(line).get('operation', '')
+                    except Exception:
+                        continue
+                    if operation in self.allowed_operations:
+                        operations.append(operation)
+                self.control_offset = control_file.tell()
+        except Exception:
+            return []
+        return operations
+
+    def write_preview(self, previews):
+        if self.preview_path is None or not previews:
+            return
+        try:
+            self.preview_path.parent.mkdir(parents=True, exist_ok=True)
+            preview_rgb = np.clip(previews[0][1], 0, 1)
+            preview_bgr = (preview_rgb[:, :, ::-1] * 255).astype(np.uint8)
+            success, encoded = cv2.imencode('.png', preview_bgr)
+            if not success:
+                return
+            temporary_path = self.preview_path.with_suffix(
+                self.preview_path.suffix + '.tmp'
+            )
+            encoded.tofile(str(temporary_path))
+            os.replace(str(temporary_path), str(self.preview_path))
+        except Exception:
+            pass
+
+
 def trainerThread (s2c, c2s, e,
                     model_class_name = None,
                     saved_models_path = None,
@@ -39,13 +97,13 @@ def trainerThread (s2c, c2s, e,
                     execute_programs = None,
                     debug=False,
                     **kwargs):
-    
+
     while True:
         try:
             start_time = time.time()
 
             save_interval_min = 25
-            
+
             if not training_data_src_path.exists():
                 training_data_src_path.mkdir(exist_ok=True, parents=True)
 
@@ -54,7 +112,7 @@ def trainerThread (s2c, c2s, e,
 
             if not saved_models_path.exists():
                 saved_models_path.mkdir(exist_ok=True, parents=True)
-                            
+
             model = models.import_model(model_class_name)(
                         is_training=True,
                         saved_models_path=saved_models_path,
@@ -79,10 +137,10 @@ def trainerThread (s2c, c2s, e,
                     io.log_info ("正在保存...", end='\r')
                     model.save()
                     shared_state['after_save'] = True
-                    
+
             def model_backup():
                 if not debug and not is_reached_goal:
-                    model.create_backup()             
+                    model.create_backup()
 
             def send_preview():
                 if not debug:
@@ -108,7 +166,7 @@ def trainerThread (s2c, c2s, e,
                 io.log_info('')
                 io.log_info('[保存时间][迭代次数][单次迭代][SRC损失][DST损失]')
             last_save_time = time.time()
-            
+
             # 更新 execute_programs 列表中每个程序的执行时间
             execute_programs = [[x[0], x[1], time.time()] for x in execute_programs]
 
@@ -116,12 +174,12 @@ def trainerThread (s2c, c2s, e,
             for i in itertools.count(0, 1):
                 if not debug:  # 检查调试模式是否已禁用
                     cur_time = time.time()  # 获取当前时间
-        
+
                     # 遍历 execute_programs 列表中的每个程序
                     for x in execute_programs:
                         prog_time, prog, last_time = x  # 解包列表中的程序详情
                         exec_prog = False  # 初始化一个标志，用于确定是否应执行程序
-            
+
                         # 根据指定的时间条件检查是否是执行程序的时间
                         if prog_time > 0 and (cur_time - start_time) >= prog_time:
                             x[0] = 0  # 将程序的时间重置为0
@@ -163,13 +221,13 @@ def trainerThread (s2c, c2s, e,
                         # 如果在保存后执行
                         if shared_state['after_save']:
                             shared_state['after_save'] = False
-    
+
                             # 计算从上次保存迭代到当前迭代的平均损失值
                             mean_loss = np.mean(loss_history[save_iter:iter], axis=0)
-                            
+
                             global_mean_loss.src="[{:.4f}]".format(mean_loss[0])
                             global_mean_loss.dst="[{:.4f}]".format(mean_loss[1])
-                                          
+
                             # 将平均损失值添加到损失字符串中
                             for loss_value in mean_loss:
                                 loss_string += "[%.4f]" % (loss_value)
@@ -190,7 +248,7 @@ def trainerThread (s2c, c2s, e,
                             # 否则，正常打印损失字符串
                             else:
                                 io.log_info(loss_string, end='\r')
-        
+
 
                         if model.get_iter() == 1:
                             model_save()
@@ -199,12 +257,12 @@ def trainerThread (s2c, c2s, e,
                             io.log_info ('达到目标迭代')
                             model_save()
                             is_reached_goal = True
-                
+
                 need_save = False
                 while time.time() - last_save_time >= save_interval_min*60:
                     last_save_time += save_interval_min*60
                     need_save = True
-                
+
                 if not is_reached_goal and need_save:
                     model_save()
                     send_preview()
@@ -266,6 +324,7 @@ def cv_set_titile(oldTitle,newTitle='神农',oneRun=False):
 def main(**kwargs):
 
     no_preview = kwargs.get('no_preview', False)
+    web_bridge = WebTrainerBridge()
 
     s2c = queue.Queue()
     c2s = queue.Queue()
@@ -276,13 +335,17 @@ def main(**kwargs):
 
     e.wait() #Wait for inital load to occur.
 
-    
+
     if no_preview:
         while True:
+            for operation in web_bridge.poll_operations():
+                s2c.put ( {'op': operation} )
             if not c2s.empty():
                 input = c2s.get()
                 op = input.get('op','')
-                if op == 'close':
+                if op == 'show':
+                    web_bridge.write_preview(input.get('previews'))
+                elif op == 'close':
                     break
             try:
                 io.process_messages(0.1)
@@ -292,7 +355,7 @@ def main(**kwargs):
         wnd_name = "--- ShenNong SAEHD --- Training preview"
         io.named_window(wnd_name)
         io.capture_keys(wnd_name)
-            
+
         previews = None
         loss_history = None
         selected_preview = 0
@@ -303,6 +366,8 @@ def main(**kwargs):
         iter = 0
 
         while True:
+            for operation in web_bridge.poll_operations():
+                s2c.put ( {'op': operation} )
             if not c2s.empty():
                 input = c2s.get()
                 op = input['op']
@@ -311,6 +376,7 @@ def main(**kwargs):
                     loss_history = input['loss_history'] if 'loss_history' in input.keys() else None
                     previews = input['previews'] if 'previews' in input.keys() else None
                     iter = input['iter'] if 'iter' in input.keys() else 0
+                    web_bridge.write_preview(previews)
                     if previews is not None:
                         max_w = 0
                         max_h = 0
@@ -350,7 +416,7 @@ def main(**kwargs):
                     '[p]:刷新预览 update    [space]:切换预览模式 next preview',
                     '[l]: loss range        当前预览模式 Preview: "%s" [%d/%d]' % (selected_preview_name,selected_preview+1, len(previews) )
                     ]
-                
+
                 head_line_height = 15
                 head_height = len(head_lines) * head_line_height
                 head = np.ones ( (head_height,w,c) ) * 0.1# 创建头部区域的图像，初始为灰色背景
@@ -390,7 +456,7 @@ def main(**kwargs):
             key, chr_key, ctrl_pressed, alt_pressed, shift_pressed = key_events[-1] if len(key_events) > 0 else (0,0,False,False,False)
 
 
-                
+
             if key == ord('\n') or key == ord('\r'):
                 s2c.put ( {'op': 'close'} )
             elif key == ord('s'):
@@ -401,7 +467,7 @@ def main(**kwargs):
                 try:
                     cv_set_titile("--- ShenNong SAEHD --- Training preview", newTitle='--- 神农 ShenNong SAEHD --- 训练预览窗口 --- QQ交流群:')
                 except:
-                    pass                
+                    pass
                 if not is_waiting_preview:
                     is_waiting_preview = True
                     s2c.put ( {'op': 'preview'} )
@@ -426,5 +492,5 @@ def main(**kwargs):
             except KeyboardInterrupt:
                 s2c.put ( {'op': 'close'} )
 
-        
+
         io.destroy_all_windows()
