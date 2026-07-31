@@ -1,0 +1,533 @@
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+
+const STORAGE_KEY = "dfl-webui-language";
+const supportedLanguages = new Set(["zh", "en"]);
+
+const EN = {
+  "DeepFaceLab 管理台": "DeepFaceLab Console",
+  "窗口控制": "Window controls",
+  "最小化（桌面壳接入后可用）": "Minimize (available after desktop shell integration)",
+  "最大化（桌面壳接入后可用）": "Maximize (available after desktop shell integration)",
+  "关闭（桌面壳接入后可用）": "Close (available after desktop shell integration)",
+  "主导航": "Main navigation",
+  "总览": "Overview",
+  "工作区": "Workspace",
+  "SRC 数据": "SRC Data",
+  "DST 数据": "DST Data",
+  "XSeg 遮罩": "XSeg Masks",
+  "模型训练": "Training",
+  "模型应用": "Merge",
+  "视频导出": "Export",
+  "工具": "Tools",
+  "设置": "Settings",
+  "项目名称来自当前仓库": "Project name comes from the current repository",
+  "工作区路径": "Workspace path",
+  "本地服务在线": "Local service online",
+  "正在检测服务": "Checking service",
+  "本地服务离线": "Local service offline",
+  "运行时": "Runtime",
+  "新建任务": "New task",
+  "打开项目菜单": "Open project menu",
+  "项目流程": "Project workflow",
+  "完成": "Done",
+  "进行中": "Running",
+  "当前视图": "Current view",
+  "未运行": "Not run",
+  "素材": "Media",
+  "提帧": "Frames",
+  "切脸": "Faces",
+  "清洗": "Clean",
+  "遮罩": "Masks",
+  "训练": "Train",
+  "合成": "Merge",
+  "封装": "Encode",
+  "提取 SRC / DST 视频帧": "Extract SRC / DST video frames",
+  "提取 SRC 人脸": "Extract SRC faces",
+  "提取 DST 人脸": "Extract DST faces",
+  "SRC / DST aligned 排序": "Sort SRC / DST aligned faces",
+  "XSeg 训练与应用": "Train and apply XSeg",
+  "训练 SAEHD": "Train SAEHD",
+  "合成 SAEHD 人脸": "Merge SAEHD faces",
+  "导出 MP4": "Export MP4",
+  "等待输入": "Waiting for input",
+  "运行中": "Running",
+  "已完成": "Completed",
+  "部分完成": "Partially completed",
+  "连接已丢失": "Connection lost",
+  "上次失败": "Last run failed",
+  "已切换到「{label}」工作区": "Switched to the “{label}” workspace",
+  "已定位到「{label}」阶段": "Moved to the “{label}” stage",
+  "已切换到任务：{label}": "Switched to task: {label}",
+  "「{label}」尚未启动，可从“新建任务”运行": "“{label}” has not started; run it from New task",
+  "「{label}」将在后续外部窗口整合阶段接入": "“{label}” will be added with external-window integration",
+  "任务已启动，终端会话正在连接": "Task started; connecting the terminal session",
+  "已归档 {count} 个任务，可从 .webui/archive 恢复": "Archived {count} tasks; restore them from .webui/archive",
+  "没有可归档的已结束任务": "No completed tasks to archive",
+  "当前没有 SAEHD 训练任务": "There is no SAEHD training task",
+  "已请求安全停止；Trainer 将先保存模型": "Safe stop requested; Trainer will save the model first",
+  "任务目录已复制": "Task directory copied",
+  "SAEHD 使用 Web 预览桥；ME、Quick384、Quick512 保留完整 CLI 问答与真实终端。": "SAEHD uses the Web preview bridge; ME, Quick384, and Quick512 keep their complete CLI prompts and real terminal.",
+  "从固定模型目录启动 SAEHD、AMP、ME 或 Quick 合成，产物统一写入 merged 序列。": "Run SAEHD, AMP, ME, or Quick merges from fixed model directories; outputs are written to the merged sequence.",
+  "导出与封装": "Export and encode",
+  "导出 DeepFaceLive DFM，或把合成序列封装为 MP4、AVI 与无损 MOV。": "Export a DeepFaceLive DFM or encode merged sequences as MP4, AVI, or lossless MOV.",
+  "源码工具": "Source tools",
+  "这里集中列出视频、数据集与遮罩的 Python / FFmpeg 能力；所有入口均为固定白名单命令。": "Python and FFmpeg tools for video, datasets, and masks; every entry is a fixed allowlisted command.",
+  "终端监视器已展开": "Terminal monitor expanded",
+  "保存请求已送入 Trainer": "Save request sent to Trainer",
+  "备份请求已送入 Trainer": "Backup request sent to Trainer",
+  "预览刷新请求已送入 Trainer": "Preview refresh request sent to Trainer",
+  "任务状态已刷新": "Task status refreshed",
+  "工作区：{path}": "Workspace: {path}",
+  "界面恢复模式": "Interface recovery mode",
+  "页面渲染遇到异常": "The interface failed to render",
+  "后台任务不会因此停止。可以重新加载界面；若问题持续出现，请保留下面的错误信息。": "Background tasks are still running. Reload the interface; if the issue continues, keep the error details below.",
+  "未知渲染错误": "Unknown rendering error",
+  "重新加载界面": "Reload interface",
+  "中文": "中文",
+  "English": "English",
+  "界面语言": "Interface language",
+
+  "排队中": "Queued",
+  "启动中": "Starting",
+  "安全停止中": "Stopping safely",
+  "失败": "Failed",
+  "已强制终止": "Force stopped",
+  "连接服务…": "Connecting to service…",
+  "正在重连": "Reconnecting",
+  "连接终端…": "Connecting terminal…",
+  "本地运行时在线": "Local runtime online",
+  "终端未连接": "Terminal disconnected",
+  "本地运行时未连接": "Local runtime is not connected",
+  "页面不会用模拟日志替代真实输出。启动或恢复本地服务后重试。": "The page will not replace real output with simulated logs. Start or restore the local service, then retry.",
+  "重新连接": "Reconnect",
+  "还没有任务会话": "No task sessions yet",
+  "启动一个白名单工作流，真实 CLI 输出和问答会出现在这里。": "Start an allowlisted workflow to see real CLI output and prompts here.",
+  "终端监视器": "Terminal monitor",
+  "展开": "Expand",
+  "收起": "Collapse",
+  "时长": "Duration",
+  "选择任务后显示命令、PID 和实时输出": "Select a task to see its command, PID, and live output",
+  "任务终端会话": "Task terminal sessions",
+  "会话列表为空": "Session list is empty",
+  "正在加载终端渲染器…": "Loading terminal renderer…",
+  "在此输入 CLI 回答，Enter 发送": "Enter a CLI response; press Enter to send",
+  "任务已结束，仅可查看日志": "Task ended; logs are read-only",
+  "CLI 输入": "CLI input",
+  "发送": "Send",
+  "快捷回答": "Quick replies",
+  "默认": "Default",
+  "是": "Yes",
+  "否": "No",
+  "训练控制": "Training controls",
+  "保存": "Save",
+  "备份": "Backup",
+  "刷新预览": "Refresh preview",
+  "安全停止": "Safe stop",
+  "终端会话详情": "Terminal session details",
+  "会话详情": "Session details",
+  "命令": "Command",
+  "开始时间": "Started",
+  "退出码": "Exit code",
+  "最后序号": "Last sequence",
+  "终端连接": "Terminal connection",
+  "已连接": "Connected",
+  "正在恢复": "Recovering",
+  "等待回答": "Awaiting response",
+  "任务目录": "Task directory",
+
+  "数据集工具": "Dataset tools",
+  "视频封装": "Video encoding",
+  "提取": "Extraction",
+  "模型导出": "Model export",
+  "排序清洗": "Sorting and cleanup",
+  "视频处理": "Video processing",
+  "当前分区没有可运行的源码命令。": "There are no runnable source commands in this section.",
+  "{count} 项": "{count} items",
+  "{count} 个参数": "{count} parameters",
+  "{count} 个已接入功能": "{count} available actions",
+  "正在读取 DFL 标注元数据…": "Reading DFL annotation metadata…",
+  "至少需要 3 个点才能闭合多边形": "A polygon needs at least 3 points",
+  "多边形类型": "Polygon type",
+  "保留区": "Include",
+  "排除区": "Exclude",
+  "撤销点": "Undo point",
+  "闭合": "Close polygon",
+  "移除末项": "Remove last",
+  "保存中": "Saving",
+  "写入 JPG": "Write to JPG",
+  "{name} XSeg 多边形编辑器": "{name} XSeg polygon editor",
+  "点击图片添加点，闭合后可拖动顶点微调。红色“排除区”会从绿色“保留区”中扣除；保存会直接更新 DFL JPG 元数据。": "Click the image to add points. After closing a polygon, drag vertices to refine it. Red Exclude regions subtract from green Include regions; saving updates the DFL JPG metadata directly.",
+  "把 {name} 移入可恢复隔离区吗？": "Move {name} to the recoverable quarantine?",
+  "{name} 已移入隔离区，可随时恢复": "{name} was moved to quarantine and can be restored",
+  "{name} 已恢复到 {side} aligned": "{name} was restored to {side} aligned",
+  "XSeg Web 遮罩编辑器": "XSeg Web mask editor",
+  "{side} 数据集": "{side} dataset",
+  "在浏览器中直接读写 DFL aligned JPG 的 include / exclude 多边形。": "Read and write include/exclude polygons in DFL aligned JPG files directly in the browser.",
+  "浏览 aligned 人脸、检查元数据，并通过可恢复隔离完成素材清洗。": "Browse aligned faces, inspect metadata, and clean the dataset with recoverable quarantine.",
+  "扫描中": "Scanning",
+  "刷新": "Refresh",
+  "{count} 个数据集命令已接入": "{count} dataset commands available",
+  "aligned 人脸": "Aligned faces",
+  "{count} 个标注": "{count} annotations",
+  "已有应用遮罩": "Applied mask present",
+  "未标注": "Unannotated",
+  "尚未生成 aligned JPG。": "No aligned JPG files have been generated.",
+  "上一页": "Previous",
+  "下一页": "Next",
+  "没有源文件名元数据": "No source filename metadata",
+  "隔离": "Quarantine",
+  "已写入 {count} 个多边形标注": "Wrote {count} polygon annotations",
+  "{name} aligned 人脸": "{name} aligned face",
+  "DFL 元数据": "DFL metadata",
+  "有效": "Valid",
+  "无效": "Invalid",
+  "手绘多边形": "Drawn polygons",
+  "标注点": "Annotation points",
+  "应用遮罩": "Applied mask",
+  "已写入": "Written",
+  "未写入": "Not written",
+  "选择一张 aligned 人脸查看。": "Select an aligned face to inspect.",
+  "可恢复隔离区": "Recoverable quarantine",
+  "恢复": "Restore",
+  "已检测模型": "Detected models",
+  "{count} 个文件": "{count} files",
+  "尚未检测到模型。": "No models detected.",
+  "运行时与恢复": "Runtime and recovery",
+  "检查固定执行环境，并从已结束或服务重启后失联的任务重新创建安全副本。": "Inspect the fixed execution environment and create safe retries from finished or orphaned tasks.",
+  "仅本机访问": "Local access only",
+  "状态未知": "Status unknown",
+  "未检测": "Not detected",
+  "Python 未检测": "Python not detected",
+  "安全边界": "Security boundary",
+  "固定命令注册表 + ConPTY": "Fixed command registry + ConPTY",
+  "不执行、不解析 BAT；写操作需要本机会话": "BAT files are never executed or parsed; writes require a local session",
+  "任务恢复": "Task recovery",
+  "{count} 个可重试记录": "{count} retryable records",
+  "已从 {source} 创建新任务 {target}": "Created task {target} from {source}",
+  "重试": "Retry",
+  "没有可恢复的历史任务。": "No recoverable task history.",
+  "本轮明确不接入": "Explicitly out of scope",
+  "独立闭源 EXE、EBSynth 与第三方角度工具保持外部运行；不会在 Web 中伪造控制或状态。": "Standalone closed-source EXEs, EBSynth, and third-party angle tools remain external; the Web UI does not fake their controls or state.",
+
+  "关闭提示": "Dismiss notification",
+  "本地 DeepFaceLab 固定工作流": "Fixed local DeepFaceLab workflow",
+  "自动 / 终端询问": "Automatic / ask in terminal",
+  "选择任务": "Choose task",
+  "配置参数": "Configure",
+  "确认执行": "Confirm",
+  "用表单处理常用参数；高级或意外问答仍在终端继续。": "Use the form for common parameters; advanced or unexpected prompts continue in the terminal.",
+  "关闭": "Close",
+  "任务创建进度": "Task creation progress",
+  "任务类型": "Task type",
+  "只显示该固定命令允许的参数。": "Only parameters allowed by this fixed command are shown.",
+  "收起高级参数": "Hide advanced parameters",
+  "显示高级参数": "Show advanced parameters",
+  "此任务无需额外参数": "This task has no extra parameters",
+  "继续后会检查素材、模型与资源锁。": "Continue to check media, models, and resource locks.",
+  "正在执行前置检查": "Running preflight checks",
+  "前置检查通过": "Preflight checks passed",
+  "前置检查未通过": "Preflight checks failed",
+  "等待前置检查": "Waiting for preflight checks",
+  "素材、运行时和资源锁均可用于创建任务。": "Media, runtime, and resource locks are ready.",
+  "不会在检查期间启动 DFL 进程。": "No DFL process is started during checks.",
+  "任务": "Task",
+  "执行摘要": "Execution summary",
+  "资源锁": "Resource locks",
+  "无": "None",
+  "终端": "Terminal",
+  "可交互 ConPTY": "Interactive ConPTY",
+  "表单只生成服务端白名单参数。DFL 出现额外问题时，终端会自动等待你的输入。": "The form only produces allowlisted server parameters. If DFL asks anything else, the terminal waits for your input.",
+  "取消": "Cancel",
+  "上一步": "Back",
+  "保留 CLI 问答": "Keep CLI prompts",
+  "下一步": "Next",
+  "启动任务": "Start task",
+  "安全停止训练？": "Safely stop training?",
+  "系统会先保存模型和最新预览，再结束 SAEHD 训练进程。": "The system saves the model and latest preview before ending SAEHD training.",
+  "继续训练": "Continue training",
+  "保存并停止": "Save and stop",
+
+  "任务终端输出": "Task terminal output",
+  "已请求 {operation}": "Requested {operation}",
+  "任务结束 · {state} · exit {code}": "Task ended · {state} · exit {code}",
+  "协议错误": "Protocol error",
+  "未设目标": "No target",
+  "已达目标": "Target reached",
+  "{days}天 {hours}小时": "{days}d {hours}h",
+  "{hours}小时 {minutes}分": "{hours}h {minutes}m",
+  "{minutes}分钟": "{minutes}m",
+  "当前流水线": "Current pipeline",
+  "等待中": "Waiting",
+  "查看全部命令日志": "View all command logs",
+  "训练损失曲线": "Training loss",
+  "越低越好": "Lower is better",
+  "图例": "Legend",
+  "训练输出出现迭代数据后，将在此绘制真实损失曲线": "The real loss curve appears here after iteration data is reported",
+  "Trainer 实时预览": "Live Trainer preview",
+  "由 SAEHD 控制桥生成，不依赖外部窗口": "Generated by the SAEHD control bridge without an external window",
+  "SAEHD 最新训练预览": "Latest SAEHD training preview",
+  "尚无真实训练预览": "No real training preview yet",
+  "启动 SAEHD，首次迭代或点击“刷新预览”后显示": "Start SAEHD; the preview appears after the first iteration or a manual refresh",
+  "等待任务": "Waiting for task",
+  "训练中": "Training",
+  "保存并停止中": "Saving and stopping",
+  "已终止": "Stopped",
+  "训练任务": "Training task",
+  "迭代次数": "Iterations",
+  "单次迭代": "Time / iteration",
+  "目标 {count} 次": "Target: {count} iterations",
+  "状态": "Status",
+  "目标": "Target",
+  "每轮耗时": "Time / iteration",
+  "迭代 / 小时": "Iterations / hour",
+  "预计剩余": "Estimated remaining",
+  "SRC 损失": "SRC loss",
+  "DST 损失": "DST loss",
+  "保存模型": "Save model",
+  "创建备份": "Create backup",
+  "实时状态": "Live status",
+  "训练进程": "Training process",
+  "当前迭代": "Current iteration",
+  "训练速度": "Training speed",
+  "预计完成": "Estimated completion",
+  "GPU 利用率": "GPU utilization",
+  "显存": "VRAM",
+  "GPU 温度": "GPU temperature",
+  "模型目录": "Model directory",
+  "检查点由 DFL 正式保存流程写入，不展示模拟文件。": "Checkpoints are written by DFL's real save flow; simulated files are not shown.",
+  "复制模型目录": "Copy model directory",
+  "任务队列（{count}）": "Task queue ({count})",
+  "队列已清空": "Queue is empty",
+  "刷新任务状态": "Refresh task status",
+
+  "SRC 源视频": "SRC source video",
+  "DST 目标视频": "DST target video",
+  "已导入": "Imported",
+  "缺少素材": "Missing media",
+  "分辨率": "Resolution",
+  "大小": "Size",
+  "修改时间": "Modified",
+  "导入后会保存为固定的 data_{side}.* 素材。": "The imported file is saved as the fixed data_{side}.* media.",
+  "正在导入…": "Importing…",
+  "更换": "Replace",
+  "导入": "Import",
+  "确定更换 {side} 视频吗？旧视频会移入可恢复归档。": "Replace the {side} video? The old video will be moved to the recoverable archive.",
+  "把已完成、失败和已停止的任务日志移入可恢复归档吗？": "Move logs from completed, failed, and stopped tasks to the recoverable archive?",
+  "工作区服务离线": "Workspace service offline",
+  "启动本地 Runtime 后即可检查和导入素材。": "Start the local Runtime to inspect and import media.",
+  "正在扫描工作区…": "Scanning workspace…",
+  "视频帧": "Video frames",
+  "XSeg 模型": "XSeg model",
+  "已检测": "Detected",
+  "SAEHD 模型": "SAEHD model",
+  "{count} 个": "{count}",
+  "merged 序列": "Merged sequence",
+  "本地素材、模型与输出": "Local media, models, and outputs",
+  "工作区管理": "Workspace management",
+  "流水线就绪度": "Pipeline readiness",
+  "{ready} / {total} 项就绪": "{ready} / {total} ready",
+  "模型": "Models",
+  "文件": "Files",
+  "更新": "Updated",
+  "尚未检测到模型": "No models detected",
+  "输出文件": "Output files",
+  "播放": "Play",
+  "合成与编码完成后，MP4 会显示在这里。": "MP4 outputs appear here after merging and encoding.",
+  "归档只移动已结束任务的日志目录，不会删除素材、模型或输出。": "Archiving only moves log directories for ended tasks; it does not delete media, models, or outputs.",
+  "归档中…": "Archiving…",
+  "归档已完成任务": "Archive completed tasks",
+};
+
+const COMMAND_EN = {
+  "src.extract_frames": ["Extract SRC video frames", "SRC frames", "Extract source video frames from workspace/data_src.*."],
+  "dst.extract_frames": ["Extract DST video frames", "DST frames", "Extract destination video frames from workspace/data_dst.*."],
+  "src.extract_faces": ["Extract SRC faces", "SRC faces", "Use S3FD to extract aligned faces from SRC frames."],
+  "dst.extract_faces": ["Extract DST faces", "DST faces", "Use S3FD to extract aligned faces from DST frames."],
+  "src.sort_faces": ["Sort SRC aligned faces", "Sort SRC", "Organize SRC aligned faces; keep DFL CLI prompts when no guided value is supplied."],
+  "dst.sort_faces": ["Sort DST aligned faces", "Sort DST", "Organize DST aligned faces; keep DFL CLI prompts when no guided value is supplied."],
+  "train.saehd": ["Train SAEHD", "SAEHD", "Train SAEHD with legacy DFL and provide Web controls and preview."],
+  "xseg.train": ["Train XSeg", "XSeg training", "Train a custom mask model with SRC and DST aligned faces."],
+  "xseg.apply_src": ["Apply XSeg to SRC", "XSeg → SRC", "Apply the custom workspace/xseg_model mask to SRC aligned faces."],
+  "xseg.apply_dst": ["Apply XSeg to DST", "XSeg → DST", "Apply the custom workspace/xseg_model mask to DST aligned faces."],
+  "merge.saehd": ["Merge SAEHD faces", "SAEHD merge", "Use the legacy SAEHD model to generate merged and merged_mask image sequences."],
+  "encode.mp4": ["Export MP4", "MP4 export", "Encode result.mp4 with source audio, then encode lossless result_mask.mp4."],
+  "encode.mp4_lossless": ["Export lossless MP4", "Lossless MP4", "Encode result.mp4 and result_mask.mp4 in lossless mode."],
+  "video.cut_src": ["Cut SRC video", "Cut SRC", "Cut workspace/data_src.* and write the result to the workspace."],
+  "video.cut_dst": ["Cut DST video", "Cut DST", "Cut workspace/data_dst.* and write the result to the workspace."],
+  "dst.denoise_frames": ["Denoise DST frames", "DST denoise", "Apply temporal denoising to the data_dst image sequence."],
+  "encode.avi": ["Export AVI", "Export AVI", "Generate result.avi and result_mask.avi."],
+  "encode.mov_lossless": ["Export lossless MOV", "Lossless MOV", "Generate result.mov and result_mask.mov."],
+};
+
+const PARAMETER_EN = {
+  outputExt: "Frame image format",
+  fps: "Frames per second",
+  detector: "Detector",
+  faceType: "Face type",
+  imageSize: "Face image size",
+  maxFaces: "Maximum faces per frame",
+  jpegQuality: "JPEG quality",
+  gpuIndexes: "GPU indexes",
+  cpuOnly: "CPU only",
+  method: "Sort method",
+  targetIterations: "Target iterations",
+  forceModelName: "Model name",
+  silentStart: "Silently resume latest model",
+  mode: "Merge mode",
+  maskMode: "Mask mode",
+  workers: "Worker threads",
+  erodeMask: "Mask erosion",
+  blurMask: "Mask blur",
+  motionBlur: "Motion blur",
+  faceScale: "Face scale",
+  colorTransfer: "Color transfer",
+  sharpenMode: "Sharpen mode",
+  sharpenAmount: "Sharpen amount",
+  superResolution: "Super resolution",
+  imageDenoise: "Image denoise",
+  bicubicDegrade: "Bicubic degrade",
+  colorDegrade: "Color degrade",
+  bitrate: "Video bitrate",
+  fromTime: "Start time",
+  toTime: "End time",
+  audioTrackId: "Audio track",
+  factor: "Denoise strength",
+  archiveType: "Archive format",
+};
+
+function interpolate(template, values) {
+  if (!values) return template;
+  return template.replace(/\{(\w+)\}/g, (match, key) => (
+    Object.hasOwn(values, key) ? String(values[key]) : match
+  ));
+}
+
+export function translateText(text, language = "zh", values) {
+  if (typeof text !== "string") return text;
+  const template = language === "en" ? EN[text] ?? text : text;
+  return interpolate(template, values);
+}
+
+function titleCaseModel(value) {
+  const map = { me: "ME", q384: "Quick384", q512: "Quick512", saehd: "SAEHD", amp: "AMP" };
+  return map[value] ?? value.toUpperCase();
+}
+
+function generatedCommandEnglish(command) {
+  const [prefix, suffix] = command.id.split(".");
+  if (prefix === "train") {
+    const model = titleCaseModel(suffix);
+    return [`Train ${model}`, model, `Train ${model} with current DFL; complete CLI prompts remain in the Web terminal.`];
+  }
+  if (prefix === "merge") {
+    const model = titleCaseModel(suffix);
+    return [`Merge ${model} faces`, `${model} merge`, `Use the ${model} model to generate merged and merged_mask image sequences.`];
+  }
+  if (prefix === "export" && suffix.startsWith("dfm_")) {
+    const model = titleCaseModel(suffix.slice(4));
+    return [`Export ${model} DFM`, `${model} DFM`, `Export the ${model} model as a DeepFaceLive-compatible DFM.`];
+  }
+  const dataset = command.id.match(/^(src|dst)\.(.+)$/);
+  if (dataset) {
+    const side = dataset[1].toUpperCase();
+    const action = {
+      landmarks_debug: ["Generate landmarks debug images", "Debug images"],
+      faces_resize: ["Resize aligned faces", "Resize"],
+      faces_enhance: ["Enhance aligned faces", "Enhance"],
+      faces_pack: ["Pack aligned faces", "Pack"],
+      faces_unpack: ["Unpack aligned faces", "Unpack"],
+      recover_names: ["Recover original filenames", "Recover names"],
+      metadata_save: ["Save faceset metadata", "Save metadata"],
+      metadata_restore: ["Restore faceset metadata", "Restore metadata"],
+    }[dataset[2]];
+    if (action) {
+      return [`${action[0]} · ${side}`, `${side} ${action[1]}`, `Fixed allowlisted utility for ${side} aligned faces.`];
+    }
+  }
+  const xseg = command.id.match(/^xseg\.(src|dst)_(apply_builtin|remove_labels|remove_mask|fetch_labels)$/);
+  if (xseg) {
+    const side = xseg[1].toUpperCase();
+    const action = {
+      apply_builtin: ["Apply built-in XSeg", "Built-in mask"],
+      remove_labels: ["Remove drawn labels", "Remove labels"],
+      remove_mask: ["Remove applied mask", "Remove mask"],
+      fetch_labels: ["Fetch labeled faces", "Fetch labels"],
+    }[xseg[2]];
+    return [`${action[0]} · ${side}`, `${side} ${action[1]}`, `${action[0]} for ${side} aligned faces.`];
+  }
+  return null;
+}
+
+export function localizeCommand(command, language) {
+  if (!command || language !== "en") return command;
+  const metadata = COMMAND_EN[command.id] ?? generatedCommandEnglish(command);
+  return {
+    ...command,
+    label: metadata?.[0] ?? command.label,
+    shortLabel: metadata?.[1] ?? command.shortLabel,
+    description: metadata?.[2] ?? command.description,
+    parameters: (command.parameters ?? []).map((schema) => ({
+      ...schema,
+      label: PARAMETER_EN[schema.id] ?? translateText(schema.label, "en"),
+      placeholder: translateText(schema.placeholder, "en"),
+      help: translateText(schema.help, "en"),
+      options: schema.options?.map((option) => ({
+        ...option,
+        label: translateText(option.label, "en")
+          .replace("（推荐）", " (recommended)")
+          .replace("（更省空间）", " (smaller)")
+          .replace("（快速测试）", " (quick test)")
+          .replace("（恢复原顺序）", " (restore original order)")
+          .replace("（DFL 原生）", " (DFL native)")
+          .replace("组合", " combination"),
+      })),
+    })),
+  };
+}
+
+function readInitialLanguage() {
+  if (typeof window === "undefined") return "en";
+  const queryLanguage = new URLSearchParams(window.location.search).get("lang")?.toLowerCase();
+  if (supportedLanguages.has(queryLanguage)) return queryLanguage;
+  const saved = window.localStorage.getItem(STORAGE_KEY);
+  if (supportedLanguages.has(saved)) return saved;
+  return "en";
+}
+
+export const I18nContext = createContext({
+  language: "en",
+  setLanguage: () => {},
+  t: (key, values) => translateText(key, "en", values),
+  localizeCommand: (command) => command,
+});
+
+export function LanguageProvider({ children }) {
+  const [language, setLanguageState] = useState(readInitialLanguage);
+  const setLanguage = useCallback((nextLanguage) => {
+    if (supportedLanguages.has(nextLanguage)) setLanguageState(nextLanguage);
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEY, language);
+    document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
+    document.title = language === "zh" ? "DeepFaceLab 管理台" : "DeepFaceLab Console";
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("lang") !== language) {
+      url.searchParams.set("lang", language);
+      window.history.replaceState(null, "", url);
+    }
+  }, [language]);
+
+  const value = useMemo(() => ({
+    language,
+    setLanguage,
+    t: (key, values) => translateText(key, language, values),
+    localizeCommand: (command) => localizeCommand(command, language),
+  }), [language, setLanguage]);
+
+  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
+}
+
+export function useI18n() {
+  return useContext(I18nContext);
+}

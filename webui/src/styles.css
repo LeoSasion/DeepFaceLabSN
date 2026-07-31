@@ -372,6 +372,39 @@ code,
   white-space: nowrap;
 }
 
+.language-switch {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: 1px solid #233a30;
+  border-radius: 6px;
+  background: #07110d;
+}
+
+.language-switch button {
+  min-width: 34px;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #829087;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.language-switch button:hover {
+  color: var(--green-hover);
+  background: var(--green-hover-surface);
+}
+
+.language-switch button.is-active {
+  color: #06130e;
+  background: var(--green);
+  box-shadow: 0 0 12px rgb(44 227 159 / 0.18);
+}
+
 .environment-badge {
   min-height: 38px;
   display: flex;

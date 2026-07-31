@@ -29,6 +29,8 @@ const appOrigin = "http://127.0.0.1:4173";
 const runtimeOrigin = "http://127.0.0.1:4174";
 const managedPorts = [4173, 4174];
 const command = process.argv[2] ?? "start";
+const outputLanguage = process.env.DFL_UI_LANG === "en" ? "en" : "zh";
+const message = (zh, en) => outputLanguage === "en" ? en : zh;
 
 mkdirSync(logsRoot, { recursive: true });
 
@@ -98,15 +100,15 @@ async function getLocalStatus() {
 
 function printStatus(status) {
   const state = status.webOnline && status.runtimeOnline
-    ? "在线"
+    ? message("在线", "online")
     : status.webOnline || status.runtimeOnline
-      ? "部分在线"
-      : "离线";
+      ? message("部分在线", "partially online")
+      : message("离线", "offline");
   console.log(`[WebUI] ${state}`);
-  console.log(`  Web:     ${status.webOnline ? "在线" : "离线"}  ${appOrigin}`);
-  console.log(`  Runtime: ${status.runtimeOnline ? "在线" : "离线"}  ${runtimeOrigin}`);
-  console.log(`  管理器:  ${status.managerAlive ? `运行中（PID ${status.pid}）` : "未运行"}`);
-  if (status.details?.logFile) console.log(`  日志:    ${status.details.logFile}`);
+  console.log(`  Web:     ${status.webOnline ? message("在线", "online") : message("离线", "offline")}  ${appOrigin}`);
+  console.log(`  Runtime: ${status.runtimeOnline ? message("在线", "online") : message("离线", "offline")}  ${runtimeOrigin}`);
+  console.log(`  ${message("管理器", "Manager")}: ${status.managerAlive ? message(`运行中（PID ${status.pid}）`, `running (PID ${status.pid})`) : message("未运行", "not running")}`);
+  if (status.details?.logFile) console.log(`  ${message("日志", "Log")}: ${status.details.logFile}`);
 }
 
 function newestSourceMtime() {
@@ -139,7 +141,10 @@ function ensureClientBuild() {
   const buildMtime = existsSync(clientIndex) ? statSync(clientIndex).mtimeMs : 0;
   if (buildMtime >= newestSourceMtime()) return;
 
-  console.log("[WebUI] 检测到前端源码更新，正在构建生产界面…");
+  console.log(message(
+    "[WebUI] 检测到前端源码更新，正在构建生产界面…",
+    "[WebUI] Frontend sources changed; building the production interface…",
+  ));
   const result = spawnSync(
     process.execPath,
     [viteEntry, "build", "--configLoader", "runner"],
@@ -151,7 +156,10 @@ function ensureClientBuild() {
     },
   );
   if (result.status !== 0) {
-    throw new Error(`前端构建失败（退出码 ${result.status ?? "unknown"}）`);
+    throw new Error(message(
+      `前端构建失败（退出码 ${result.status ?? "unknown"}）`,
+      `Frontend build failed (exit code ${result.status ?? "unknown"})`,
+    ));
   }
 }
 
@@ -174,7 +182,10 @@ async function assertPortsAvailable() {
   const occupied = results.filter((item) => !item.available).map((item) => item.port);
   if (occupied.length) {
     throw new Error(
-      `端口 ${occupied.join("、")} 已被其他进程占用。为保护现有任务，管理器不会自动结束未知进程。`,
+      message(
+        `端口 ${occupied.join("、")} 已被其他进程占用。为保护现有任务，管理器不会自动结束未知进程。`,
+        `Ports ${occupied.join(", ")} are owned by another process. The manager will not stop unknown processes.`,
+      ),
     );
   }
 }
@@ -186,7 +197,10 @@ async function waitForReady(timeoutMs = 20000) {
     if (status.webOnline && status.runtimeOnline) return status;
     await new Promise((resolve) => setTimeout(resolve, 300));
   }
-  throw new Error("WebUI 启动超时，请查看 .runtime/logs 下的最新日志");
+  throw new Error(message(
+    "WebUI 启动超时，请查看 .runtime/logs 下的最新日志",
+    "WebUI startup timed out; check the latest log under .runtime/logs",
+  ));
 }
 
 async function startManager() {
@@ -194,12 +208,18 @@ async function startManager() {
   if (existing.webOnline && existing.runtimeOnline) {
     printStatus(existing);
     if (!existing.managerAlive) {
-      console.log("[WebUI] 检测到未受管理的兼容服务；未重复启动。");
+      console.log(message(
+        "[WebUI] 检测到未受管理的兼容服务；未重复启动。",
+        "[WebUI] Compatible unmanaged services detected; no duplicate services were started.",
+      ));
     }
     return;
   }
   if (existing.managerAlive) {
-    throw new Error(`管理器 PID ${existing.pid} 仍在运行，但服务未就绪；请先选择“重启”。`);
+    throw new Error(message(
+      `管理器 PID ${existing.pid} 仍在运行，但服务未就绪；请先选择“重启”。`,
+      `Manager PID ${existing.pid} is running, but its services are not ready; choose Restart first.`,
+    ));
   }
 
   await assertPortsAvailable();
@@ -233,9 +253,12 @@ async function requestStop() {
   const current = await getLocalStatus();
   if (!current.managerAlive) {
     if (current.webOnline || current.runtimeOnline) {
-      throw new Error("检测到未受当前管理器控制的服务，请先确认其来源后再结束。");
+      throw new Error(message(
+        "检测到未受当前管理器控制的服务，请先确认其来源后再结束。",
+        "Services not owned by this manager were detected; verify their source before stopping them.",
+      ));
     }
-    console.log("[WebUI] 已处于停止状态。");
+    console.log(message("[WebUI] 已处于停止状态。", "[WebUI] Already stopped."));
     return;
   }
 
@@ -252,10 +275,13 @@ async function requestStop() {
       { stdio: "ignore", windowsHide: true },
     );
     if (result.status !== 0 && isProcessAlive(current.pid)) {
-      throw new Error(`无法结束管理器 PID ${current.pid}`);
+      throw new Error(message(
+        `无法结束管理器 PID ${current.pid}`,
+        `Unable to stop manager PID ${current.pid}`,
+      ));
     }
   }
-  console.log("[WebUI] 已停止。");
+  console.log(message("[WebUI] 已停止。", "[WebUI] Stopped."));
 }
 
 function runSupervisor() {
@@ -429,7 +455,7 @@ async function main() {
     process.exitCode = status.webOnline && status.runtimeOnline ? 0 : 1;
     return;
   }
-  throw new Error(`未知操作：${command}`);
+  throw new Error(message(`未知操作：${command}`, `Unknown action: ${command}`));
 }
 
 main().catch((error) => {
