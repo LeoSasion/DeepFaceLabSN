@@ -5,6 +5,7 @@ _internal/doc/
 _internal/EbSynth/
 _internal/ffmpeg/
 _internal/model_generic_xseg/
+_internal/node/
 _internal/pretrain_Quick224/
 _internal/pretrain_Quick384/
 _internal/pretrain_Quick512/

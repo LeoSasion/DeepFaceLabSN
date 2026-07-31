@@ -11,6 +11,7 @@ import {
   IconUpload,
 } from "@tabler/icons-react";
 import { runtimeApi } from "../runtime/api.js";
+import { useI18n } from "../i18n.jsx";
 
 function formatBytes(bytes = 0) {
   if (!bytes) return "0 B";
@@ -32,8 +33,9 @@ function formatDuration(seconds) {
 }
 
 function MaterialSlot({ side, material, busy, onImport }) {
+  const { language, t } = useI18n();
   const inputRef = useRef(null);
-  const label = side === "src" ? "SRC 源视频" : "DST 目标视频";
+  const label = side === "src" ? t("SRC 源视频") : t("DST 目标视频");
   return (
     <section className="material-slot">
       <input
@@ -53,23 +55,23 @@ function MaterialSlot({ side, material, busy, onImport }) {
           <h3>{label}</h3>
         </div>
         <span className={`readiness-dot ${material ? "is-ready" : "is-missing"}`}>
-          {material ? "已导入" : "缺少素材"}
+          {material ? t("已导入") : t("缺少素材")}
         </span>
       </div>
       {material ? (
         <div className="material-details">
           <strong title={material.path}>{material.name}</strong>
           <dl>
-            <div><dt>时长</dt><dd>{formatDuration(material.durationSeconds)}</dd></div>
-            <div><dt>分辨率</dt><dd>{material.width ? `${material.width} × ${material.height}` : "—"}</dd></div>
-            <div><dt>大小</dt><dd>{formatBytes(material.bytes)}</dd></div>
-            <div><dt>修改时间</dt><dd>{new Date(material.modifiedAt).toLocaleString()}</dd></div>
+            <div><dt>{t("时长")}</dt><dd>{formatDuration(material.durationSeconds)}</dd></div>
+            <div><dt>{t("分辨率")}</dt><dd>{material.width ? `${material.width} × ${material.height}` : "—"}</dd></div>
+            <div><dt>{t("大小")}</dt><dd>{formatBytes(material.bytes)}</dd></div>
+            <div><dt>{t("修改时间")}</dt><dd>{new Date(material.modifiedAt).toLocaleString(language === "zh" ? "zh-CN" : "en-US")}</dd></div>
           </dl>
         </div>
       ) : (
         <div className="material-empty">
           <IconUpload size={24} />
-          <p>导入后会保存为固定的 data_{side}.* 素材。</p>
+          <p>{t("导入后会保存为固定的 data_{side}.* 素材。", { side })}</p>
         </div>
       )}
       <button
@@ -78,7 +80,7 @@ function MaterialSlot({ side, material, busy, onImport }) {
         onClick={() => inputRef.current?.click()}
         disabled={busy}
       >
-        <IconUpload size={15} />{busy ? "正在导入…" : material ? "更换" : "导入"}
+        <IconUpload size={15} />{busy ? t("正在导入…") : material ? t("更换") : t("导入")}
       </button>
     </section>
   );
@@ -97,6 +99,7 @@ function ReadinessItem({ label, value, ready }) {
 }
 
 export function WorkspaceView({ serviceOnline, onError, onArchived }) {
+  const { language, t } = useI18n();
   const [workspace, setWorkspace] = useState(null);
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(null);
@@ -119,7 +122,7 @@ export function WorkspaceView({ serviceOnline, onError, onArchived }) {
 
   const handleImport = async (side, file, replacing) => {
     if (replacing && !window.confirm(
-      `确定更换 ${side.toUpperCase()} 视频吗？旧视频会移入可恢复归档。`,
+      t("确定更换 {side} 视频吗？旧视频会移入可恢复归档。", { side: side.toUpperCase() }),
     )) return;
     setImporting(side);
     try {
@@ -133,7 +136,7 @@ export function WorkspaceView({ serviceOnline, onError, onArchived }) {
   };
 
   const handleArchive = async () => {
-    if (!window.confirm("把已完成、失败和已停止的任务日志移入可恢复归档吗？")) return;
+    if (!window.confirm(t("把已完成、失败和已停止的任务日志移入可恢复归档吗？"))) return;
     setArchiving(true);
     try {
       const result = await runtimeApi.archiveCompletedJobs();
@@ -149,14 +152,14 @@ export function WorkspaceView({ serviceOnline, onError, onArchived }) {
     return (
       <section className="workspace-manager workspace-offline">
         <IconAlertTriangle size={24} />
-        <h2>工作区服务离线</h2>
-        <p>启动本地 Runtime 后即可检查和导入素材。</p>
+        <h2>{t("工作区服务离线")}</h2>
+        <p>{t("启动本地 Runtime 后即可检查和导入素材。")}</p>
       </section>
     );
   }
 
   if (loading && !workspace) {
-    return <section className="workspace-manager workspace-loading">正在扫描工作区…</section>;
+    return <section className="workspace-manager workspace-loading">{t("正在扫描工作区…")}</section>;
   }
 
   const data = workspace ?? {
@@ -168,29 +171,29 @@ export function WorkspaceView({ serviceOnline, onError, onArchived }) {
   };
   const readiness = [
     {
-      label: "视频帧",
+      label: t("视频帧"),
       value: `SRC ${data.datasets.srcFrames?.count ?? 0} / DST ${data.datasets.dstFrames?.count ?? 0}`,
       ready: data.readiness.frames,
     },
     {
-      label: "aligned 人脸",
+      label: t("aligned 人脸"),
       value: `SRC ${data.datasets.srcFaces?.count ?? 0} / DST ${data.datasets.dstFaces?.count ?? 0}`,
       ready: data.readiness.faces,
     },
     {
-      label: "XSeg 模型",
-      value: data.readiness.xseg ? "已检测" : "未检测",
+      label: t("XSeg 模型"),
+      value: data.readiness.xseg ? t("已检测") : t("未检测"),
       ready: data.readiness.xseg,
     },
     {
-      label: "SAEHD 模型",
+      label: t("SAEHD 模型"),
       value: data.models.filter((model) => model.type === "SAEHD").length
-        ? `${data.models.filter((model) => model.type === "SAEHD").length} 个`
-        : "未检测",
+        ? t("{count} 个", { count: data.models.filter((model) => model.type === "SAEHD").length })
+        : t("未检测"),
       ready: data.readiness.saehd,
     },
     {
-      label: "merged 序列",
+      label: t("merged 序列"),
       value: `${data.datasets.merged?.count ?? 0} / ${data.datasets.mergedMask?.count ?? 0}`,
       ready: data.readiness.merged,
     },
@@ -200,12 +203,12 @@ export function WorkspaceView({ serviceOnline, onError, onArchived }) {
     <section className="workspace-manager">
       <header className="workspace-manager-header">
         <div>
-          <span>本地素材、模型与输出</span>
-          <h2>工作区管理</h2>
+          <span>{t("本地素材、模型与输出")}</span>
+          <h2>{t("工作区管理")}</h2>
           <code>{data.root}</code>
         </div>
         <button className="button secondary" type="button" onClick={() => void refresh()} disabled={loading}>
-          <IconRefresh size={15} />{loading ? "扫描中" : "刷新"}
+          <IconRefresh size={15} />{loading ? t("扫描中") : t("刷新")}
         </button>
       </header>
 
@@ -228,8 +231,8 @@ export function WorkspaceView({ serviceOnline, onError, onArchived }) {
 
           <section className="readiness-section">
             <div className="workspace-section-heading">
-              <h3>流水线就绪度</h3>
-              <small>{readiness.filter((item) => item.ready).length} / {readiness.length} 项就绪</small>
+              <h3>{t("流水线就绪度")}</h3>
+              <small>{t("{ready} / {total} 项就绪", { ready: readiness.filter((item) => item.ready).length, total: readiness.length })}</small>
             </div>
             <div className="readiness-grid">
               {readiness.map((item) => <ReadinessItem key={item.label} {...item} />)}
@@ -239,7 +242,7 @@ export function WorkspaceView({ serviceOnline, onError, onArchived }) {
 
         <aside className="workspace-models">
           <div className="workspace-section-heading">
-            <h3>模型</h3>
+            <h3>{t("模型")}</h3>
             <IconBoxModel2 size={17} />
           </div>
           {data.models.length ? data.models.map((model, index) => (
@@ -249,21 +252,21 @@ export function WorkspaceView({ serviceOnline, onError, onArchived }) {
                 <strong>{model.name}</strong>
               </div>
               <dl>
-                <div><dt>文件</dt><dd>{model.fileCount}</dd></div>
-                <div><dt>大小</dt><dd>{formatBytes(model.bytes)}</dd></div>
-                <div><dt>更新</dt><dd>{new Date(model.modifiedAt).toLocaleString()}</dd></div>
+                <div><dt>{t("文件")}</dt><dd>{model.fileCount}</dd></div>
+                <div><dt>{t("大小")}</dt><dd>{formatBytes(model.bytes)}</dd></div>
+                <div><dt>{t("更新")}</dt><dd>{new Date(model.modifiedAt).toLocaleString(language === "zh" ? "zh-CN" : "en-US")}</dd></div>
               </dl>
             </div>
           )) : (
-            <div className="workspace-list-empty">尚未检测到模型</div>
+            <div className="workspace-list-empty">{t("尚未检测到模型")}</div>
           )}
         </aside>
       </div>
 
       <section className="workspace-outputs">
         <div className="workspace-section-heading">
-          <h3>输出文件</h3>
-          <span>{data.outputs.length} 个文件</span>
+          <h3>{t("输出文件")}</h3>
+          <span>{t("{count} 个文件", { count: data.outputs.length })}</span>
         </div>
         {data.outputs.length ? (
           <div className="output-list">
@@ -272,21 +275,21 @@ export function WorkspaceView({ serviceOnline, onError, onArchived }) {
                 <span className="output-icon"><IconFile size={18} /></span>
                 <div>
                   <strong>{output.name}</strong>
-                  <small>{formatBytes(output.bytes)} · {new Date(output.modifiedAt).toLocaleString()}</small>
+                  <small>{formatBytes(output.bytes)} · {new Date(output.modifiedAt).toLocaleString(language === "zh" ? "zh-CN" : "en-US")}</small>
                 </div>
                 <a className="button secondary" href={output.url} target="_blank" rel="noreferrer">
-                  <IconPlayerPlay size={15} />播放
+                  <IconPlayerPlay size={15} />{t("播放")}
                 </a>
               </div>
             ))}
           </div>
         ) : (
-          <div className="workspace-list-empty">合成与编码完成后，MP4 会显示在这里。</div>
+          <div className="workspace-list-empty">{t("合成与编码完成后，MP4 会显示在这里。")}</div>
         )}
         <div className="workspace-archive-row">
-          <p>归档只移动已结束任务的日志目录，不会删除素材、模型或输出。</p>
+          <p>{t("归档只移动已结束任务的日志目录，不会删除素材、模型或输出。")}</p>
           <button className="button secondary" type="button" onClick={() => void handleArchive()} disabled={archiving}>
-            <IconArchive size={15} />{archiving ? "归档中…" : "归档已完成任务"}
+            <IconArchive size={15} />{archiving ? t("归档中…") : t("归档已完成任务")}
           </button>
         </div>
       </section>

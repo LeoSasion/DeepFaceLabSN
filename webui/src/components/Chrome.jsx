@@ -19,6 +19,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { workflowStages } from "../data/dashboard.js";
+import { useI18n } from "../i18n.jsx";
 
 const DESKTOP_BREAKPOINT = 1020;
 const DESKTOP_DESIGN_WIDTH = 1440;
@@ -64,24 +65,26 @@ const navItems = [
 ];
 
 export function BrandBar() {
+  const { t } = useI18n();
   return (
     <div className="brand-bar">
       <div className="brand-lockup">
         <img className="brand-mark" src="/assets/brand-mark.png" alt="" />
-        <strong>DeepFaceLab 管理台</strong>
+        <strong>{t("DeepFaceLab 管理台")}</strong>
       </div>
-      <div className="window-actions" aria-label="窗口控制">
-        <button type="button" aria-label="最小化（桌面壳接入后可用）" disabled><IconMinus size={15} stroke={1.6} /></button>
-        <button type="button" aria-label="最大化（桌面壳接入后可用）" disabled><IconSquare size={12} stroke={1.6} /></button>
-        <button className="window-close" type="button" aria-label="关闭（桌面壳接入后可用）" disabled><IconX size={15} stroke={1.6} /></button>
+      <div className="window-actions" aria-label={t("窗口控制")}>
+        <button type="button" aria-label={t("最小化（桌面壳接入后可用）")} disabled><IconMinus size={15} stroke={1.6} /></button>
+        <button type="button" aria-label={t("最大化（桌面壳接入后可用）")} disabled><IconSquare size={12} stroke={1.6} /></button>
+        <button className="window-close" type="button" aria-label={t("关闭（桌面壳接入后可用）")} disabled><IconX size={15} stroke={1.6} /></button>
       </div>
     </div>
   );
 }
 
 export function Sidebar({ activeNav, onNavigate }) {
+  const { t } = useI18n();
   return (
-    <aside className="sidebar" aria-label="主导航">
+    <aside className="sidebar" aria-label={t("主导航")}>
       <nav className="sidebar-nav">
         {navItems.map(({ id, label, icon: Icon, tone }) => (
           <button
@@ -89,10 +92,10 @@ export function Sidebar({ activeNav, onNavigate }) {
             key={id}
             type="button"
             aria-current={activeNav === id ? "page" : undefined}
-            onClick={() => onNavigate(id, label)}
+            onClick={() => onNavigate(id, t(label))}
           >
             <Icon size={20} stroke={1.8} />
-            <span>{label}</span>
+            <span>{t(label)}</span>
           </button>
         ))}
       </nav>
@@ -100,16 +103,17 @@ export function Sidebar({ activeNav, onNavigate }) {
         className={`nav-item sidebar-settings ${activeNav === "settings" ? "is-active" : ""}`}
         type="button"
         aria-current={activeNav === "settings" ? "page" : undefined}
-        onClick={() => onNavigate("settings", "设置")}
+        onClick={() => onNavigate("settings", t("设置"))}
       >
         <IconSettings size={20} stroke={1.8} />
-        <span>设置</span>
+        <span>{t("设置")}</span>
       </button>
     </aside>
   );
 }
 
 export function ProjectHeader({ workspacePath, serviceState, telemetry, onNewTask, onMenu }) {
+  const { language, setLanguage, t } = useI18n();
   const serviceOnline = serviceState === "online";
   const gpu = telemetry?.gpus?.[0];
   return (
@@ -117,23 +121,41 @@ export function ProjectHeader({ workspacePath, serviceState, telemetry, onNewTas
       <div className="project-copy">
         <div className="project-title-row">
           <h1>DeepFaceLabSN</h1>
-          <button className="icon-button quiet" type="button" aria-label="项目名称来自当前仓库" disabled>
+          <button className="icon-button quiet" type="button" aria-label={t("项目名称来自当前仓库")} disabled>
             <IconPencil size={15} stroke={1.8} />
           </button>
         </div>
         <div className="workspace-path">
-          <span>工作区路径</span>
+          <span>{t("工作区路径")}</span>
           <code>{workspacePath}</code>
           <IconFolder size={15} stroke={1.7} />
         </div>
       </div>
       <div className="project-actions">
+        <div className="language-switch" role="group" aria-label={t("界面语言")}>
+          <button
+            className={language === "zh" ? "is-active" : ""}
+            type="button"
+            aria-pressed={language === "zh"}
+            onClick={() => setLanguage("zh")}
+          >
+            中文
+          </button>
+          <button
+            className={language === "en" ? "is-active" : ""}
+            type="button"
+            aria-pressed={language === "en"}
+            onClick={() => setLanguage("en")}
+          >
+            EN
+          </button>
+        </div>
         <div className={`environment-badge ${serviceOnline ? "" : "is-offline"}`}>
           <IconCheck size={15} stroke={2.5} />
-          <span>{serviceOnline ? "本地服务在线" : serviceState === "loading" ? "正在检测服务" : "本地服务离线"}</span>
+          <span>{serviceOnline ? t("本地服务在线") : serviceState === "loading" ? t("正在检测服务") : t("本地服务离线")}</span>
         </div>
         <div className="gpu-summary">
-          <span>{gpu ? `GPU ${gpu.index}` : "运行时"}</span>
+          <span>{gpu ? `GPU ${gpu.index}` : t("运行时")}</span>
           <strong title={gpu?.name}>
             {gpu
               ? `${gpu.name} · ${(gpu.memoryUsedMiB / 1024).toFixed(1)} / ${(gpu.memoryTotalMiB / 1024).toFixed(1)} GB`
@@ -142,9 +164,9 @@ export function ProjectHeader({ workspacePath, serviceState, telemetry, onNewTas
         </div>
         <button className="button primary new-task-button" type="button" onClick={onNewTask} disabled={!serviceOnline}>
           <IconPlus size={18} stroke={2} />
-          新建任务
+          {t("新建任务")}
         </button>
-        <button className="icon-button menu-button" type="button" aria-label="打开项目菜单" onClick={onMenu}>
+        <button className="icon-button menu-button" type="button" aria-label={t("打开项目菜单")} onClick={onMenu}>
           <IconMenu2 size={21} stroke={1.8} />
         </button>
       </div>
@@ -153,8 +175,9 @@ export function ProjectHeader({ workspacePath, serviceState, telemetry, onNewTas
 }
 
 export function WorkflowBar({ selectedStage, stageStates = {}, onSelectStage }) {
+  const { t } = useI18n();
   return (
-    <nav className="workflow-bar" aria-label="项目流程">
+    <nav className="workflow-bar" aria-label={t("项目流程")}>
       {workflowStages.map((stage, index) => {
         const actualState = stageStates[stage.id] ?? stage.state;
         const state = selectedStage === stage.id ? "active" : actualState;
@@ -163,20 +186,20 @@ export function WorkflowBar({ selectedStage, stageStates = {}, onSelectStage }) 
             <button
               className={`workflow-step is-${state}`}
               type="button"
-              onClick={() => onSelectStage(stage)}
+              onClick={() => onSelectStage({ ...stage, label: t(stage.label) })}
               aria-current={state === "active" ? "step" : undefined}
             >
               <span className="stage-number">
                 {actualState === "done" && selectedStage !== stage.id ? <IconCheck size={14} stroke={2.6} /> : index + 1}
               </span>
               <span className="stage-copy">
-                <strong>{stage.label}</strong>
+                <strong>{t(stage.label)}</strong>
                 <small>
                   {actualState === "done"
-                    ? "完成"
+                    ? t("完成")
                     : actualState === "active"
-                      ? "进行中"
-                      : selectedStage === stage.id ? "当前视图" : "未运行"}
+                      ? t("进行中")
+                      : selectedStage === stage.id ? t("当前视图") : t("未运行")}
                 </small>
               </span>
             </button>

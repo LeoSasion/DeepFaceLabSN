@@ -1,9 +1,11 @@
 import { useEffect, useRef } from "react";
+import { useI18n } from "../i18n.jsx";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 
 export default function TerminalSurface({ events, interactive, onInput, onResize }) {
+  const { t } = useI18n();
   const containerRef = useRef(null);
   const terminalRef = useRef(null);
   const fitRef = useRef(null);
@@ -91,19 +93,22 @@ export default function TerminalSurface({ events, interactive, onInput, onResize
       lastSequenceRef.current = event.sequence;
       if (event.type === "terminal.output") terminal.write(event.payload.data);
       if (event.type === "job.control") {
-        terminal.writeln(`\r\n\u001b[38;2;44;227;159m[WEB]\u001b[0m 已请求 ${event.payload.operation}`);
+        terminal.writeln(`\r\n\u001b[38;2;44;227;159m[WEB]\u001b[0m ${t("已请求 {operation}", { operation: event.payload.operation })}`);
       }
       if (event.type === "job.finished") {
         const color = event.payload.state === "succeeded" ? "44;227;159" : "255;90;70";
         terminal.writeln(
-          `\r\n\u001b[38;2;${color}m[WEB]\u001b[0m 任务结束 · ${event.payload.state} · exit ${event.payload.exitCode}`,
+          `\r\n\u001b[38;2;${color}m[WEB]\u001b[0m ${t("任务结束 · {state} · exit {code}", {
+            state: event.payload.state,
+            code: event.payload.exitCode,
+          })}`,
         );
       }
       if (event.type === "protocol.error") {
-        terminal.writeln(`\r\n\u001b[38;2;255;90;70m[协议错误]\u001b[0m ${event.payload.message}`);
+        terminal.writeln(`\r\n\u001b[38;2;255;90;70m[${t("协议错误")}]\u001b[0m ${event.payload.message}`);
       }
     }
-  }, [events]);
+  }, [events, t]);
 
-  return <div className="xterm-surface" ref={containerRef} aria-label="任务终端输出" />;
+  return <div className="xterm-surface" ref={containerRef} aria-label={t("任务终端输出")} />;
 }

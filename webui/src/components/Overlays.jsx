@@ -13,6 +13,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { taskTypes } from "../data/dashboard.js";
+import { useI18n } from "../i18n.jsx";
 
 function useDialogFocus(open, onClose) {
   const dialogRef = useRef(null);
@@ -61,12 +62,13 @@ function useDialogFocus(open, onClose) {
 }
 
 export function Toast({ message, tone = "success", onDismiss }) {
+  const { t } = useI18n();
   if (!message) return null;
   return (
     <div className={`toast is-${tone}`} role="status">
       {tone === "warning" ? <IconAlertTriangle size={18} stroke={2} /> : <IconCheck size={18} stroke={2.2} />}
       <span>{message}</span>
-      <button type="button" className="icon-button quiet" aria-label="关闭提示" onClick={onDismiss}>
+      <button type="button" className="icon-button quiet" aria-label={t("关闭提示")} onClick={onDismiss}>
         <IconX size={16} />
       </button>
     </div>
@@ -84,6 +86,7 @@ export function NewTaskDialog({
   onClose,
   onCreate,
 }) {
+  const { t } = useI18n();
   const { dialogRef, initialFocusRef } = useDialogFocus(open, onClose);
   const [step, setStep] = useState(1);
   const [parameters, setParameters] = useState({});
@@ -95,11 +98,12 @@ export function NewTaskDialog({
       ? commands
       : taskTypes.map((task) => ({
         ...task,
-        description: "本地 DeepFaceLab 固定工作流",
+        label: t(task.label),
+        description: t("本地 DeepFaceLab 固定工作流"),
         parameters: [],
         locks: [],
       })),
-    [commands],
+    [commands, t],
   );
   const selectedCommand = useMemo(
     () => availableCommands.find((command) => command.id === taskType) ?? availableCommands[0],
@@ -156,11 +160,11 @@ export function NewTaskDialog({
 
   const formatParameter = (schema) => {
     const value = parameters[schema.id];
-    if (schema.type === "boolean") return value ? "是" : "否";
+    if (schema.type === "boolean") return value ? t("是") : t("否");
     if (schema.type === "select") {
       return schema.options.find((option) => String(option.value) === String(value))?.label ?? value;
     }
-    return value === "" ? "自动 / 终端询问" : `${value}${schema.suffix ? ` ${schema.suffix}` : ""}`;
+    return value === "" ? t("自动 / 终端询问") : `${value}${schema.suffix ? ` ${schema.suffix}` : ""}`;
   };
 
   const launch = async (launchMode) => {
@@ -175,7 +179,7 @@ export function NewTaskDialog({
     }
   };
 
-  const stepLabels = ["选择任务", "配置参数", "确认执行"];
+  const stepLabels = ["选择任务", "配置参数", "确认执行"].map((label) => t(label));
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => {
@@ -193,16 +197,16 @@ export function NewTaskDialog({
           <div>
             <span className="modal-icon"><IconPlus size={20} stroke={2} /></span>
             <div>
-              <h2 id="new-task-title">新建任务</h2>
-              <p id="new-task-description">用表单处理常用参数；高级或意外问答仍在终端继续。</p>
+              <h2 id="new-task-title">{t("新建任务")}</h2>
+              <p id="new-task-description">{t("用表单处理常用参数；高级或意外问答仍在终端继续。")}</p>
             </div>
           </div>
-          <button className="icon-button quiet" type="button" aria-label="关闭" onClick={onClose}>
+          <button className="icon-button quiet" type="button" aria-label={t("关闭")} onClick={onClose}>
             <IconX size={19} />
           </button>
         </header>
 
-        <div className="wizard-progress" aria-label="任务创建进度">
+        <div className="wizard-progress" aria-label={t("任务创建进度")}>
           {stepLabels.map((label, index) => {
             const number = index + 1;
             return (
@@ -222,7 +226,7 @@ export function NewTaskDialog({
             {step === 1 && (
               <div className="wizard-step-panel">
                 <label className="wizard-field">
-                  <span>任务类型</span>
+                  <span>{t("任务类型")}</span>
                   <select
                     ref={initialFocusRef}
                     value={selectedCommand?.id ?? ""}
@@ -253,7 +257,7 @@ export function NewTaskDialog({
                 <div className="wizard-section-heading">
                   <div>
                     <strong>{selectedCommand?.label}</strong>
-                    <p>只显示该固定命令允许的参数。</p>
+                    <p>{t("只显示该固定命令允许的参数。")}</p>
                   </div>
                   {parameterSchemas.some((parameter) => parameter.advanced) && (
                     <button
@@ -261,7 +265,7 @@ export function NewTaskDialog({
                       type="button"
                       onClick={() => setShowAdvanced((current) => !current)}
                     >
-                      {showAdvanced ? "收起高级参数" : "显示高级参数"}
+                      {showAdvanced ? t("收起高级参数") : t("显示高级参数")}
                     </button>
                   )}
                 </div>
@@ -314,8 +318,8 @@ export function NewTaskDialog({
                 ) : (
                   <div className="wizard-empty">
                     <IconChecks size={24} />
-                    <strong>此任务无需额外参数</strong>
-                    <p>继续后会检查素材、模型与资源锁。</p>
+                    <strong>{t("此任务无需额外参数")}</strong>
+                    <p>{t("继续后会检查素材、模型与资源锁。")}</p>
                   </div>
                 )}
               </div>
@@ -329,21 +333,22 @@ export function NewTaskDialog({
                   {preflight.state === "failed" && <IconAlertTriangle size={18} />}
                   <div>
                     <strong>
-                      {preflight.state === "checking" && "正在执行前置检查"}
-                      {preflight.state === "ready" && "前置检查通过"}
-                      {preflight.state === "failed" && "前置检查未通过"}
-                      {preflight.state === "idle" && "等待前置检查"}
+                      {preflight.state === "checking" && t("正在执行前置检查")}
+                      {preflight.state === "ready" && t("前置检查通过")}
+                      {preflight.state === "failed" && t("前置检查未通过")}
+                      {preflight.state === "idle" && t("等待前置检查")}
                     </strong>
                     <p>
                       {preflight.error?.message
-                        ?? (preflight.state === "ready"
-                          ? "素材、运行时和资源锁均可用于创建任务。"
-                          : "不会在检查期间启动 DFL 进程。")}
+                        ? t(preflight.error.message)
+                        : (preflight.state === "ready"
+                          ? t("素材、运行时和资源锁均可用于创建任务。")
+                          : t("不会在检查期间启动 DFL 进程。"))}
                     </p>
                   </div>
                 </div>
                 <dl className="wizard-review">
-                  <div><dt>任务</dt><dd>{selectedCommand?.label}</dd></div>
+                  <div><dt>{t("任务")}</dt><dd>{selectedCommand?.label}</dd></div>
                   {parameterSchemas.map((schema) => (
                     <div key={schema.id}><dt>{schema.label}</dt><dd>{formatParameter(schema)}</dd></div>
                   ))}
@@ -353,29 +358,29 @@ export function NewTaskDialog({
           </section>
 
           <aside className="wizard-summary">
-            <h3>执行摘要</h3>
+            <h3>{t("执行摘要")}</h3>
             <dl>
-              <div><dt>运行时</dt><dd>{selectedCommand?.profile === "legacy" ? "DFL legacy" : "DFL current"}</dd></div>
-              <div><dt>工作区</dt><dd title={workspacePath}>{workspacePath}</dd></div>
+              <div><dt>{t("运行时")}</dt><dd>{selectedCommand?.profile === "legacy" ? "DFL legacy" : "DFL current"}</dd></div>
+              <div><dt>{t("工作区")}</dt><dd title={workspacePath}>{workspacePath}</dd></div>
               <div>
-                <dt><IconLock size={13} />资源锁</dt>
-                <dd>{selectedCommand?.locks?.length ? `${selectedCommand.locks.length} 项` : "无"}</dd>
+                <dt><IconLock size={13} />{t("资源锁")}</dt>
+                <dd>{selectedCommand?.locks?.length ? t("{count} 项", { count: selectedCommand.locks.length }) : t("无")}</dd>
               </div>
-              <div><dt>终端</dt><dd>可交互 ConPTY</dd></div>
+              <div><dt>{t("终端")}</dt><dd>{t("可交互 ConPTY")}</dd></div>
             </dl>
             <div className="wizard-summary-note">
               <IconCode size={16} />
-              <p>表单只生成服务端白名单参数。DFL 出现额外问题时，终端会自动等待你的输入。</p>
+              <p>{t("表单只生成服务端白名单参数。DFL 出现额外问题时，终端会自动等待你的输入。")}</p>
             </div>
           </aside>
         </div>
 
         <footer>
           <div className="wizard-footer-start">
-            <button className="button secondary" type="button" onClick={onClose}>取消</button>
+            <button className="button secondary" type="button" onClick={onClose}>{t("取消")}</button>
             {step > 1 && (
               <button className="button secondary" type="button" onClick={() => setStep((current) => current - 1)}>
-                <IconArrowLeft size={16} />上一步
+                <IconArrowLeft size={16} />{t("上一步")}
               </button>
             )}
           </div>
@@ -387,7 +392,7 @@ export function NewTaskDialog({
                 onClick={() => void launch("cli")}
                 disabled={!serviceOnline || submitting}
               >
-                <IconCode size={16} />保留 CLI 问答
+                <IconCode size={16} />{t("保留 CLI 问答")}
               </button>
             )}
             {step < 3 ? (
@@ -397,7 +402,7 @@ export function NewTaskDialog({
                 onClick={() => setStep((current) => current + 1)}
                 disabled={!selectedCommand}
               >
-                下一步<IconArrowRight size={16} />
+                {t("下一步")}<IconArrowRight size={16} />
               </button>
             ) : (
               <button
@@ -406,7 +411,7 @@ export function NewTaskDialog({
                 onClick={() => void launch("guided")}
                 disabled={!serviceOnline || preflight.state !== "ready" || submitting}
               >
-                <IconPlus size={17} />启动任务
+                <IconPlus size={17} />{t("启动任务")}
               </button>
             )}
           </div>
@@ -417,6 +422,7 @@ export function NewTaskDialog({
 }
 
 export function StopConfirmDialog({ open, onCancel, onConfirm }) {
+  const { t } = useI18n();
   const { dialogRef, initialFocusRef } = useDialogFocus(open, onCancel);
   if (!open) return null;
   return (
@@ -430,11 +436,11 @@ export function StopConfirmDialog({ open, onCancel, onConfirm }) {
         aria-describedby="stop-description"
       >
         <span className="stop-icon"><IconPlayerStop size={22} stroke={2} /></span>
-        <h2 id="stop-title">安全停止训练？</h2>
-        <p id="stop-description">系统会先保存模型和最新预览，再结束 SAEHD 训练进程。</p>
+        <h2 id="stop-title">{t("安全停止训练？")}</h2>
+        <p id="stop-description">{t("系统会先保存模型和最新预览，再结束 SAEHD 训练进程。")}</p>
         <footer>
-          <button ref={initialFocusRef} className="button secondary" type="button" onClick={onCancel}>继续训练</button>
-          <button className="button danger" type="button" onClick={onConfirm}>保存并停止</button>
+          <button ref={initialFocusRef} className="button secondary" type="button" onClick={onCancel}>{t("继续训练")}</button>
+          <button className="button danger" type="button" onClick={onConfirm}>{t("保存并停止")}</button>
         </footer>
       </section>
     </div>

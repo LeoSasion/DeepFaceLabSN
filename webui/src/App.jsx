@@ -11,6 +11,7 @@ import {
 import { WorkbenchGrid } from "./components/TrainingView.jsx";
 import { WorkspaceView } from "./components/WorkspaceView.jsx";
 import { pipelineTasks } from "./data/dashboard.js";
+import { useI18n } from "./i18n.jsx";
 import { runtimeApi } from "./runtime/api.js";
 import { useRuntime } from "./runtime/useRuntime.js";
 
@@ -29,6 +30,7 @@ const activeStates = new Set(["queued", "starting", "running", "waiting_input", 
 
 export function App() {
   const runtime = useRuntime();
+  const { language, localizeCommand, t } = useI18n();
   const [activeNav, setActiveNav] = useState("overview");
   const [selectedStage, setSelectedStage] = useState("train");
   const [activeTask, setActiveTask] = useState("saehd");
@@ -41,12 +43,29 @@ export function App() {
   const [workspaceSnapshot, setWorkspaceSnapshot] = useState(null);
   const [toast, setToast] = useState({ message: "", tone: "success" });
 
+  const commands = useMemo(
+    () => runtime.commands.map((command) => localizeCommand(command)),
+    [language, localizeCommand, runtime.commands],
+  );
+  const commandById = useMemo(
+    () => new Map(commands.map((command) => [command.id, command])),
+    [commands],
+  );
+  const jobs = useMemo(() => runtime.jobs.map((job) => ({
+    ...job,
+    label: commandById.get(job.commandId)?.label ?? job.label,
+  })), [commandById, runtime.jobs]);
+  const selectedJob = useMemo(
+    () => jobs.find((job) => job.id === runtime.selectedJobId) ?? null,
+    [jobs, runtime.selectedJobId],
+  );
+
   const showToast = useCallback((message, tone = "success") => {
     setToast({ message, tone });
   }, []);
   const showError = useCallback((error) => {
-    showToast(error.message, "warning");
-  }, [showToast]);
+    showToast(t(error.message), "warning");
+  }, [showToast, t]);
 
   useEffect(() => {
     if (!toast.message) return undefined;
@@ -63,12 +82,12 @@ export function App() {
     void runtimeApi.workspace().then((value) => {
       if (!cancelled) setWorkspaceSnapshot(value);
     }).catch((error) => {
-      if (!cancelled) showToast(error.message, "warning");
+      if (!cancelled) showToast(t(error.message), "warning");
     });
     return () => {
       cancelled = true;
     };
-  }, [activeNav, runtime.serviceState, showToast]);
+  }, [activeNav, runtime.serviceState, showToast, t]);
 
   const runAction = useCallback(async (action, successMessage) => {
     try {
@@ -76,29 +95,34 @@ export function App() {
       if (successMessage) showToast(successMessage);
       return result;
     } catch (error) {
-      showToast(error.message, "warning");
+      showToast(t(error.message), "warning");
       throw error;
     }
-  }, [showToast]);
+  }, [showToast, t]);
 
   const trainingJob = useMemo(() => {
-    if (runtime.selectedJob?.commandId === "train.saehd") return runtime.selectedJob;
-    return runtime.jobs.find((job) => job.commandId === "train.saehd" && activeStates.has(job.state))
-      ?? runtime.jobs.find((job) => job.commandId === "train.saehd")
+    if (selectedJob?.commandId === "train.saehd") return selectedJob;
+    return jobs.find((job) => job.commandId === "train.saehd" && activeStates.has(job.state))
+      ?? jobs.find((job) => job.commandId === "train.saehd")
       ?? null;
-  }, [runtime.jobs, runtime.selectedJob]);
+  }, [jobs, selectedJob]);
 
-  const queue = useMemo(() => runtime.jobs.map((job) => ({
+  const queue = useMemo(() => jobs.map((job) => ({
     id: job.id,
     title: job.label,
     subtitle: `${job.profile === "legacy" ? "DFL legacy" : "DFL current"} · PID ${job.pid ?? "—"}`,
     state: activeStates.has(job.state) ? "active" : job.state,
     raw: job,
-  })), [runtime.jobs]);
+  })), [jobs]);
 
-  const livePipelineTasks = useMemo(() => pipelineTasks.map((task) => {
+  const livePipelineTasks = useMemo(() => pipelineTasks.map((sourceTask) => {
+    const task = {
+      ...sourceTask,
+      label: t(sourceTask.label),
+      time: t(sourceTask.time),
+    };
     const commandIds = pipelineCommandMap[task.id] ?? [];
-    const matchingJobs = runtime.jobs.filter((candidate) => commandIds.includes(candidate.commandId));
+    const matchingJobs = jobs.filter((candidate) => commandIds.includes(candidate.commandId));
     const job = matchingJobs.find((candidate) => activeStates.has(candidate.state)) ?? matchingJobs[0];
     if (!job) return task;
     const requiredStates = commandIds.map((commandId) => (
@@ -114,18 +138,18 @@ export function App() {
       ...task,
       state: isActive ? "active" : isComplete ? "done" : "waiting",
       time: isActive
-        ? job.state === "waiting_input" ? "等待输入" : "运行中"
+        ? job.state === "waiting_input" ? t("等待输入") : t("运行中")
         : isComplete
-          ? "已完成"
+          ? t("已完成")
           : hasPartialSuccess
-            ? "部分完成"
-            : job.state === "orphaned" ? "连接已丢失" : "上次失败",
+            ? t("部分完成")
+            : job.state === "orphaned" ? t("连接已丢失") : t("上次失败"),
     };
-  }), [runtime.jobs]);
+  }), [jobs, t]);
 
   const workflowStates = useMemo(() => {
     const stateFor = (commandId) => {
-      const job = runtime.jobs.find((candidate) => candidate.commandId === commandId);
+      const job = jobs.find((candidate) => candidate.commandId === commandId);
       if (!job) return "waiting";
       if (activeStates.has(job.state)) return "active";
       return job.state === "succeeded" ? "done" : "waiting";
@@ -149,18 +173,18 @@ export function App() {
           ? "active"
           : "waiting",
     };
-  }, [runtime.jobs]);
+  }, [jobs]);
 
   const handleNavigate = useCallback((id, label) => {
     setActiveNav(id);
     setConsoleCollapsed(id !== "overview");
-    showToast(`已切换到「${label}」工作区`);
-  }, [showToast]);
+    showToast(t("已切换到「{label}」工作区", { label }));
+  }, [showToast, t]);
 
   const handleStageSelect = useCallback((stage) => {
     setSelectedStage(stage.id);
-    showToast(`已定位到「${stage.label}」阶段`);
-  }, [showToast]);
+    showToast(t("已定位到「{label}」阶段", { label: stage.label }));
+  }, [showToast, t]);
 
   const handleTaskSelect = useCallback((task) => {
     setActiveTask(task.id);
@@ -169,30 +193,30 @@ export function App() {
     if (task.id === "merge") setSelectedStage("merge");
     if (task.id === "export") setSelectedStage("encode");
     const commandIds = pipelineCommandMap[task.id] ?? [];
-    const existing = runtime.jobs.find(
+    const existing = jobs.find(
       (job) => commandIds.includes(job.commandId) && activeStates.has(job.state),
-    ) ?? runtime.jobs.find((job) => commandIds.includes(job.commandId));
+    ) ?? jobs.find((job) => commandIds.includes(job.commandId));
     if (existing) {
       runtime.selectJob(existing.id);
       setConsoleCollapsed(false);
-      showToast(`已切换到任务：${existing.label}`);
+      showToast(t("已切换到任务：{label}", { label: existing.label }));
     } else if (commandIds.length) {
       setTaskType(commandIds[0]);
       setNewTaskOpen(true);
-      showToast(`「${task.label}」尚未启动，可从“新建任务”运行`);
+      showToast(t("「{label}」尚未启动，可从“新建任务”运行", { label: task.label }));
     } else {
-      showToast(`「${task.label}」将在后续外部窗口整合阶段接入`, "warning");
+      showToast(t("「{label}」将在后续外部窗口整合阶段接入", { label: task.label }), "warning");
     }
-  }, [runtime, showToast]);
+  }, [jobs, runtime, showToast, t]);
 
   const handleStartJob = useCallback(async (commandId, options = {}) => {
     const job = await runAction(
       () => runtime.startJob(commandId, options),
-      "任务已启动，终端会话正在连接",
+      t("任务已启动，终端会话正在连接"),
     );
     setConsoleCollapsed(false);
     return job;
-  }, [runAction, runtime]);
+  }, [runAction, runtime, t]);
 
   const openCommand = useCallback((commandId) => {
     setTaskType(commandId);
@@ -202,9 +226,9 @@ export function App() {
   const handleArchivedJobs = useCallback((result) => {
     void runtime.refresh();
     showToast(result.archived
-      ? `已归档 ${result.archived} 个任务，可从 .webui/archive 恢复`
-      : "没有可归档的已结束任务");
-  }, [runtime.refresh, showToast]);
+      ? t("已归档 {count} 个任务，可从 .webui/archive 恢复", { count: result.archived })
+      : t("没有可归档的已结束任务"));
+  }, [runtime.refresh, showToast, t]);
 
   const handleCreateTask = useCallback(async (options) => {
     try {
@@ -217,7 +241,7 @@ export function App() {
 
   const controlTraining = useCallback(async (operation, message) => {
     if (!trainingJob) {
-      showToast("当前没有 SAEHD 训练任务", "warning");
+      showToast(t("当前没有 SAEHD 训练任务"), "warning");
       return;
     }
     try {
@@ -226,22 +250,22 @@ export function App() {
     } catch {
       // runAction already surfaced a recovery-oriented toast.
     }
-  }, [runAction, runtime, showToast, trainingJob]);
+  }, [runAction, runtime, showToast, t, trainingJob]);
 
   const handleStopConfirm = useCallback(async () => {
     setStopConfirmOpen(false);
-    await controlTraining("close", "已请求安全停止；Trainer 将先保存模型");
-  }, [controlTraining]);
+    await controlTraining("close", t("已请求安全停止；Trainer 将先保存模型"));
+  }, [controlTraining, t]);
 
   const handleCopyPath = useCallback(async (value) => {
     if (!value) return;
     try {
       await navigator.clipboard.writeText(value);
-      showToast("任务目录已复制");
+      showToast(t("任务目录已复制"));
     } catch {
       showToast(value, "warning");
     }
-  }, [showToast]);
+  }, [showToast, t]);
 
   const workspacePath = runtime.health?.runtime?.current?.workspace ?? "workspace";
   const previewVersion = trainingJob?.previewVersion ?? previewRefresh;
@@ -264,7 +288,7 @@ export function App() {
     mainContent = (
       <DatasetView
         side={activeNav}
-        commands={runtime.commands}
+        commands={commands}
         onOpenCommand={openCommand}
         onError={showError}
         onNotice={showToast}
@@ -274,7 +298,7 @@ export function App() {
     mainContent = (
       <DatasetView
         side={xsegSide}
-        commands={runtime.commands}
+        commands={commands}
         editMasks
         onSideChange={setXsegSide}
         onOpenCommand={openCommand}
@@ -285,9 +309,9 @@ export function App() {
   } else if (activeNav === "training") {
     mainContent = (
       <CommandCenterView
-        title="模型训练"
-        description="SAEHD 使用 Web 预览桥；ME、Quick384、Quick512 保留完整 CLI 问答与真实终端。"
-        commands={runtime.commands}
+        title={t("模型训练")}
+        description={t("SAEHD 使用 Web 预览桥；ME、Quick384、Quick512 保留完整 CLI 问答与真实终端。")}
+        commands={commands}
         filter={(command) => command.category === "training"}
         onOpenCommand={openCommand}
         aside={<ModelSummaryAside workspace={workspaceSnapshot} />}
@@ -296,9 +320,9 @@ export function App() {
   } else if (activeNav === "merge") {
     mainContent = (
       <CommandCenterView
-        title="模型应用"
-        description="从固定模型目录启动 SAEHD、AMP、ME 或 Quick 合成，产物统一写入 merged 序列。"
-        commands={runtime.commands}
+        title={t("模型应用")}
+        description={t("从固定模型目录启动 SAEHD、AMP、ME 或 Quick 合成，产物统一写入 merged 序列。")}
+        commands={commands}
         filter={(command) => command.category === "merge"}
         onOpenCommand={openCommand}
         aside={<ModelSummaryAside workspace={workspaceSnapshot} />}
@@ -307,9 +331,9 @@ export function App() {
   } else if (activeNav === "export") {
     mainContent = (
       <CommandCenterView
-        title="导出与封装"
-        description="导出 DeepFaceLive DFM，或把合成序列封装为 MP4、AVI 与无损 MOV。"
-        commands={runtime.commands}
+        title={t("导出与封装")}
+        description={t("导出 DeepFaceLive DFM，或把合成序列封装为 MP4、AVI 与无损 MOV。")}
+        commands={commands}
         filter={(command) => ["model", "encode"].includes(command.category)}
         onOpenCommand={openCommand}
         aside={<ModelSummaryAside workspace={workspaceSnapshot} />}
@@ -318,9 +342,9 @@ export function App() {
   } else if (activeNav === "tools") {
     mainContent = (
       <CommandCenterView
-        title="源码工具"
-        description="这里集中列出视频、数据集与遮罩的 Python / FFmpeg 能力；所有入口均为固定白名单命令。"
-        commands={runtime.commands}
+        title={t("源码工具")}
+        description={t("这里集中列出视频、数据集与遮罩的 Python / FFmpeg 能力；所有入口均为固定白名单命令。")}
+        commands={commands}
         filter={(command) => ["video", "dataset", "sort", "mask"].includes(command.category)}
         onOpenCommand={openCommand}
       />
@@ -329,7 +353,7 @@ export function App() {
     mainContent = (
       <SettingsView
         health={runtime.health}
-        jobs={runtime.jobs}
+        jobs={jobs}
         onRetry={runtime.retryJob}
         onError={showError}
         onNotice={showToast}
@@ -344,7 +368,7 @@ export function App() {
           onSelectTask: handleTaskSelect,
           onOpenCommandLog: () => {
             setConsoleCollapsed(false);
-            showToast("终端监视器已展开");
+            showToast(t("终端监视器已展开"));
           },
         }}
         training={{
@@ -359,9 +383,9 @@ export function App() {
           targetIterations: trainingMetric?.targetIterations,
           srcLoss: trainingMetric?.srcLoss,
           dstLoss: trainingMetric?.dstLoss,
-          onSave: () => void controlTraining("save", "保存请求已送入 Trainer"),
-          onBackup: () => void controlTraining("backup", "备份请求已送入 Trainer"),
-          onRefresh: () => void controlTraining("preview", "预览刷新请求已送入 Trainer"),
+          onSave: () => void controlTraining("save", t("保存请求已送入 Trainer")),
+          onBackup: () => void controlTraining("backup", t("备份请求已送入 Trainer")),
+          onRefresh: () => void controlTraining("preview", t("预览刷新请求已送入 Trainer")),
           onSafeStop: () => setStopConfirmOpen(true),
         }}
         status={{
@@ -375,7 +399,7 @@ export function App() {
           },
           onRefreshQueue: () => void runAction(
             () => runtime.refresh(),
-            "任务状态已刷新",
+            t("任务状态已刷新"),
           ).catch(() => {}),
           onOpenModels: () => handleCopyPath(`${workspacePath}\\model`),
         }}
@@ -391,7 +415,7 @@ export function App() {
           serviceState={runtime.serviceState}
           telemetry={runtime.telemetry}
           onNewTask={() => setNewTaskOpen(true)}
-          onMenu={() => showToast(`工作区：${workspacePath}`)}
+          onMenu={() => showToast(t("工作区：{path}", { path: workspacePath }))}
         />
         <WorkflowBar
           selectedStage={selectedStage}
@@ -404,9 +428,9 @@ export function App() {
           onToggle={() => setConsoleCollapsed((current) => !current)}
           serviceState={runtime.serviceState}
           socketState={runtime.socketState}
-          commands={runtime.commands}
-          jobs={runtime.jobs}
-          selectedJob={runtime.selectedJob}
+          commands={commands}
+          jobs={jobs}
+          selectedJob={selectedJob}
           events={runtime.selectedEvents}
           onSelectJob={runtime.selectJob}
           onStart={handleStartJob}
@@ -430,7 +454,7 @@ export function App() {
         taskType={taskType}
         workspacePath={workspacePath}
         serviceOnline={runtime.serviceState === "online"}
-        commands={runtime.commands}
+        commands={commands}
         onTaskType={setTaskType}
         onPreflight={runtime.preflight}
         onClose={() => setNewTaskOpen(false)}
