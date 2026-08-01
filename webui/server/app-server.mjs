@@ -5,8 +5,11 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 import {
+  auditAlignedAssets,
   buildAlignedPoseAtlas,
+  inspectAlignedPack,
   inspectAlignedAnnotation,
+  inspectExtractionCoverage,
   listAlignedAssets,
   listAlignedQuarantine,
   quarantineAlignedImage,
@@ -22,8 +25,12 @@ import { PATHS, pathExists } from "./paths.mjs";
 import { getGpuTelemetry } from "./telemetry.mjs";
 import {
   importWorkspaceVideo,
+  inspectExportReadiness,
   inspectWorkspace,
+  listMergeReview,
+  resolveReviewAsset,
   resolveWorkspaceArtifact,
+  resolveWorkspaceMaterial,
 } from "./workspace-manager.mjs";
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -107,6 +114,23 @@ async function sendVideoArtifact(request, response, target) {
     "Cache-Control": "no-cache",
   });
   return createReadStream(target, { start, end }).pipe(response);
+}
+
+async function sendReviewImage(response, target) {
+  if (!(await pathExists(target))) {
+    return sendJson(response, 404, {
+      ok: false,
+      error: { code: "REVIEW_IMAGE_MISSING", message: "复核图片尚未生成" },
+    });
+  }
+  const fileStat = await stat(target);
+  const contentType = path.extname(target).toLowerCase() === ".png" ? "image/png" : "image/jpeg";
+  response.writeHead(200, {
+    "Content-Type": contentType,
+    "Content-Length": fileStat.size,
+    "Cache-Control": "private, max-age=30",
+  });
+  return createReadStream(target).pipe(response);
 }
 
 function parseCookies(header = "") {
@@ -314,6 +338,66 @@ export class RuntimeServer {
     }
     if (request.method === "GET" && url.pathname === "/api/workspace") {
       return sendJson(response, 200, { ok: true, data: await inspectWorkspace() });
+    }
+    const toolAuditMatch = url.pathname.match(/^\/api\/tools\/assets\/(src|dst)\/audit$/);
+    if (request.method === "GET" && toolAuditMatch) {
+      return sendJson(response, 200, {
+        ok: true,
+        data: await auditAlignedAssets(toolAuditMatch[1], {
+          refresh: url.searchParams.get("refresh") === "1",
+          offset: url.searchParams.get("offset"),
+          limit: url.searchParams.get("limit"),
+        }),
+      });
+    }
+    const toolPackMatch = url.pathname.match(/^\/api\/tools\/assets\/(src|dst)\/pack$/);
+    if (request.method === "GET" && toolPackMatch) {
+      return sendJson(response, 200, {
+        ok: true,
+        data: await inspectAlignedPack(toolPackMatch[1], {
+          refresh: url.searchParams.get("refresh") === "1",
+        }),
+      });
+    }
+    const toolCoverageMatch = url.pathname.match(/^\/api\/tools\/assets\/(src|dst)\/coverage$/);
+    if (request.method === "GET" && toolCoverageMatch) {
+      return sendJson(response, 200, {
+        ok: true,
+        data: await inspectExtractionCoverage(toolCoverageMatch[1], {
+          refresh: url.searchParams.get("refresh") === "1",
+          offset: url.searchParams.get("offset"),
+          limit: url.searchParams.get("limit"),
+        }),
+      });
+    }
+    if (request.method === "GET" && url.pathname === "/api/tools/export-preflight") {
+      return sendJson(response, 200, { ok: true, data: await inspectExportReadiness() });
+    }
+    if (request.method === "GET" && url.pathname === "/api/tools/merge-review") {
+      return sendJson(response, 200, {
+        ok: true,
+        data: await listMergeReview({
+          offset: url.searchParams.get("offset"),
+          limit: url.searchParams.get("limit"),
+        }),
+      });
+    }
+    const workspaceMaterialMatch = url.pathname.match(/^\/api\/workspace\/materials\/(src|dst)$/);
+    if (request.method === "GET" && workspaceMaterialMatch) {
+      return sendVideoArtifact(
+        request,
+        response,
+        await resolveWorkspaceMaterial(workspaceMaterialMatch[1]),
+      );
+    }
+    const reviewImageMatch = url.pathname.match(
+      /^\/api\/workspace\/review\/(src-frame|dst-frame|merged|mask)\/([^/]+)$/,
+    );
+    if (request.method === "GET" && reviewImageMatch) {
+      return sendReviewImage(
+        response,
+        resolveReviewAsset(reviewImageMatch[1], reviewImageMatch[2]),
+      );
     }
     const alignedListMatch = url.pathname.match(/^\/api\/assets\/(src|dst)\/aligned$/);
     if (request.method === "GET" && alignedListMatch) {

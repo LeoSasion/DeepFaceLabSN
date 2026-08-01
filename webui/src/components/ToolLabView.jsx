@@ -15,8 +15,17 @@ import {
 import { runtimeApi } from "../runtime/api.js";
 import { useI18n } from "../i18n.jsx";
 import { CommandRows } from "./OperationsView.jsx";
+import {
+  DatasetAuditPanel,
+  ExportPreflightPanel,
+  ExtractionReviewPanel,
+  MergeReviewPanel,
+  MetadataPackPanel,
+  VideoTimelinePanel,
+} from "./ToolWorkbenchPanels.jsx";
 
 const QUALITY_LABELS = ["< 0.2", "0.2 – 0.4", "0.4 – 0.6", "0.6 – 0.8", "> 0.8"];
+const SIDE_AWARE_TABS = new Set(["audit", "extract", "video", "metadata", "atlas"]);
 
 const MIGRATION_GROUPS = [
   {
@@ -54,25 +63,25 @@ const MIGRATION_GROUPS = [
   },
   {
     id: "native-ui",
-    label: "下一批原生 UI",
+    label: "Web 复核 + 原工具接力",
     rows: [
       {
         id: "manual-extractor",
         name: "Manual Extractor",
         source: "_internal/DeepFaceLab/mainscripts/Extractor.py",
-        interaction: "逐帧画框、landmarks 覆盖、缩放平移、接受/跳过与批量复核",
-        status: "待迁移",
-        priority: "P0",
-        detail: "建议做成全屏审片台：中央源帧画布、右侧候选人脸、底部帧带，并保留原快捷键节奏。",
+        interaction: "源帧覆盖、source_rect / landmarks、遗漏/多人脸筛选与逐帧步进",
+        status: "复核已上线",
+        priority: "桥接",
+        detail: "Web 已可核对真实提取覆盖并定位遗漏；需要画框精修时由固定提取命令选择 manual 检测器，保留原快捷键窗口。",
       },
       {
         id: "interactive-merger",
         name: "Interactive Merger",
         source: "_internal/DeepFaceLab/merger/InteractiveMergerSubprocessor.py",
-        interaction: "逐帧 A/B 预览、遮罩/腐蚀/模糊/色彩参数侧栏与时间轴缓存",
-        status: "待迁移",
-        priority: "P0",
-        detail: "适合以大画布和可折叠参数轨道替代原按键屏幕；每次改参只重算当前帧，确认后批量合成。",
+        interaction: "DST / merged / mask 三联帧同步步进、缺失检查与引导式合成接力",
+        status: "复核已上线",
+        priority: "桥接",
+        detail: "Web 已完成真实产物逐帧验收；依赖模型常驻的逐参数实时重算仍由原交互合成器或引导式固定任务执行。",
       },
       {
         id: "faceset-preview",
@@ -87,34 +96,43 @@ const MIGRATION_GROUPS = [
   },
   {
     id: "planned",
-    label: "可视化规划",
+    label: "本次新增原生工具",
     rows: [
       {
         id: "sorter",
         name: "Sorter 清洗工作台",
         source: "_internal/DeepFaceLab/mainscripts/Sorter.py",
-        interaction: "按模糊/姿态/直方图排序，双图比较，先隔离后提交",
-        status: "可设计",
-        priority: "P1",
-        detail: "把不可逆重命名改成预览队列：先显示排序理由和异常分数，再通过隔离区提交或回滚。",
+        interaction: "质量/曝光/姿态/元数据排序筛选、样本检查与可恢复隔离",
+        status: "已上线",
+        priority: "完成",
+        detail: "Python 先生成非破坏式质量清单；Web 显示排序依据，确认后只进入现有可恢复隔离区，不执行原 Sorter 的批量重命名。",
       },
       {
         id: "videoed",
         name: "VideoEd 视频工具",
         source: "_internal/DeepFaceLab/mainscripts/VideoEd.py",
-        interaction: "时间码裁剪、抽帧范围、降噪强度与前后帧对比",
-        status: "可设计",
-        priority: "P1",
-        detail: "用时间轴、关键帧缩略图和局部预览代替 CLI 问答；运行仍走固定白名单命令。",
+        interaction: "浏览器视频流、时长/分辨率/帧率检查与裁剪/抽帧/降噪接力",
+        status: "已上线",
+        priority: "完成",
+        detail: "素材可直接在 Web 播放和预检；实际 VideoEd 与 ffmpeg 操作继续走固定参数任务。",
       },
       {
         id: "metadata-pack",
         name: "Metadata / PackedFaceset",
         source: "_internal/DeepFaceLab/mainscripts/Util.py · samplelib/PackedFaceset.py",
-        interaction: "元数据版本时间线、差异预览、包内容清单与恢复点",
-        status: "可设计",
-        priority: "P2",
-        detail: "把 save/restore/pack/unpack 组织成可审计的版本流，显示影响文件数、目标路径和冲突。",
+        interaction: "元数据覆盖/重复来源、PAK/ZIP 包头、样本数、摘要与异常",
+        status: "已上线",
+        priority: "完成",
+        detail: "检查接口保持零写入；保存/恢复/打包/解包仍通过固定命令，执行前可看清当前状态。",
+      },
+      {
+        id: "dfm-export",
+        name: "模型导出预检",
+        source: "_internal/DeepFaceLab/mainscripts/ExportDFM.py",
+        interaction: "模型家族、data.dat、权重组件、已有 DFM 与阻塞项",
+        status: "已上线",
+        priority: "完成",
+        detail: "先按实际模型文件完成就绪度检查，再开放与模型类型匹配的固定 DFM 导出命令。",
       },
     ],
   },
@@ -424,7 +442,7 @@ function MigrationMap() {
 
 export function ToolLabView({ commands, onOpenCommand, onError, onNotice, onNavigateDataset }) {
   const { t } = useI18n();
-  const [activeTab, setActiveTab] = useState("atlas");
+  const [activeTab, setActiveTab] = useState("audit");
   const [side, setSide] = useState("src");
   const [refreshVersion, setRefreshVersion] = useState(0);
   const toolCommands = commands.filter((command) => (
@@ -435,18 +453,20 @@ export function ToolLabView({ commands, onOpenCommand, onError, onNotice, onNavi
     <section className="tool-lab-view">
       <header className="operation-header tool-lab-header">
         <div>
-          <h2>{t("工具实验室")}</h2>
-          <p>{t("把 DeepFaceLab 原生窗口与 Python 工具重组为可审查、可恢复的本地 Web 工作台。")}</p>
+          <h2>{t("全工具工作台")}</h2>
+          <p>{t("用真实工作区证据完成审计、提取复核、合成验收与导出预检；高成本交互保留固定命令接力。")}</p>
         </div>
-        {activeTab === "atlas" && (
+        {!["commands", "migration"].includes(activeTab) && (
           <div className="tool-lab-actions">
-            <div className="side-switch" role="group" aria-label={t("数据集") }>
-              {["src", "dst"].map((value) => (
-                <button className={side === value ? "is-active" : ""} key={value} type="button" onClick={() => setSide(value)}>
-                  {value.toUpperCase()}
-                </button>
-              ))}
-            </div>
+            {SIDE_AWARE_TABS.has(activeTab) && (
+              <div className="side-switch" role="group" aria-label={t("数据集") }>
+                {["src", "dst"].map((value) => (
+                  <button className={side === value ? "is-active" : ""} key={value} type="button" onClick={() => setSide(value)}>
+                    {value.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            )}
             <button className="button primary" type="button" onClick={() => setRefreshVersion((value) => value + 1)}>
               <IconRefresh size={15} />{t("刷新分析")}
             </button>
@@ -455,11 +475,29 @@ export function ToolLabView({ commands, onOpenCommand, onError, onNotice, onNavi
       </header>
 
       <nav className="tool-lab-tabs" aria-label={t("工具实验室视图") }>
+        <button className={activeTab === "audit" ? "is-active" : ""} type="button" onClick={() => setActiveTab("audit")}>
+          <IconFileAnalytics size={16} />{t("数据审计")}
+        </button>
+        <button className={activeTab === "extract" ? "is-active" : ""} type="button" onClick={() => setActiveTab("extract")}>
+          <IconPhoto size={16} />{t("提取复核")}
+        </button>
+        <button className={activeTab === "merge" ? "is-active" : ""} type="button" onClick={() => setActiveTab("merge")}>
+          <IconRoute size={16} />{t("合成复核")}
+        </button>
+        <button className={activeTab === "video" ? "is-active" : ""} type="button" onClick={() => setActiveTab("video")}>
+          <IconPlayerPlay size={16} />{t("视频时间线")}
+        </button>
+        <button className={activeTab === "metadata" ? "is-active" : ""} type="button" onClick={() => setActiveTab("metadata")}>
+          <IconArchive size={16} />{t("元数据与打包")}
+        </button>
+        <button className={activeTab === "export" ? "is-active" : ""} type="button" onClick={() => setActiveTab("export")}>
+          <IconCode size={16} />{t("模型导出")}
+        </button>
         <button className={activeTab === "atlas" ? "is-active" : ""} type="button" onClick={() => setActiveTab("atlas")}>
-          <IconFileAnalytics size={16} />{t("人脸姿态图谱")}
+          <IconTool size={16} />{t("姿态图谱")}
         </button>
         <button className={activeTab === "migration" ? "is-active" : ""} type="button" onClick={() => setActiveTab("migration")}>
-          <IconRoute size={16} />{t("工具迁移地图")}
+          <IconCheck size={16} />{t("覆盖清单")}
         </button>
         <button className={activeTab === "commands" ? "is-active" : ""} type="button" onClick={() => setActiveTab("commands")}>
           <IconCode size={16} />{t("命令目录")}
@@ -467,7 +505,26 @@ export function ToolLabView({ commands, onOpenCommand, onError, onNotice, onNavi
       </nav>
 
       <div className="tool-lab-content">
-        {activeTab === "atlas" ? (
+        {activeTab === "audit" ? (
+          <DatasetAuditPanel
+            side={side}
+            refreshVersion={refreshVersion}
+            onError={onError}
+            onNotice={onNotice}
+            onNavigateDataset={onNavigateDataset}
+            onOpenCommand={onOpenCommand}
+          />
+        ) : activeTab === "extract" ? (
+          <ExtractionReviewPanel side={side} refreshVersion={refreshVersion} onError={onError} onOpenCommand={onOpenCommand} />
+        ) : activeTab === "merge" ? (
+          <MergeReviewPanel refreshVersion={refreshVersion} onError={onError} onOpenCommand={onOpenCommand} />
+        ) : activeTab === "video" ? (
+          <VideoTimelinePanel side={side} refreshVersion={refreshVersion} onError={onError} onOpenCommand={onOpenCommand} />
+        ) : activeTab === "metadata" ? (
+          <MetadataPackPanel side={side} refreshVersion={refreshVersion} onError={onError} onOpenCommand={onOpenCommand} />
+        ) : activeTab === "export" ? (
+          <ExportPreflightPanel refreshVersion={refreshVersion} onError={onError} onOpenCommand={onOpenCommand} />
+        ) : activeTab === "atlas" ? (
           <PoseAtlas
             side={side}
             refreshVersion={refreshVersion}

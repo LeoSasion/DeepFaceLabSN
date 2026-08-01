@@ -169,8 +169,10 @@ queued → starting → running ↔ waiting_input
 
 - `WorkspaceManager` 只扫描固定的 SRC、DST、aligned、model、merged 和 result 路径，识别 SAEHD、ME、AMP、Q384、Q512 模型及 MP4/AVI/MOV 输出。
 - `AssetManager` 只允许 `src`/`dst` 和安全 JPG 文件名；固定 Python helper 复用 DFLIMG/SegIEPolys 读取与写回元数据。
+- 工具分析层由固定 Python helper 提供 `audit`、`coverage` 和 `pack-inspect`：审计单页最多处理 500 张图片，UI 以 120 张翻页；图片指标使用有界缩略图。PackedFaceset 配置通过 `pickletools` 做结构计数，不执行反序列化构造器，ZIP 条目在解压前校验大小。Node 子进程有 120 秒和 4 MiB 输出上限，结果短时缓存 30 秒。
+- 合成复核只暴露 `src-frame`、`dst-frame`、`merged`、`mask` 四个槽位和严格文件名；模型导出预检只扫描固定 `workspace/model`，不接受浏览器路径。
 - 视频上传只接受允许扩展名，并写入固定的 `data_src`/`data_dst` 目标；结果播放只允许 `result.mp4` 与 `result_mask.mp4`。
-- 视频元数据由固定的 `ffprobe` 读取，结果接口实现 HTTP Range。
+- 视频元数据由固定的 `ffprobe` 读取，工作区素材与结果接口实现 HTTP Range，避免浏览器预览时整体读入视频。
 - `TelemetryProvider` 以缓存频率调用 `nvidia-smi`，返回利用率、显存、温度、功耗和风扇；前端每 3 秒轮询。
 - `JobManager` 根据 SAEHD 迭代耗时和引导模式的目标迭代数计算每小时迭代数与 ETA。
 

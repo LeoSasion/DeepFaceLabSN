@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { WebSocket } from "ws";
+import { listCommands } from "../server/command-registry.mjs";
 
 const origin = process.env.DFL_WEBUI_ORIGIN ?? "http://127.0.0.1:4173";
 const socketOrigin = origin.replace(/^http/, "ws");
@@ -23,7 +24,11 @@ const commandsResponse = await fetch(`${origin}/api/commands`, {
 assert.equal(commandsResponse.status, 200, "commands endpoint should be reachable");
 const commandsPayload = await commandsResponse.json();
 assert.equal(commandsPayload.ok, true, "commands payload should be successful");
-assert.equal(commandsPayload.data.length, 13, "all 13 fixed workflows should be registered");
+assert.equal(
+  commandsPayload.data.length,
+  listCommands().length,
+  "live command catalog should match the fixed registry",
+);
 
 const workspaceResponse = await fetch(`${origin}/api/workspace`, {
   headers: { Cookie: cookie, Origin: origin },

@@ -53,6 +53,19 @@ export const runtimeApi = {
     `/api/assets/${side}/aligned?offset=${offset}&limit=${limit}`,
   ),
   alignedPoseAtlas: (side) => request(`/api/assets/${side}/pose-atlas`),
+  alignedAudit: (side, { refresh = false, offset = 0, limit = 120 } = {}) => request(
+    `/api/tools/assets/${side}/audit?offset=${offset}&limit=${limit}${refresh ? "&refresh=1" : ""}`,
+  ),
+  alignedPack: (side, { refresh = false } = {}) => request(
+    `/api/tools/assets/${side}/pack${refresh ? "?refresh=1" : ""}`,
+  ),
+  extractionCoverage: (side, { refresh = false, offset = 0, limit = 120 } = {}) => request(
+    `/api/tools/assets/${side}/coverage?offset=${offset}&limit=${limit}${refresh ? "&refresh=1" : ""}`,
+  ),
+  mergeReview: ({ offset = 0, limit = 120 } = {}) => request(
+    `/api/tools/merge-review?offset=${offset}&limit=${limit}`,
+  ),
+  exportPreflight: () => request("/api/tools/export-preflight"),
   alignedAnnotation: (side, name) => request(
     `/api/assets/${side}/aligned/${encodeURIComponent(name)}/annotation`,
   ),

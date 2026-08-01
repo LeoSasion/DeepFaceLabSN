@@ -115,6 +115,72 @@ test("runtime server issues a loopback session and protects writes/WebSocket", a
   const workspaceBody = await workspaceResponse.json();
   assert.ok(Object.hasOwn(workspaceBody.data.materials, "src"));
 
+  const auditResponse = await fetch(`${baseUrl}/api/tools/assets/src/audit`, {
+    headers: { Origin: origin },
+  });
+  assert.equal(auditResponse.status, 200);
+  const auditBody = await auditResponse.json();
+  assert.equal(auditBody.data.side, "src");
+  assert.ok(auditBody.data.analyzedCount <= 500);
+  const auditPageResponse = await fetch(`${baseUrl}/api/tools/assets/src/audit?offset=1&limit=1`, {
+    headers: { Origin: origin },
+  });
+  assert.equal(auditPageResponse.status, 200);
+  const auditPageBody = await auditPageResponse.json();
+  assert.equal(auditPageBody.data.offset, 1);
+  assert.equal(auditPageBody.data.items.length, 1);
+
+  const coverageResponse = await fetch(`${baseUrl}/api/tools/assets/dst/coverage`, {
+    headers: { Origin: origin },
+  });
+  assert.equal(coverageResponse.status, 200);
+  const coverageBody = await coverageResponse.json();
+  assert.equal(coverageBody.data.side, "dst");
+  const coveragePageResponse = await fetch(`${baseUrl}/api/tools/assets/dst/coverage?offset=1&limit=1`, {
+    headers: { Origin: origin },
+  });
+  assert.equal(coveragePageResponse.status, 200);
+  const coveragePageBody = await coveragePageResponse.json();
+  assert.equal(coveragePageBody.data.offset, 1);
+  assert.equal(coveragePageBody.data.items.length, 1);
+
+  const mergeReviewResponse = await fetch(`${baseUrl}/api/tools/merge-review?limit=3`, {
+    headers: { Origin: origin },
+  });
+  assert.equal(mergeReviewResponse.status, 200);
+  const mergeReviewBody = await mergeReviewResponse.json();
+  assert.ok(mergeReviewBody.data.items.length <= 3);
+  const mergeReviewPageResponse = await fetch(`${baseUrl}/api/tools/merge-review?offset=1&limit=1`, {
+    headers: { Origin: origin },
+  });
+  assert.equal(mergeReviewPageResponse.status, 200);
+  const mergeReviewPageBody = await mergeReviewPageResponse.json();
+  assert.equal(mergeReviewPageBody.data.offset, 1);
+  assert.equal(mergeReviewPageBody.data.items.length, 1);
+  if (mergeReviewBody.data.items[0]) {
+    const reviewImageResponse = await fetch(
+      `${baseUrl}${mergeReviewBody.data.items[0].sourceUrl}`,
+      { headers: { Origin: origin } },
+    );
+    assert.equal(reviewImageResponse.status, 200);
+    assert.match(reviewImageResponse.headers.get("content-type"), /^image\//);
+  }
+
+  const exportResponse = await fetch(`${baseUrl}/api/tools/export-preflight`, {
+    headers: { Origin: origin },
+  });
+  assert.equal(exportResponse.status, 200);
+  const exportBody = await exportResponse.json();
+  assert.equal(typeof exportBody.data.readyCount, "number");
+
+  if (workspaceBody.data.materials.src) {
+    const materialResponse = await fetch(`${baseUrl}/api/workspace/materials/src`, {
+      headers: { Origin: origin, Range: "bytes=0-31" },
+    });
+    assert.equal(materialResponse.status, 206);
+    assert.equal((await materialResponse.arrayBuffer()).byteLength, 32);
+  }
+
   const telemetryResponse = await fetch(`${baseUrl}/api/telemetry`, {
     headers: { Origin: origin },
   });

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { access, link, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
@@ -10,7 +12,10 @@ import {
   validateCommandParameters,
 } from "../server/command-registry.mjs";
 import {
+  auditAlignedAssets,
   buildAlignedPoseAtlas,
+  inspectAlignedPack,
+  inspectExtractionCoverage,
   listAlignedAssets,
   resolveAlignedImage,
 } from "../server/asset-manager.mjs";
@@ -21,7 +26,13 @@ import { OutputParser, stripAnsi } from "../server/output-parser.mjs";
 import { PATHS, assertWithin } from "../server/paths.mjs";
 import { createPtyRunner } from "../server/pty-runner.mjs";
 import { parseNvidiaSmiCsv } from "../server/telemetry.mjs";
-import { inspectWorkspace, resolveWorkspaceArtifact } from "../server/workspace-manager.mjs";
+import {
+  inspectExportReadiness,
+  inspectWorkspace,
+  listMergeReview,
+  resolveReviewAsset,
+  resolveWorkspaceArtifact,
+} from "../server/workspace-manager.mjs";
 import { applyEventToJob, mergeJobs } from "../src/runtime/useRuntime.js";
 
 test("command registry exposes the approved fixed workflows", () => {
@@ -208,6 +219,8 @@ test("allowed paths cannot escape their parent", () => {
     () => resolveAlignedImage("src", encodeURIComponent("../model/file.jpg")),
     (error) => error.code === "IMAGE_NAME_INVALID",
   );
+  assert.match(resolveAlignedImage("src", "review.png"), /review\.png$/i);
+  assert.match(resolveAlignedImage("src", "review.jpeg"), /review\.jpeg$/i);
 });
 
 test("aligned asset browser reads real DFL metadata through the fixed helper", async () => {
@@ -231,6 +244,138 @@ test("pose atlas aggregates real DFL landmarks into bounded review bins", async 
   assert.ok(atlas.cells.flatMap((cell) => cell.samples).every(
     (sample) => sample.imageUrl.startsWith("/api/assets/src/aligned/"),
   ));
+});
+
+test("tool workbench analysis is bounded, non-destructive, and uses fixed review slots", async () => {
+  const [audit, pack, coverage, mergeReview, exportReadiness] = await Promise.all([
+    auditAlignedAssets("src", { refresh: true }),
+    inspectAlignedPack("src", { refresh: true }),
+    inspectExtractionCoverage("dst", { refresh: true }),
+    listMergeReview({ limit: 8 }),
+    inspectExportReadiness(),
+  ]);
+  assert.equal(audit.side, "src");
+  assert.ok(audit.analyzedCount <= 500);
+  assert.ok(audit.items.every((item) => item.imageUrl.startsWith("/api/assets/src/aligned/")));
+  assert.ok(audit.items.every((item) => item.qualityScore >= 0 && item.qualityScore <= 1));
+  if (audit.total > 1) {
+    const firstAudit = await auditAlignedAssets("src", { refresh: true, offset: 0, limit: 1 });
+    const nextAudit = await auditAlignedAssets("src", { refresh: true, offset: 1, limit: 1 });
+    assert.equal(nextAudit.offset, 1);
+    assert.equal(nextAudit.items.length, 1);
+    assert.notEqual(nextAudit.items[0].name, firstAudit.items[0].name);
+  }
+  assert.equal(pack.side, "src");
+  assert.ok(["ready", "invalid", "not_packed"].includes(pack.status));
+  assert.equal(coverage.side, "dst");
+  assert.ok(coverage.analyzedCount <= 500);
+  assert.ok(coverage.items.every((item) => item.frameUrl.startsWith("/api/workspace/review/dst-frame/")));
+  assert.ok(mergeReview.items.length <= 8);
+  assert.ok(mergeReview.items.every((item) => item.sourceUrl.startsWith("/api/workspace/review/dst-frame/")));
+  assert.equal(typeof exportReadiness.readyCount, "number");
+  assert.throws(
+    () => resolveReviewAsset("dst-frame", encodeURIComponent("../model/file.png")),
+    (error) => error.code === "REVIEW_NAME_INVALID",
+  );
+  assert.throws(
+    () => resolveReviewAsset("arbitrary", "00001.png"),
+    (error) => error.code === "REVIEW_SLOT_INVALID",
+  );
+  if (mergeReview.total > 1) {
+    const nextMergeReview = await listMergeReview({ offset: 1, limit: 1 });
+    assert.equal(nextMergeReview.offset, 1);
+    assert.equal(nextMergeReview.items.length, 1);
+    assert.notEqual(nextMergeReview.items[0].name, mergeReview.items[0].name);
+  }
+});
+
+test("PackedFaceset preflight counts configs without executing pickle callables", async (t) => {
+  const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "dfl-pack-review-"));
+  t.after(() => rm(temporaryDirectory, { recursive: true, force: true }));
+  const helper = path.join(PATHS.webuiRoot, "python", "dfl_asset_tool.py");
+  const packPath = path.join(temporaryDirectory, "faceset.pak");
+  const markerPath = path.join(temporaryDirectory, "pickle-executed.txt").replaceAll("\\", "/");
+  const maliciousMetadata = Buffer.from(
+    `cbuiltins\neval\n(V__import__('pathlib').Path('${markerPath}').write_text('owned')\ntR.`,
+    "utf8",
+  );
+  const packPayload = (metadata) => {
+    const header = Buffer.alloc(16);
+    header.writeBigUInt64LE(1n, 0);
+    header.writeBigUInt64LE(BigInt(metadata.length), 8);
+    return Buffer.concat([header, metadata]);
+  };
+  await writeFile(packPath, packPayload(maliciousMetadata));
+  let result = spawnSync(
+    PATHS.python,
+    [helper, "pack-inspect", "--directory", temporaryDirectory],
+    { encoding: "utf8", env: buildDflEnvironment("current"), cwd: PATHS.currentDflRoot },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).status, "invalid");
+  await assert.rejects(access(path.join(temporaryDirectory, "pickle-executed.txt")));
+
+  const safeMetadata = Buffer.from([
+    0x80, 0x04, 0x5d, 0x94, 0x28,
+    0x7d, 0x94, 0x7d, 0x94, 0x7d, 0x94,
+    0x65, 0x2e,
+  ]);
+  await writeFile(packPath, packPayload(safeMetadata));
+  result = spawnSync(
+    PATHS.python,
+    [helper, "pack-inspect", "--directory", temporaryDirectory],
+    { encoding: "utf8", env: buildDflEnvironment("current"), cwd: PATHS.currentDflRoot },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.status, "ready");
+  assert.equal(payload.sampleCount, 3);
+});
+
+test("coverage pagination keeps aligned faces after frame 500 out of orphan counts", async (t) => {
+  const assets = await listAlignedAssets("src", { offset: 0, limit: 1 });
+  const sample = assets.items.find((item) => item.sourceFilename);
+  assert.ok(sample, "real SRC aligned metadata should include a source frame");
+  const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "dfl-coverage-review-"));
+  t.after(() => rm(temporaryDirectory, { recursive: true, force: true }));
+  const framesDirectory = path.join(temporaryDirectory, "frames");
+  const alignedDirectory = path.join(temporaryDirectory, "aligned");
+  await mkdir(framesDirectory);
+  await mkdir(alignedDirectory);
+  const sourceFrame = path.join(PATHS.workspaceRoot, "data_src", path.basename(sample.sourceFilename));
+  const alignedImage = path.join(PATHS.workspaceRoot, "data_src", "aligned", sample.name);
+  await Promise.all(Array.from({ length: 500 }, (_, index) => link(
+    sourceFrame,
+    path.join(framesDirectory, `!${String(index).padStart(4, "0")}.png`),
+  )));
+  await link(sourceFrame, path.join(framesDirectory, path.basename(sample.sourceFilename)));
+  await link(alignedImage, path.join(alignedDirectory, sample.name));
+
+  const helper = path.join(PATHS.webuiRoot, "python", "dfl_asset_tool.py");
+  const result = spawnSync(
+    PATHS.python,
+    [
+      helper,
+      "coverage",
+      "--frames",
+      framesDirectory,
+      "--directory",
+      alignedDirectory,
+      "--offset",
+      "500",
+      "--limit",
+      "10",
+    ],
+    { encoding: "utf8", env: buildDflEnvironment("current"), cwd: PATHS.currentDflRoot },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.total, 501);
+  assert.equal(payload.offset, 500);
+  assert.equal(payload.items[0].name, path.basename(sample.sourceFilename));
+  assert.equal(payload.items[0].faceCount, 1);
+  assert.equal(payload.coveredCount, 1);
+  assert.equal(payload.orphanAlignmentCount, 0);
 });
 
 test("workspace inspector exposes only fixed materials, models, and outputs", async () => {

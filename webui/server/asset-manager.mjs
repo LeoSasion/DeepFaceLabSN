@@ -6,9 +6,11 @@ import path from "node:path";
 import { buildDflEnvironment } from "./environment.mjs";
 import { PATHS, assertWithin, pathExists } from "./paths.mjs";
 
-const IMAGE_NAME = /^[^<>:"/\\|?*\u0000-\u001f]{1,220}\.jpg$/i;
+const IMAGE_NAME = /^[^<>:"/\\|?*\u0000-\u001f]{1,220}\.(?:jpe?g|png)$/i;
 const QUARANTINE_TOKEN = /^\d{14}-[a-f0-9]{10}$/;
 const MAX_HELPER_OUTPUT = 4 * 1024 * 1024;
+const ANALYSIS_CACHE_TTL_MS = 30_000;
+const analysisCache = new Map();
 
 export class AssetError extends Error {
   constructor(message, code = "ASSET_ERROR", status = 400, details) {
@@ -52,21 +54,39 @@ function runAssetHelper(args, input) {
     const stdout = [];
     const stderr = [];
     let outputBytes = 0;
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      callback(value);
+    };
+    const timeout = setTimeout(() => {
+      child.kill();
+      finish(
+        reject,
+        new AssetError("DFL 分析超过 120 秒，已安全终止", "HELPER_TIMEOUT", 504),
+      );
+    }, 120_000);
     const collect = (target) => (chunk) => {
       outputBytes += chunk.length;
       if (outputBytes > MAX_HELPER_OUTPUT) {
         child.kill();
-        reject(new AssetError("aligned 元数据响应过大", "HELPER_OUTPUT_TOO_LARGE", 500));
+        finish(
+          reject,
+          new AssetError("DFL 分析响应超过 4 MiB", "HELPER_OUTPUT_TOO_LARGE", 500),
+        );
         return;
       }
       target.push(chunk);
     };
     child.stdout.on("data", collect(stdout));
     child.stderr.on("data", collect(stderr));
-    child.once("error", reject);
+    child.once("error", (error) => finish(reject, error));
     child.once("exit", (code) => {
+      if (settled) return;
       if (code !== 0) {
-        reject(new AssetError(
+        finish(reject, new AssetError(
           Buffer.concat(stderr).toString("utf8").trim() || "读取 DFL 元数据失败",
           "DFL_METADATA_FAILED",
           422,
@@ -74,9 +94,9 @@ function runAssetHelper(args, input) {
         return;
       }
       try {
-        resolve(JSON.parse(Buffer.concat(stdout).toString("utf8")));
+        finish(resolve, JSON.parse(Buffer.concat(stdout).toString("utf8")));
       } catch {
-        reject(new AssetError("DFL 元数据响应无效", "DFL_METADATA_INVALID", 500));
+        finish(reject, new AssetError("DFL 分析响应不是有效 JSON", "DFL_METADATA_INVALID", 500));
       }
     });
     if (input === undefined) child.stdin.end();
@@ -106,6 +126,23 @@ export async function listAlignedAssets(side, { offset = 0, limit = 60 } = {}) {
       imageUrl: `/api/assets/${side}/aligned/${encodeURIComponent(item.name)}`,
     })),
   };
+}
+
+async function cachedAnalysis(side, key, refresh, loader) {
+  const cacheKey = `${side}:${key}`;
+  const cached = analysisCache.get(cacheKey);
+  if (!refresh && cached && Date.now() - cached.createdAt < ANALYSIS_CACHE_TTL_MS) {
+    return { ...cached.value, cached: true };
+  }
+  const value = await loader();
+  analysisCache.set(cacheKey, { createdAt: Date.now(), value });
+  return { ...value, cached: false };
+}
+
+function invalidateAnalysis(side) {
+  for (const key of analysisCache.keys()) {
+    if (key.startsWith(`${side}:`)) analysisCache.delete(key);
+  }
 }
 
 export async function buildAlignedPoseAtlas(side) {
@@ -144,6 +181,111 @@ export async function buildAlignedPoseAtlas(side) {
   };
 }
 
+export async function auditAlignedAssets(side, { refresh = false, offset = 0, limit = 120 } = {}) {
+  const directory = alignedDirectory(side);
+  const safeOffset = Math.max(Number(offset) || 0, 0);
+  const safeLimit = Math.min(Math.max(Number(limit) || 120, 1), 500);
+  if (!(await pathExists(directory))) {
+    return {
+      side,
+      total: 0,
+      offset: safeOffset,
+      limit: safeLimit,
+      analyzedCount: 0,
+      validMetadataCount: 0,
+      invalidMetadataCount: 0,
+      maskedCount: 0,
+      uniqueSourceCount: 0,
+      duplicateSourceGroupCount: 0,
+      meanQualityScore: 0,
+      meanSharpness: 0,
+      issueCounts: {},
+      items: [],
+      cached: false,
+    };
+  }
+  const result = await cachedAnalysis(side, `audit:${safeOffset}:${safeLimit}`, refresh, () => (
+    runAssetHelper([
+      "audit",
+      "--directory",
+      directory,
+      "--offset",
+      String(safeOffset),
+      "--limit",
+      String(safeLimit),
+    ])
+  ));
+  return {
+    side,
+    ...result,
+    items: result.items.map((item) => ({
+      ...item,
+      imageUrl: `/api/assets/${side}/aligned/${encodeURIComponent(item.name)}`,
+    })),
+  };
+}
+
+export async function inspectAlignedPack(side, { refresh = false } = {}) {
+  const directory = alignedDirectory(side);
+  if (!(await pathExists(directory))) {
+    return { side, present: false, status: "aligned_missing", warnings: [], cached: false };
+  }
+  const result = await cachedAnalysis(side, "pack", refresh, () => (
+    runAssetHelper(["pack-inspect", "--directory", directory])
+  ));
+  return { side, ...result };
+}
+
+export async function inspectExtractionCoverage(
+  side,
+  { refresh = false, offset = 0, limit = 120 } = {},
+) {
+  const directory = alignedDirectory(side);
+  const frames = path.join(PATHS.workspaceRoot, `data_${side}`);
+  const safeOffset = Math.max(Number(offset) || 0, 0);
+  const safeLimit = Math.min(Math.max(Number(limit) || 120, 1), 500);
+  if (!(await pathExists(directory)) || !(await pathExists(frames))) {
+    return {
+      side,
+      total: 0,
+      offset: safeOffset,
+      limit: safeLimit,
+      analyzedCount: 0,
+      coveredCount: 0,
+      uncoveredCount: 0,
+      multiFaceCount: 0,
+      orphanAlignmentCount: 0,
+      items: [],
+      cached: false,
+    };
+  }
+  const result = await cachedAnalysis(side, `coverage:${safeOffset}:${safeLimit}`, refresh, () => (
+    runAssetHelper([
+      "coverage",
+      "--frames",
+      frames,
+      "--directory",
+      directory,
+      "--offset",
+      String(safeOffset),
+      "--limit",
+      String(safeLimit),
+    ])
+  ));
+  return {
+    side,
+    ...result,
+    items: result.items.map((item) => ({
+      ...item,
+      frameUrl: `/api/workspace/review/${side}-frame/${encodeURIComponent(item.name)}`,
+      faces: item.faces.map((face) => ({
+        ...face,
+        alignedUrl: `/api/assets/${side}/aligned/${encodeURIComponent(face.alignedName)}`,
+      })),
+    })),
+  };
+}
+
 export async function inspectAlignedAnnotation(side, encodedName) {
   const target = resolveAlignedImage(side, encodedName);
   if (!(await pathExists(target))) {
@@ -157,7 +299,9 @@ export async function saveAlignedAnnotation(side, encodedName, payload) {
   if (!(await pathExists(target))) {
     throw new AssetError("aligned 图片不存在", "IMAGE_MISSING", 404);
   }
-  return runAssetHelper(["save", "--file", target], payload);
+  const result = await runAssetHelper(["save", "--file", target], payload);
+  invalidateAnalysis(side);
+  return result;
 }
 
 export async function streamAlignedImage(response, side, encodedName) {
@@ -166,8 +310,9 @@ export async function streamAlignedImage(response, side, encodedName) {
     throw new AssetError("aligned 图片不存在", "IMAGE_MISSING", 404);
   }
   const fileStat = await stat(target);
+  const contentType = path.extname(target).toLowerCase() === ".png" ? "image/png" : "image/jpeg";
   response.writeHead(200, {
-    "Content-Type": "image/jpeg",
+    "Content-Type": contentType,
     "Content-Length": fileStat.size,
     "Cache-Control": "private, max-age=30",
   });
@@ -183,6 +328,7 @@ export async function quarantineAlignedImage(side, encodedName) {
   const destinationDirectory = path.join(PATHS.runtimeRoot, "quarantine", side, token);
   await mkdir(destinationDirectory, { recursive: true });
   await rename(target, path.join(destinationDirectory, path.basename(target)));
+  invalidateAnalysis(side);
   return { side, token, name: path.basename(target), recoverable: true };
 }
 
@@ -224,5 +370,6 @@ export async function restoreAlignedImage(side, token, encodedName) {
   }
   await mkdir(path.dirname(destination), { recursive: true });
   await rename(source, destination);
+  invalidateAnalysis(side);
   return { side, token, name, restored: true };
 }

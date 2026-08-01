@@ -6,6 +6,8 @@ const origin = process.env.DFL_WEBUI_ORIGIN ?? "http://127.0.0.1:4173";
 const browserChannel = process.env.DFL_E2E_BROWSER_CHANNEL;
 const mutating = process.env.DFL_E2E_MUTATING === "1";
 const modelName = process.env.DFL_E2E_MODEL_NAME ?? "web-smoke-128";
+const appUrl = new URL(origin);
+appUrl.searchParams.set("lang", "zh");
 
 async function launch() {
   if (browserChannel) {
@@ -34,7 +36,7 @@ async function launch() {
 async function openApp(browser) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
-  await page.goto(origin, { waitUntil: "domcontentloaded" });
+  await page.goto(appUrl.href, { waitUntil: "domcontentloaded" });
   await page.getByText("本地服务在线", { exact: true }).waitFor({ timeout: 15000 });
   return { context, page };
 }

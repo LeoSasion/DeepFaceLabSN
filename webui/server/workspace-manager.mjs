@@ -16,6 +16,13 @@ import { PATHS, pathExists } from "./paths.mjs";
 
 const execFileAsync = promisify(execFile);
 const VIDEO_EXTENSIONS = new Set([".avi", ".mkv", ".mov", ".mp4", ".m4v", ".webm"]);
+const REVIEW_IMAGE_NAME = /^[^<>:"/\\|?*\u0000-\u001f]{1,220}\.(?:jpe?g|png)$/i;
+const REVIEW_SLOTS = Object.freeze({
+  "src-frame": path.join(PATHS.workspaceRoot, "data_src"),
+  "dst-frame": path.join(PATHS.workspaceRoot, "data_dst"),
+  merged: path.join(PATHS.workspaceRoot, "data_dst", "merged"),
+  mask: path.join(PATHS.workspaceRoot, "data_dst", "merged_mask"),
+});
 const MAX_VIDEO_BYTES = 100 * 1024 * 1024 * 1024;
 const ARTIFACTS = Object.freeze({
   "result.mp4": path.join(PATHS.workspaceRoot, "result.mp4"),
@@ -121,10 +128,18 @@ async function discoverModels() {
     const name = match[1];
     const type = match[2].toUpperCase();
     const key = `${type}:${name}`;
-    const current = grouped.get(key) ?? { name, type, fileCount: 0, bytes: 0, modifiedAt: null };
+    const current = grouped.get(key) ?? {
+      name,
+      type,
+      fileCount: 0,
+      bytes: 0,
+      modifiedAt: null,
+      files: [],
+    };
     const fileStat = await stat(path.join(modelDirectory, entry.name));
     current.fileCount += 1;
     current.bytes += fileStat.size;
+    current.files.push(entry.name);
     current.modifiedAt = !current.modifiedAt || fileStat.mtime.toISOString() > current.modifiedAt
       ? fileStat.mtime.toISOString()
       : current.modifiedAt;
@@ -143,6 +158,121 @@ async function discoverModels() {
     });
   }
   return { models, modelStats, saehdStats, xsegStats };
+}
+
+export async function inspectExportReadiness() {
+  const modelInfo = await discoverModels();
+  const modelDirectory = path.join(PATHS.workspaceRoot, "model");
+  const entries = (await pathExists(modelDirectory))
+    ? await readdir(modelDirectory, { withFileTypes: true })
+    : [];
+  const dfmOutputs = await Promise.all(entries
+    .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".dfm"))
+    .map(async (entry) => {
+      const fileStat = await stat(path.join(modelDirectory, entry.name));
+      return {
+        name: entry.name,
+        bytes: fileStat.size,
+        modifiedAt: fileStat.mtime.toISOString(),
+      };
+    }));
+  const models = modelInfo.models
+    .filter((model) => model.type !== "XSeg")
+    .map((model) => {
+      const dataFiles = model.files.filter((name) => /_data\.dat$/i.test(name));
+      const weightFiles = model.files.filter((name) => /\.(?:npy|dat)$/i.test(name) && !/_data\.dat$/i.test(name));
+      const commandId = `export.dfm_${model.type.toLowerCase()}`;
+      const supported = ["SAEHD", "ME", "Q384", "Q512"].includes(model.type);
+      const ready = supported && dataFiles.length > 0 && weightFiles.length > 0;
+      return {
+        ...model,
+        files: model.files.slice().sort(),
+        dataFileCount: dataFiles.length,
+        weightFileCount: weightFiles.length,
+        supported,
+        ready,
+        commandId: supported ? commandId : null,
+        blockers: [
+          ...(!supported ? ["model_type_not_exportable"] : []),
+          ...(dataFiles.length ? [] : ["model_data_missing"]),
+          ...(weightFiles.length ? [] : ["model_weights_missing"]),
+        ],
+      };
+    });
+  return {
+    modelCount: models.length,
+    readyCount: models.filter((model) => model.ready).length,
+    outputCount: dfmOutputs.length,
+    models,
+    outputs: dfmOutputs,
+  };
+}
+
+export async function listMergeReview({ offset = 0, limit = 120 } = {}) {
+  const safeOffset = Math.max(Number(offset) || 0, 0);
+  const safeLimit = Math.min(Math.max(Number(limit) || 120, 1), 240);
+  const directories = Object.fromEntries(await Promise.all(
+    ["dst-frame", "merged", "mask"].map(async (slot) => {
+      const directory = REVIEW_SLOTS[slot];
+      const entries = (await pathExists(directory))
+        ? await readdir(directory, { withFileTypes: true })
+        : [];
+      return [slot, entries
+        .filter((entry) => entry.isFile() && REVIEW_IMAGE_NAME.test(entry.name))
+        .map((entry) => entry.name)
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))];
+    }),
+  ));
+  const mergedSet = new Set(directories.merged);
+  const maskSet = new Set(directories.mask);
+  const names = directories["dst-frame"];
+  return {
+    total: names.length,
+    offset: safeOffset,
+    limit: safeLimit,
+    completeCount: names.filter((name) => mergedSet.has(name) && maskSet.has(name)).length,
+    missingMergedCount: names.filter((name) => !mergedSet.has(name)).length,
+    missingMaskCount: names.filter((name) => !maskSet.has(name)).length,
+    items: names.slice(safeOffset, safeOffset + safeLimit).map((name) => ({
+      name,
+      sourceUrl: `/api/workspace/review/dst-frame/${encodeURIComponent(name)}`,
+      mergedUrl: mergedSet.has(name)
+        ? `/api/workspace/review/merged/${encodeURIComponent(name)}`
+        : null,
+      maskUrl: maskSet.has(name)
+        ? `/api/workspace/review/mask/${encodeURIComponent(name)}`
+        : null,
+      complete: mergedSet.has(name) && maskSet.has(name),
+    })),
+  };
+}
+
+export function resolveReviewAsset(slot, encodedName) {
+  const directory = REVIEW_SLOTS[slot];
+  if (!directory) {
+    throw new WorkspaceError("复核资源槽不在允许列表", "REVIEW_SLOT_INVALID", 404);
+  }
+  let name;
+  try {
+    name = decodeURIComponent(encodedName);
+  } catch {
+    throw new WorkspaceError("复核资源文件名无效", "REVIEW_NAME_INVALID");
+  }
+  if (!REVIEW_IMAGE_NAME.test(name) || path.basename(name) !== name) {
+    throw new WorkspaceError("复核资源文件名不在允许范围", "REVIEW_NAME_INVALID");
+  }
+  return path.join(directory, name);
+}
+
+export async function resolveWorkspaceMaterial(side) {
+  if (!["src", "dst"].includes(side)) {
+    throw new WorkspaceError("素材类型不受支持", "SIDE_INVALID");
+  }
+  const material = await findMaterial(side);
+  if (!material) {
+    throw new WorkspaceError("工作区素材尚未导入", "MATERIAL_MISSING", 404);
+  }
+  return material.path;
 }
 
 export async function inspectWorkspace() {
