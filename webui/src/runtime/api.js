@@ -52,6 +52,7 @@ export const runtimeApi = {
   alignedAssets: (side, { offset = 0, limit = 60 } = {}) => request(
     `/api/assets/${side}/aligned?offset=${offset}&limit=${limit}`,
   ),
+  alignedPoseAtlas: (side) => request(`/api/assets/${side}/pose-atlas`),
   alignedAnnotation: (side, name) => request(
     `/api/assets/${side}/aligned/${encodeURIComponent(name)}/annotation`,
   ),

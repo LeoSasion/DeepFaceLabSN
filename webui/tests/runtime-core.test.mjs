@@ -9,7 +9,11 @@ import {
   listCommands,
   validateCommandParameters,
 } from "../server/command-registry.mjs";
-import { listAlignedAssets, resolveAlignedImage } from "../server/asset-manager.mjs";
+import {
+  buildAlignedPoseAtlas,
+  listAlignedAssets,
+  resolveAlignedImage,
+} from "../server/asset-manager.mjs";
 import { buildDflEnvironment } from "../server/environment.mjs";
 import { DisabledExternalWindowAdapter } from "../server/external-window-adapter.mjs";
 import { JobManager } from "../server/job-manager.mjs";
@@ -211,6 +215,22 @@ test("aligned asset browser reads real DFL metadata through the fixed helper", a
   assert.equal(assets.side, "src");
   assert.ok(assets.total >= assets.items.length);
   assert.ok(assets.items.every((item) => item.imageUrl.startsWith("/api/assets/src/aligned/")));
+});
+
+test("pose atlas aggregates real DFL landmarks into bounded review bins", async () => {
+  const atlas = await buildAlignedPoseAtlas("src");
+  assert.equal(atlas.side, "src");
+  assert.equal(atlas.cells.length, atlas.yawTicks.length * atlas.pitchTicks.length);
+  assert.equal(
+    atlas.cells.reduce((total, cell) => total + cell.count, 0),
+    atlas.validCount,
+  );
+  assert.ok(atlas.coverage >= 0 && atlas.coverage <= 1);
+  assert.ok(atlas.meanSharpness >= 0 && atlas.meanSharpness <= 1);
+  assert.ok(atlas.cells.every((cell) => cell.samples.length <= 8));
+  assert.ok(atlas.cells.flatMap((cell) => cell.samples).every(
+    (sample) => sample.imageUrl.startsWith("/api/assets/src/aligned/"),
+  ));
 });
 
 test("workspace inspector exposes only fixed materials, models, and outputs", async () => {

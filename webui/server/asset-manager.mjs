@@ -108,6 +108,42 @@ export async function listAlignedAssets(side, { offset = 0, limit = 60 } = {}) {
   };
 }
 
+export async function buildAlignedPoseAtlas(side) {
+  const directory = alignedDirectory(side);
+  if (!(await pathExists(directory))) {
+    return {
+      side,
+      total: 0,
+      validCount: 0,
+      invalidCount: 0,
+      lowQualityCount: 0,
+      meanSharpness: 0,
+      coverage: 0,
+      occupiedCells: 0,
+      cellCount: 117,
+      lowQualityThreshold: 0.24,
+      yawTicks: [-90, -75, -60, -45, -30, -15, 0, 15, 30, 45, 60, 75, 90],
+      pitchTicks: [60, 45, 30, 15, 0, -15, -30, -45, -60],
+      cells: [],
+    };
+  }
+  const result = await runAssetHelper(["atlas", "--directory", directory]);
+  return {
+    side,
+    ...result,
+    cells: result.cells.map((cell) => ({
+      ...cell,
+      samples: cell.samples.map((sample) => ({
+        ...sample,
+        hasDflMetadata: true,
+        polygonCount: 0,
+        pointCount: 0,
+        imageUrl: `/api/assets/${side}/aligned/${encodeURIComponent(sample.name)}`,
+      })),
+    })),
+  };
+}
+
 export async function inspectAlignedAnnotation(side, encodedName) {
   const target = resolveAlignedImage(side, encodedName);
   if (!(await pathExists(target))) {

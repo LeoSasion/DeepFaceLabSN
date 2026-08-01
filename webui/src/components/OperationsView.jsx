@@ -37,7 +37,7 @@ function profileLabel(profile) {
   return profile === "legacy" ? "DFL legacy" : "DFL current";
 }
 
-function CommandRows({ commands, onOpenCommand }) {
+export function CommandRows({ commands, onOpenCommand }) {
   const { t } = useI18n();
   const groups = useMemo(() => {
     const result = new Map();
@@ -311,6 +311,9 @@ function AnnotationCanvas({ side, item, annotation, onSaved, onError }) {
 export function DatasetView({
   side,
   commands,
+  focusItem,
+  focusNonce,
+  onFocusConsumed,
   onOpenCommand,
   onError,
   onNotice,
@@ -351,6 +354,16 @@ export function DatasetView({
     setAnnotation(null);
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (!focusItem || !focusNonce || !assets || assets.side !== side) return;
+    setAssets((current) => {
+      if (!current || current.items.some((item) => item.name === focusItem.name)) return current;
+      return { ...current, items: [focusItem, ...current.items] };
+    });
+    setSelectedName(focusItem.name);
+    onFocusConsumed?.();
+  }, [assets, focusItem, focusNonce, onFocusConsumed, side]);
 
   useEffect(() => {
     if (

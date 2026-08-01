@@ -5,6 +5,7 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 import {
+  buildAlignedPoseAtlas,
   inspectAlignedAnnotation,
   listAlignedAssets,
   listAlignedQuarantine,
@@ -322,6 +323,13 @@ export class RuntimeServer {
           offset: url.searchParams.get("offset"),
           limit: url.searchParams.get("limit"),
         }),
+      });
+    }
+    const poseAtlasMatch = url.pathname.match(/^\/api\/assets\/(src|dst)\/pose-atlas$/);
+    if (request.method === "GET" && poseAtlasMatch) {
+      return sendJson(response, 200, {
+        ok: true,
+        data: await buildAlignedPoseAtlas(poseAtlasMatch[1]),
       });
     }
     const alignedAnnotationMatch = url.pathname.match(

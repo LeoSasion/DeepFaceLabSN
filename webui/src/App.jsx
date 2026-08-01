@@ -9,6 +9,7 @@ import {
   SettingsView,
 } from "./components/OperationsView.jsx";
 import { WorkbenchGrid } from "./components/TrainingView.jsx";
+import { ToolLabView } from "./components/ToolLabView.jsx";
 import { WorkspaceView } from "./components/WorkspaceView.jsx";
 import { pipelineTasks } from "./data/dashboard.js";
 import { useI18n } from "./i18n.jsx";
@@ -41,6 +42,7 @@ export function App() {
   const [taskType, setTaskType] = useState("train.saehd");
   const [xsegSide, setXsegSide] = useState("dst");
   const [workspaceSnapshot, setWorkspaceSnapshot] = useState(null);
+  const [datasetFocus, setDatasetFocus] = useState(null);
   const [toast, setToast] = useState({ message: "", tone: "success" });
 
   const commands = useMemo(
@@ -223,6 +225,16 @@ export function App() {
     setNewTaskOpen(true);
   }, []);
 
+  const openDatasetSample = useCallback((side, sample) => {
+    setDatasetFocus(sample ? { side, sample, nonce: Date.now() } : null);
+    setActiveNav(side);
+    setConsoleCollapsed(true);
+    showToast(sample
+      ? t("已在 {side} 数据集中定位 {name}", { side: side.toUpperCase(), name: sample.name })
+      : t("已打开 {side} 数据集", { side: side.toUpperCase() }));
+  }, [showToast, t]);
+  const consumeDatasetFocus = useCallback(() => setDatasetFocus(null), []);
+
   const handleArchivedJobs = useCallback((result) => {
     void runtime.refresh();
     showToast(result.archived
@@ -289,6 +301,9 @@ export function App() {
       <DatasetView
         side={activeNav}
         commands={commands}
+        focusItem={datasetFocus?.side === activeNav ? datasetFocus.sample : null}
+        focusNonce={datasetFocus?.side === activeNav ? datasetFocus.nonce : null}
+        onFocusConsumed={consumeDatasetFocus}
         onOpenCommand={openCommand}
         onError={showError}
         onNotice={showToast}
@@ -341,12 +356,12 @@ export function App() {
     );
   } else if (activeNav === "tools") {
     mainContent = (
-      <CommandCenterView
-        title={t("源码工具")}
-        description={t("这里集中列出视频、数据集与遮罩的 Python / FFmpeg 能力；所有入口均为固定白名单命令。")}
+      <ToolLabView
         commands={commands}
-        filter={(command) => ["video", "dataset", "sort", "mask"].includes(command.category)}
         onOpenCommand={openCommand}
+        onError={showError}
+        onNotice={showToast}
+        onNavigateDataset={openDatasetSample}
       />
     );
   } else if (activeNav === "settings") {
