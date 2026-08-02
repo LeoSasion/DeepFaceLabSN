@@ -424,7 +424,7 @@ export function App() {
 
   return (
     <AppShell activeNav={activeNav} onNavigate={handleNavigate}>
-      <main className="main-surface">
+      <main className={`main-surface${activeNav === "tools" ? " is-tools" : ""}`}>
         <ProjectHeader
           workspacePath={workspacePath}
           serviceState={runtime.serviceState}
@@ -432,11 +432,13 @@ export function App() {
           onNewTask={() => setNewTaskOpen(true)}
           onMenu={() => showToast(t("工作区：{path}", { path: workspacePath }))}
         />
-        <WorkflowBar
-          selectedStage={selectedStage}
-          stageStates={workflowStates}
-          onSelectStage={handleStageSelect}
-        />
+        {activeNav !== "tools" && (
+          <WorkflowBar
+            selectedStage={selectedStage}
+            stageStates={workflowStates}
+            onSelectStage={handleStageSelect}
+          />
+        )}
         {mainContent}
         <ConsoleDock
           collapsed={consoleCollapsed}

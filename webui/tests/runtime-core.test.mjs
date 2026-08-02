@@ -258,6 +258,9 @@ test("tool workbench analysis is bounded, non-destructive, and uses fixed review
   assert.ok(audit.analyzedCount <= 500);
   assert.ok(audit.items.every((item) => item.imageUrl.startsWith("/api/assets/src/aligned/")));
   assert.ok(audit.items.every((item) => item.qualityScore >= 0 && item.qualityScore <= 1));
+  assert.ok(audit.items.every((item) => ["full", "xseg"].includes(item.sharpnessScope)));
+  assert.ok(audit.items.every((item) => typeof item.hasAppliedMask === "boolean"));
+  assert.ok(audit.items.every((item) => item.fullSharpness >= 0 && item.fullSharpness <= 1));
   if (audit.total > 1) {
     const firstAudit = await auditAlignedAssets("src", { refresh: true, offset: 0, limit: 1 });
     const nextAudit = await auditAlignedAssets("src", { refresh: true, offset: 1, limit: 1 });
@@ -287,6 +290,37 @@ test("tool workbench analysis is bounded, non-destructive, and uses fixed review
     assert.equal(nextMergeReview.items.length, 1);
     assert.notEqual(nextMergeReview.items[0].name, mergeReview.items[0].name);
   }
+});
+
+test("audit sharpness uses an eroded XSeg region while retaining the full-frame baseline", () => {
+  const helperDirectory = path.join(PATHS.webuiRoot, "python");
+  const source = `
+import json
+import sys
+import cv2
+import numpy as np
+sys.path.insert(0, ${JSON.stringify(helperDirectory)})
+from dfl_asset_tool import bounded_image_metrics
+
+image = np.full((128, 128, 3), 40, dtype=np.uint8)
+checker = ((np.indices((128, 64)).sum(axis=0) % 2) * 255).astype(np.uint8)
+image[:, 64:, :] = checker[:, :, None]
+mask = np.zeros((128, 128, 1), dtype=np.float32)
+mask[:, :64, 0] = 1.0
+print(json.dumps(bounded_image_metrics(image, mask)))
+`;
+  const result = spawnSync(PATHS.python, ["-c", source], {
+    encoding: "utf8",
+    env: buildDflEnvironment("current"),
+    cwd: PATHS.currentDflRoot,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const metrics = JSON.parse(result.stdout);
+  assert.equal(metrics.sharpnessScope, "xseg");
+  assert.equal(metrics.maskValid, true);
+  assert.ok(metrics.maskCoverage > 0.49 && metrics.maskCoverage < 0.51);
+  assert.ok(metrics.maskSamplePixels >= 64);
+  assert.ok(metrics.sharpness < metrics.fullSharpness);
 });
 
 test("PackedFaceset preflight counts configs without executing pickle callables", async (t) => {

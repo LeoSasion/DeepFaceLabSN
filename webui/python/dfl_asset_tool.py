@@ -30,8 +30,9 @@ PITCH_TICKS = tuple(range(60, -61, -15))
 LOW_QUALITY_THRESHOLD = 0.24
 QUALITY_BANDS = (0.2, 0.4, 0.6, 0.8)
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
-AUDIT_SCHEMA_VERSION = 1
+AUDIT_SCHEMA_VERSION = 2
 MAX_AUDIT_ITEMS = 500
+MIN_XSEG_AUDIT_PIXELS = 64
 MAX_PACK_CONFIG_BYTES = 64 * 1024 * 1024
 MAX_PICKLE_OPS = 2_000_000
 PICKLE_MARK = object()
@@ -256,31 +257,79 @@ def safe_pickle_list_length(data):
     return result["length"]
 
 
-def bounded_image_metrics(image):
-    """Calculate review metrics on a bounded preview without changing DFL pixels."""
+def bounded_image_metrics(image, xseg_mask=None):
+    """Calculate bounded review metrics, preferring a valid XSeg face region for blur."""
     height, width = image.shape[:2]
     longest = max(height, width)
+    preview_width = width
+    preview_height = height
     if longest > 320:
         scale = 320.0 / longest
+        preview_width = max(1, round(width * scale))
+        preview_height = max(1, round(height * scale))
         image = cv2.resize(
             image,
-            (max(1, round(width * scale)), max(1, round(height * scale))),
+            (preview_width, preview_height),
             interpolation=cv2.INTER_AREA,
         )
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    laplacian_variance = float(cv2.Laplacian(gray, cv2.CV_64F).var())
-    sharpness = min(max(laplacian_variance / (laplacian_variance + 500.0), 0.0), 1.0)
+    laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+    full_laplacian_variance = float(laplacian.var())
+    full_sharpness = min(
+        max(full_laplacian_variance / (full_laplacian_variance + 500.0), 0.0),
+        1.0,
+    )
+
+    sharpness = full_sharpness
+    sharpness_scope = "full"
+    mask_coverage = 0.0
+    mask_sample_pixels = 0
+    mask_valid = False
+    if xseg_mask is not None:
+        mask = xseg_mask
+        if len(mask.shape) == 3:
+            mask = mask[..., 0]
+        if mask.shape[:2] != (preview_height, preview_width):
+            mask = cv2.resize(
+                mask,
+                (preview_width, preview_height),
+                interpolation=cv2.INTER_NEAREST,
+            )
+        binary_mask = (mask >= 0.5).astype("uint8")
+        mask_coverage = float(binary_mask.mean())
+        if binary_mask.any():
+            # Ignore the rasterized mask boundary: it is a segmentation edge, not face detail.
+            eroded_mask = cv2.erode(binary_mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)))
+            if int(eroded_mask.sum()) >= MIN_XSEG_AUDIT_PIXELS:
+                binary_mask = eroded_mask
+        mask_sample_pixels = int(binary_mask.sum())
+        if mask_sample_pixels >= MIN_XSEG_AUDIT_PIXELS:
+            masked_laplacian_variance = float(laplacian[binary_mask.astype(bool)].var())
+            sharpness = min(
+                max(masked_laplacian_variance / (masked_laplacian_variance + 500.0), 0.0),
+                1.0,
+            )
+            sharpness_scope = "xseg"
+            mask_valid = True
+
     brightness = float(gray.mean() / 255.0)
     dark_ratio = float((gray <= 8).mean())
     bright_ratio = float((gray >= 247).mean())
     exposure_score = max(0.0, 1.0 - abs(brightness - 0.5) / 0.5)
     quality_score = 0.72 * sharpness + 0.28 * exposure_score
+    full_quality_score = 0.72 * full_sharpness + 0.28 * exposure_score
     return {
         "sharpness": sharpness,
+        "fullSharpness": full_sharpness,
+        "sharpnessScope": sharpness_scope,
+        "maskCoverage": mask_coverage,
+        "maskSamplePixels": mask_sample_pixels,
+        "maskValid": mask_valid,
         "brightness": brightness,
         "darkRatio": dark_ratio,
         "brightRatio": bright_ratio,
         "qualityScore": quality_score,
+        "fullQualityScore": full_quality_score,
     }
 
 
@@ -315,6 +364,10 @@ def audit_sample(image_path):
     try:
         dfl_image = load_dfl_image(image_path)
         polygons = serialize_polygons(dfl_image)
+        has_applied_mask = bool(dfl_image.has_xseg_mask())
+        if has_applied_mask:
+            metrics = bounded_image_metrics(image, dfl_image.get_xseg_mask())
+            item.update(metrics)
         pitch, yaw, roll = LandmarksProcessor.estimate_pitch_yaw_roll(
             dfl_image.get_landmarks(),
             size=dfl_image.get_shape()[1],
@@ -326,12 +379,14 @@ def audit_sample(image_path):
             "pitch": float(math.degrees(pitch)),
             "yaw": float(math.degrees(-yaw)),
             "roll": float(math.degrees(roll)),
-            "hasAppliedMask": bool(dfl_image.has_xseg_mask()),
+            "hasAppliedMask": has_applied_mask,
             "polygonCount": len(polygons),
         })
     except Exception:
         item["issues"].append("missing_dfl_metadata")
 
+    if item["hasAppliedMask"] and not item["maskValid"]:
+        item["issues"].append("mask_invalid")
     if item["sharpness"] < LOW_QUALITY_THRESHOLD:
         item["issues"].append("low_sharpness")
     if item["brightness"] < 0.16:
@@ -367,6 +422,22 @@ def audit_directory(directory, offset=0, limit=120):
                 item["issues"].append("mask_missing")
     issue_counts = Counter(issue for item in items for issue in item["issues"])
     metric_items = [item for item in items if "qualityScore" in item]
+    usable_count = sum(
+        1
+        for item in metric_items
+        if item.get("hasDflMetadata") and item["qualityScore"] >= LOW_QUALITY_THRESHOLD
+    )
+    issue_item_count = sum(1 for item in items if item["issues"])
+    severe_issue_count = sum(
+        1
+        for item in items
+        if "unreadable_image" in item["issues"]
+        or "missing_dfl_metadata" in item["issues"]
+        or item.get("qualityScore", 1.0) < 0.12
+    )
+    xseg_sharpness_count = sum(
+        1 for item in metric_items if item.get("sharpnessScope") == "xseg"
+    )
     source_covered = len({item["sourceFilename"] for item in valid_items if item["sourceFilename"]})
     sorted_items = sorted(
         items,
@@ -382,6 +453,10 @@ def audit_directory(directory, offset=0, limit=120):
         "validMetadataCount": len(valid_items),
         "invalidMetadataCount": len(items) - len(valid_items),
         "maskedCount": masked_count,
+        "xsegSharpnessCount": xseg_sharpness_count,
+        "usableCount": usable_count,
+        "issueItemCount": issue_item_count,
+        "severeIssueCount": severe_issue_count,
         "uniqueSourceCount": source_covered,
         "duplicateSourceGroupCount": len(duplicate_sources),
         "meanQualityScore": (
@@ -390,6 +465,10 @@ def audit_directory(directory, offset=0, limit=120):
         ),
         "meanSharpness": (
             sum(item["sharpness"] for item in metric_items) / len(metric_items)
+            if metric_items else 0.0
+        ),
+        "meanFullSharpness": (
+            sum(item["fullSharpness"] for item in metric_items) / len(metric_items)
             if metric_items else 0.0
         ),
         "issueCounts": dict(sorted(issue_counts.items())),

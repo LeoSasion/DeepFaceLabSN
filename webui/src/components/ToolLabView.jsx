@@ -451,29 +451,6 @@ export function ToolLabView({ commands, onOpenCommand, onError, onNotice, onNavi
 
   return (
     <section className="tool-lab-view">
-      <header className="operation-header tool-lab-header">
-        <div>
-          <h2>{t("全工具工作台")}</h2>
-          <p>{t("用真实工作区证据完成审计、提取复核、合成验收与导出预检；高成本交互保留固定命令接力。")}</p>
-        </div>
-        {!["commands", "migration"].includes(activeTab) && (
-          <div className="tool-lab-actions">
-            {SIDE_AWARE_TABS.has(activeTab) && (
-              <div className="side-switch" role="group" aria-label={t("数据集") }>
-                {["src", "dst"].map((value) => (
-                  <button className={side === value ? "is-active" : ""} key={value} type="button" onClick={() => setSide(value)}>
-                    {value.toUpperCase()}
-                  </button>
-                ))}
-              </div>
-            )}
-            <button className="button primary" type="button" onClick={() => setRefreshVersion((value) => value + 1)}>
-              <IconRefresh size={15} />{t("刷新分析")}
-            </button>
-          </div>
-        )}
-      </header>
-
       <nav className="tool-lab-tabs" aria-label={t("工具实验室视图") }>
         <button className={activeTab === "audit" ? "is-active" : ""} type="button" onClick={() => setActiveTab("audit")}>
           <IconFileAnalytics size={16} />{t("数据审计")}
@@ -502,6 +479,22 @@ export function ToolLabView({ commands, onOpenCommand, onError, onNotice, onNavi
         <button className={activeTab === "commands" ? "is-active" : ""} type="button" onClick={() => setActiveTab("commands")}>
           <IconCode size={16} />{t("命令目录")}
         </button>
+        {!["commands", "migration"].includes(activeTab) && (
+          <div className="tool-lab-actions">
+            {SIDE_AWARE_TABS.has(activeTab) && (
+              <div className="side-switch" role="group" aria-label={t("数据集") }>
+                {["src", "dst"].map((value) => (
+                  <button className={side === value ? "is-active" : ""} key={value} type="button" onClick={() => setSide(value)}>
+                    {value.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            )}
+            <button className="button primary" type="button" onClick={() => setRefreshVersion((value) => value + 1)}>
+              <IconRefresh size={15} />{t("刷新分析")}
+            </button>
+          </div>
+        )}
       </nav>
 
       <div className="tool-lab-content">

@@ -7,9 +7,13 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconCode,
+  IconFilter,
+  IconMask,
   IconPhoto,
   IconPlayerPlay,
   IconRefresh,
+  IconSearch,
+  IconShieldCheck,
 } from "@tabler/icons-react";
 import { useI18n } from "../i18n.jsx";
 import { runtimeApi } from "../runtime/api.js";
@@ -21,6 +25,7 @@ const ISSUE_LABELS = {
   underexposed: "曝光不足",
   overexposed: "曝光过高",
   clipped_tones: "高光或暗部截断",
+  mask_invalid: "应用遮罩无有效区域",
   mask_missing: "尚无应用遮罩",
   duplicate_source: "同源人脸重复",
 };
@@ -67,6 +72,16 @@ function CompactSummary({ children }) {
   return <div className="tool-compact-summary">{children}</div>;
 }
 
+function AuditMetric({ label, value, display, detail, tone = "default" }) {
+  return (
+    <div className={`audit-metric is-${tone}`}>
+      <div><span>{label}</span><strong>{display}</strong></div>
+      <i aria-hidden="true"><b style={{ width: percent(value) }} /></i>
+      {detail && <small>{detail}</small>}
+    </div>
+  );
+}
+
 export function DatasetAuditPanel({
   side,
   refreshVersion,
@@ -80,7 +95,9 @@ export function DatasetAuditPanel({
   const [error, setError] = useState(null);
   const [retry, setRetry] = useState(0);
   const [issue, setIssue] = useState("all");
+  const [maskFilter, setMaskFilter] = useState("all");
   const [sort, setSort] = useState("quality");
+  const [query, setQuery] = useState("");
   const [selectedName, setSelectedName] = useState(null);
   const [offset, setOffset] = useState(0);
 
@@ -112,16 +129,26 @@ export function DatasetAuditPanel({
 
   const visibleItems = useMemo(() => {
     if (!audit) return [];
-    const filtered = issue === "all"
-      ? audit.items
-      : audit.items.filter((item) => item.issues.includes(issue));
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    const filtered = audit.items.filter((item) => {
+      if (issue !== "all" && !item.issues.includes(issue)) return false;
+      if (maskFilter === "xseg" && !item.hasAppliedMask) return false;
+      if (maskFilter === "none" && item.hasAppliedMask) return false;
+      if (normalizedQuery && !`${item.name} ${item.sourceFilename ?? ""}`.toLocaleLowerCase().includes(normalizedQuery)) return false;
+      return true;
+    });
     return filtered.slice().sort((left, right) => {
       if (sort === "name") return left.name.localeCompare(right.name, undefined, { numeric: true });
       if (sort === "brightness") return (left.brightness ?? -1) - (right.brightness ?? -1);
+      if (sort === "sharpness") return (left.sharpness ?? -1) - (right.sharpness ?? -1);
       return (left.qualityScore ?? -1) - (right.qualityScore ?? -1);
     });
-  }, [audit, issue, sort]);
+  }, [audit, issue, maskFilter, query, sort]);
   const selected = visibleItems.find((item) => item.name === selectedName) ?? visibleItems[0] ?? null;
+  const selectedIndex = selected ? visibleItems.findIndex((item) => item.name === selected.name) : -1;
+  const exposureScore = selected
+    ? Math.max(0, 1 - Math.abs((selected.brightness ?? 0) - 0.5) / 0.5)
+    : 0;
 
   const quarantineSelected = async () => {
     if (!selected) return;
@@ -151,94 +178,126 @@ export function DatasetAuditPanel({
   }
 
   return (
-    <div className="dataset-audit-layout">
-      <section className="dataset-audit-main">
-        <CompactSummary>
-          <div><span>{t("本页分析")}</span><strong>{audit.analyzedCount}</strong></div>
-          <div><span>{t("元数据有效")}</span><strong>{percent(audit.validMetadataCount / Math.max(audit.analyzedCount, 1))}</strong></div>
-          <div><span>{t("已有遮罩")}</span><strong>{percent(audit.maskedCount / Math.max(audit.validMetadataCount, 1))}</strong></div>
-          <div className={audit.meanQualityScore < 0.45 ? "is-warning" : ""}>
-            <span>{t("平均质量")}</span><strong>{audit.meanQualityScore.toFixed(3)}</strong>
-          </div>
-          <small>{audit.cached ? t("本地缓存") : t("刚刚分析")}</small>
-        </CompactSummary>
-
-        <div className="tool-filter-row">
-          <label>{t("问题")}
-            <select value={issue} onChange={(event) => setIssue(event.target.value)}>
-              <option value="all">{t("全部样本")}</option>
-              {Object.entries(ISSUE_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>{t(label)} · {audit.issueCounts[value] ?? 0}</option>
-              ))}
-            </select>
-          </label>
-          <label>{t("排序")}
-            <select value={sort} onChange={(event) => setSort(event.target.value)}>
-              <option value="quality">{t("质量从低到高")}</option>
-              <option value="brightness">{t("亮度从低到高")}</option>
-              <option value="name">{t("文件名")}</option>
-            </select>
-          </label>
-          <span>{t("本页显示 {count} / {pageTotal} · 全部 {total}", {
-            count: visibleItems.length,
-            pageTotal: audit.analyzedCount,
-            total: audit.total,
-          })}</span>
-          <div className="frame-stepper">
-            <button type="button" aria-label={t("上一批")} disabled={offset <= 0} onClick={() => setOffset((value) => Math.max(0, value - AUDIT_PAGE_SIZE))}><IconChevronLeft size={17} /></button>
-            <span>{audit.total ? `${audit.offset + 1}–${audit.offset + audit.analyzedCount} / ${audit.total}` : "0 / 0"}</span>
-            <button type="button" aria-label={t("下一批")} disabled={audit.offset + audit.analyzedCount >= audit.total} onClick={() => setOffset((value) => value + AUDIT_PAGE_SIZE)}><IconChevronRight size={17} /></button>
-          </div>
+    <div className="audit-workbench">
+      <header className="audit-ready-header">
+        <div className="audit-ready-state">
+          <span><IconShieldCheck size={21} /></span>
+          <div><strong>{t("数据审计就绪")}</strong><small>{t("已完成本批次质量分析，可开始筛选与复核。")}</small></div>
         </div>
+        <dl>
+          <div><dt>{t("数据集")}</dt><dd>{side.toUpperCase()} ALIGNED</dd></div>
+          <div><dt>{t("分析范围")}</dt><dd>{audit.offset + 1}–{audit.offset + audit.analyzedCount}</dd></div>
+          <div><dt>{t("清晰度规则")}</dt><dd>{t("XSeg 优先")}</dd></div>
+          <div><dt>{t("规则版本")}</dt><dd>v{audit.schemaVersion ?? 1}</dd></div>
+        </dl>
+      </header>
 
-        {visibleItems.length ? (
-          <div className="audit-face-grid">
-            {visibleItems.map((item) => (
-              <button
-                className={selected?.name === item.name ? "is-selected" : ""}
-                key={item.name}
-                type="button"
-                onClick={() => setSelectedName(item.name)}
-                aria-pressed={selected?.name === item.name}
-              >
-                <img src={item.imageUrl} alt="" loading="lazy" />
-                <span><strong>{item.name}</strong><small>{(item.qualityScore ?? 0).toFixed(2)}</small></span>
-                <i><b style={{ width: percent(item.qualityScore) }} /></i>
-                {item.issues.length > 0 && <em>{t(ISSUE_LABELS[item.issues[0]] ?? item.issues[0])}</em>}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="tool-inline-empty"><IconCheck size={18} />{t("当前筛选下没有问题样本")}</div>
-        )}
+      <section className="audit-kpi-strip" aria-label={t("审计摘要") }>
+        <div><span>{t("样本总量")}</span><strong>{audit.total.toLocaleString()}</strong><small>{t("本批分析 {count}", { count: audit.analyzedCount })}</small></div>
+        <div><span>{t("当前可用")}</span><strong>{audit.usableCount ?? 0}</strong><small>{percent((audit.usableCount ?? 0) / Math.max(audit.analyzedCount, 1))}</small></div>
+        <div className={(audit.issueItemCount ?? 0) ? "is-warning" : ""}><span>{t("发现问题")}</span><strong>{audit.issueItemCount ?? 0}</strong><small>{t("本批问题样本")}</small></div>
+        <div className={(audit.severeIssueCount ?? 0) ? "is-danger" : ""}><span>{t("高风险")}</span><strong>{audit.severeIssueCount ?? 0}</strong><small>{t("需优先处理")}</small></div>
       </section>
 
-      <aside className="tool-inspector">
-        {selected ? (
-          <>
-            <header><div><span>{t("样本检查")}</span><strong>{selected.name}</strong></div><small>{formatBytes(selected.bytes)}</small></header>
-            <img className="tool-inspector-image" src={selected.imageUrl} alt="" />
-            <dl className="tool-inspector-data">
-              <div><dt>{t("综合质量")}</dt><dd>{(selected.qualityScore ?? 0).toFixed(3)}</dd></div>
-              <div><dt>{t("清晰度")}</dt><dd>{(selected.sharpness ?? 0).toFixed(3)}</dd></div>
-              <div><dt>{t("亮度")}</dt><dd>{(selected.brightness ?? 0).toFixed(3)}</dd></div>
-              <div><dt>{t("姿态")}</dt><dd>{selected.yaw == null ? "—" : `${selected.yaw.toFixed(1)}° / ${selected.pitch.toFixed(1)}°`}</dd></div>
-              <div><dt>{t("源帧")}</dt><dd title={selected.sourceFilename ?? ""}>{selected.sourceFilename ?? "—"}</dd></div>
-              <div><dt>{t("遮罩")}</dt><dd>{selected.hasAppliedMask ? t("已应用") : t("未应用")}</dd></div>
-            </dl>
-            <div className="tool-issue-list">
-              {selected.issues.length
-                ? selected.issues.map((value) => <span key={value}>{t(ISSUE_LABELS[value] ?? value)}</span>)
-                : <span className="is-ok"><IconCheck size={13} />{t("未发现规则问题")}</span>}
+      <div className="dataset-audit-layout">
+        <section className="dataset-audit-main">
+          <div className="audit-filter-bar">
+            <label className="audit-search"><IconSearch size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("搜索文件名或源帧…")} aria-label={t("搜索审计样本")} /></label>
+            <label><IconFilter size={14} /><span>{t("问题")}</span>
+              <select value={issue} onChange={(event) => setIssue(event.target.value)}>
+                <option value="all">{t("全部样本")}</option>
+                {Object.entries(ISSUE_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>{t(label)} · {audit.issueCounts[value] ?? 0}</option>
+                ))}
+              </select>
+            </label>
+            <label><IconMask size={14} /><span>{t("遮罩")}</span>
+              <select value={maskFilter} onChange={(event) => setMaskFilter(event.target.value)}>
+                <option value="all">{t("全部遮罩状态")}</option>
+                <option value="xseg">{t("已有 XSeg")}</option>
+                <option value="none">{t("无 XSeg")}</option>
+              </select>
+            </label>
+            <label><span>{t("排序")}</span>
+              <select value={sort} onChange={(event) => setSort(event.target.value)}>
+                <option value="quality">{t("质量从低到高")}</option>
+                <option value="sharpness">{t("清晰度从低到高")}</option>
+                <option value="brightness">{t("亮度从低到高")}</option>
+                <option value="name">{t("文件名")}</option>
+              </select>
+            </label>
+            <div className="frame-stepper audit-pager">
+              <button type="button" aria-label={t("上一批")} disabled={offset <= 0} onClick={() => setOffset((value) => Math.max(0, value - AUDIT_PAGE_SIZE))}><IconChevronLeft size={17} /></button>
+              <span>{audit.total ? `${audit.offset + 1}–${audit.offset + audit.analyzedCount} / ${audit.total}` : "0 / 0"}</span>
+              <button type="button" aria-label={t("下一批")} disabled={audit.offset + audit.analyzedCount >= audit.total} onClick={() => setOffset((value) => value + AUDIT_PAGE_SIZE)}><IconChevronRight size={17} /></button>
             </div>
-            <div className="tool-inspector-actions">
-              <button type="button" onClick={() => onNavigateDataset(side, selected)}><IconPhoto size={15} />{t("在数据集中查看")}<IconArrowRight size={14} /></button>
-              <button className="is-warning" type="button" onClick={() => void quarantineSelected()}><IconArchive size={15} />{t("移入可恢复隔离区")}</button>
-              <button type="button" onClick={() => onOpenCommand(`${side}.sort_faces`)}><IconCode size={15} />{t("打开原始排序命令")}</button>
+          </div>
+
+          <div className="audit-grid-heading"><span>{t("对齐人脸样本")}</span><small>{t("显示 {count} / {pageTotal}", { count: visibleItems.length, pageTotal: audit.analyzedCount })}</small></div>
+          {visibleItems.length ? (
+            <div className="audit-face-grid">
+              {visibleItems.map((item) => (
+                <button
+                  className={selected?.name === item.name ? "is-selected" : ""}
+                  key={item.name}
+                  type="button"
+                  onClick={() => setSelectedName(item.name)}
+                  aria-pressed={selected?.name === item.name}
+                >
+                  <span className="audit-card-check"><IconCheck size={11} /></span>
+                  <span className={`audit-card-mask ${item.hasAppliedMask ? "is-xseg" : "is-empty"}`}><IconMask size={10} />{item.hasAppliedMask ? "XSEG" : t("无遮罩")}</span>
+                  <img src={item.imageUrl} alt="" loading="lazy" />
+                  <span className="audit-card-title"><strong>{item.name}</strong><small>{(item.qualityScore ?? 0).toFixed(2)}</small></span>
+                  <i className="audit-card-score"><b style={{ width: percent(item.qualityScore) }} /></i>
+                  <span className="audit-card-meta"><small>{item.sourceFilename ?? t("无源帧信息")}</small>{item.issues[0] && <em>{t(ISSUE_LABELS[item.issues[0]] ?? item.issues[0])}</em>}</span>
+                </button>
+              ))}
             </div>
-          </>
-        ) : <div className="tool-inline-empty">{t("选择一个样本查看详情")}</div>}
-      </aside>
+          ) : (
+            <div className="tool-inline-empty"><IconCheck size={18} />{t("当前筛选下没有问题样本")}</div>
+          )}
+        </section>
+
+        <aside className="tool-inspector audit-inspector">
+          {selected ? (
+            <>
+              <header><div><span>{t("质量检查器")}</span><strong>{selected.name}</strong></div><small>{selectedIndex + 1} / {visibleItems.length}</small></header>
+              <div className="audit-inspector-preview">
+                <img className="tool-inspector-image" src={selected.imageUrl} alt="" />
+                <span className={selected.hasAppliedMask ? "is-xseg" : ""}>{selected.hasAppliedMask ? t("含 XSeg 遮罩") : t("无 XSeg 遮罩")}</span>
+              </div>
+              <div className="audit-inspector-tabs"><strong>{t("质量报告")}</strong><span>{formatBytes(selected.bytes)}</span></div>
+              <div className="audit-metric-list">
+                <AuditMetric label={t("综合质量")} value={selected.qualityScore} display={(selected.qualityScore ?? 0).toFixed(3)} tone={(selected.qualityScore ?? 0) < 0.24 ? "warning" : "default"} />
+                <AuditMetric label={t("清晰度")} value={selected.sharpness} display={(selected.sharpness ?? 0).toFixed(3)} detail={selected.sharpnessScope === "xseg" ? t("仅统计 XSeg 遮罩内") : t("按全图统计")} tone={(selected.sharpness ?? 0) < 0.24 ? "warning" : "default"} />
+                {selected.sharpnessScope === "xseg" && <AuditMetric label={t("全图清晰度基线")} value={selected.fullSharpness} display={(selected.fullSharpness ?? 0).toFixed(3)} detail={t("用于对照，不参与模糊判定")} />}
+                <AuditMetric label={t("曝光稳定度")} value={exposureScore} display={exposureScore.toFixed(3)} />
+                <AuditMetric label={t("遮罩覆盖") } value={selected.maskCoverage} display={selected.hasAppliedMask ? percent(selected.maskCoverage) : "—"} detail={selected.hasAppliedMask ? t("内缩后有效像素 {count}", { count: selected.maskSamplePixels ?? 0 }) : t("本样本使用全图清晰度")} tone={selected.hasAppliedMask && !selected.maskValid ? "warning" : "xseg"} />
+              </div>
+              <dl className="tool-inspector-data">
+                <div><dt>{t("姿态")}</dt><dd>{selected.yaw == null ? "—" : `${selected.yaw.toFixed(1)}° / ${selected.pitch.toFixed(1)}°`}</dd></div>
+                <div><dt>{t("源帧")}</dt><dd title={selected.sourceFilename ?? ""}>{selected.sourceFilename ?? "—"}</dd></div>
+                <div><dt>{t("遮罩判定")}</dt><dd>{selected.sharpnessScope === "xseg" ? t("XSeg 区域") : t("全图回退")}</dd></div>
+              </dl>
+              <div className="tool-issue-list">
+                {selected.issues.length
+                  ? selected.issues.map((value) => <span key={value}>{t(ISSUE_LABELS[value] ?? value)}</span>)
+                  : <span className="is-ok"><IconCheck size={13} />{t("未发现规则问题")}</span>}
+              </div>
+            </>
+          ) : <div className="tool-inline-empty">{t("选择一个样本查看详情")}</div>}
+        </aside>
+      </div>
+
+      <footer className="audit-action-dock">
+        <div><span><IconShieldCheck size={17} /></span><p><strong>{selected ? t("已选中 1 个样本") : t("尚未选择样本")}</strong><small>{selected ? `${selected.name} · ${selected.hasAppliedMask ? t("XSeg 区域判定") : t("全图判定")}` : t("从上方网格选择样本开始复核")}</small></p></div>
+        <dl><div><dt>{t("本批问题")}</dt><dd>{audit.issueItemCount ?? 0}</dd></div><div><dt>{t("XSeg 判定")}</dt><dd>{audit.xsegSharpnessCount ?? 0}</dd></div><div><dt>{t("平均质量")}</dt><dd>{audit.meanQualityScore.toFixed(3)}</dd></div></dl>
+        <div className="audit-dock-actions">
+          <button type="button" disabled={!selected} onClick={() => selected && onNavigateDataset(side, selected)}><IconPhoto size={15} />{t("在数据集中查看")}</button>
+          <button className="is-warning" type="button" disabled={!selected} onClick={() => void quarantineSelected()}><IconArchive size={15} />{t("移入隔离区")}</button>
+          <button className="is-primary" type="button" onClick={() => onOpenCommand(`${side}.sort_faces`)}><IconCode size={15} />{t("打开排序命令")}<IconArrowRight size={14} /></button>
+        </div>
+      </footer>
     </div>
   );
 }
