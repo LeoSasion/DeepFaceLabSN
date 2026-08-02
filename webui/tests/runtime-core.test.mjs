@@ -34,6 +34,7 @@ import {
   resolveWorkspaceArtifact,
 } from "../server/workspace-manager.mjs";
 import { applyEventToJob, mergeJobs } from "../src/runtime/useRuntime.js";
+import { buildPoseComparison } from "../src/domain/pose-comparison.js";
 
 test("command registry exposes the approved fixed workflows", () => {
   const commands = listCommands();
@@ -290,6 +291,30 @@ test("tool workbench analysis is bounded, non-destructive, and uses fixed review
     assert.equal(nextMergeReview.items.length, 1);
     assert.notEqual(nextMergeReview.items[0].name, mergeReview.items[0].name);
   }
+});
+
+test("pose comparison normalizes unequal datasets and identifies actionable SRC gaps", () => {
+  const atlas = (side, counts) => ({
+    side,
+    validCount: Object.values(counts).reduce((total, count) => total + count, 0),
+    cells: [
+      { id: "front", yaw: 0, pitch: 0, count: counts.front ?? 0 },
+      { id: "left", yaw: -30, pitch: 0, count: counts.left ?? 0 },
+      { id: "right", yaw: 30, pitch: 0, count: counts.right ?? 0 },
+    ],
+  });
+  const comparison = buildPoseComparison(
+    atlas("src", { front: 80, left: 20 }),
+    atlas("dst", { front: 50, right: 50 }),
+  );
+
+  assert.equal(comparison.matchScore, 0.5);
+  assert.equal(comparison.destinationCoverage, 0.5);
+  assert.equal(comparison.gapCount, 1);
+  assert.equal(comparison.deficitCount, 1);
+  assert.equal(comparison.cells.find((cell) => cell.id === "right").status, "missing-src");
+  assert.equal(comparison.cells.find((cell) => cell.id === "left").status, "src-only");
+  assert.equal(comparison.cells.find((cell) => cell.id === "front").status, "src-surplus");
 });
 
 test("audit sharpness uses an eroded XSeg region while retaining the full-frame baseline", () => {

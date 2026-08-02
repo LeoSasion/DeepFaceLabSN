@@ -98,6 +98,29 @@ test("DeepFaceLabSN browser E2E", { timeout: 240000 }, async (suite) => {
     }
   });
 
+  await suite.test("SRC / DST 姿态对比保留单库审查", async () => {
+    const { context, page } = await openApp(browser);
+    try {
+      await page.getByRole("button", { name: "工具", exact: true }).click();
+      await page.getByRole("button", { name: "姿态图谱", exact: true }).click();
+      const compare = page.getByRole("button", { name: "对比", exact: true });
+      await compare.waitFor({ state: "visible", timeout: 120000 });
+      assert.equal(await compare.getAttribute("aria-pressed"), "true");
+      await page.getByText("SRC / DST 姿态占比差", { exact: true }).waitFor();
+      await page.getByText("姿态匹配", { exact: true }).waitFor();
+
+      await page.getByRole("button", { name: "SRC", exact: true }).click();
+      await page.getByText("SRC · 左右角 Yaw", { exact: true }).waitFor();
+      await page.getByRole("button", { name: "清晰度", exact: true }).click();
+      assert.equal(
+        await page.getByRole("button", { name: "清晰度", exact: true }).getAttribute("aria-pressed"),
+        "true",
+      );
+    } finally {
+      await context.close();
+    }
+  });
+
   await suite.test("真实 CLI 输入与 SAEHD 保存式停止", { skip: !mutating }, async () => {
     const { context, page } = await openApp(browser);
     try {
