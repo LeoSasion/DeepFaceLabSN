@@ -49,12 +49,34 @@ export const runtimeApi = {
   telemetry: () => request("/api/telemetry"),
   commands: () => request("/api/commands"),
   workspace: () => request("/api/workspace"),
+  projects: () => request("/api/projects"),
+  createProject: (payload) => request("/api/projects", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }),
+  activateProject: (id) => request(`/api/projects/${encodeURIComponent(id)}/activate`, {
+    method: "POST",
+  }),
   alignedAssets: (side, { offset = 0, limit = 60 } = {}) => request(
     `/api/assets/${side}/aligned?offset=${offset}&limit=${limit}`,
   ),
   alignedPoseAtlas: (side) => request(`/api/assets/${side}/pose-atlas`),
+  trainingEvaluationManifests: (modelKey) => request(
+    `/api/training-evaluations/${encodeURIComponent(modelKey)}/manifests`,
+  ),
+  trainingEvaluationSnapshots: (modelKey) => request(
+    `/api/training-evaluations/${encodeURIComponent(modelKey)}/snapshots`,
+  ),
+  trainingEvaluationSnapshot: (modelKey, snapshotId) => request(
+    `/api/training-evaluations/${encodeURIComponent(modelKey)}`
+      + `/snapshots/${encodeURIComponent(snapshotId)}`,
+  ),
   alignedAudit: (side, { refresh = false, offset = 0, limit = 120 } = {}) => request(
     `/api/tools/assets/${side}/audit?offset=${offset}&limit=${limit}${refresh ? "&refresh=1" : ""}`,
+  ),
+  alignedSimilarity: (side, { refresh = false, threshold = 0.86, limit = 500 } = {}) => request(
+    `/api/tools/assets/${side}/similarity?threshold=${encodeURIComponent(threshold)}`
+      + `&limit=${encodeURIComponent(limit)}${refresh ? "&refresh=1" : ""}`,
   ),
   alignedPack: (side, { refresh = false } = {}) => request(
     `/api/tools/assets/${side}/pack${refresh ? "?refresh=1" : ""}`,
@@ -76,9 +98,26 @@ export const runtimeApi = {
       body: JSON.stringify({ polygons }),
     },
   ),
+  previewAlignedRepair: (side, name, landmarks) => request(
+    `/api/assets/${side}/aligned/${encodeURIComponent(name)}/alignment-preview`,
+    { method: "POST", body: JSON.stringify({ landmarks }) },
+  ),
+  applyAlignedRepair: (side, name, landmarks) => request(
+    `/api/assets/${side}/aligned/${encodeURIComponent(name)}/alignment-apply`,
+    { method: "POST", body: JSON.stringify({ landmarks }) },
+  ),
+  alignedRepairBackups: (side) => request(`/api/assets/${side}/alignment-backups`),
+  restoreAlignedRepair: (side, token, name) => request(
+    `/api/assets/${side}/alignment-backups/${encodeURIComponent(token)}/${encodeURIComponent(name)}/restore`,
+    { method: "POST" },
+  ),
   quarantineAligned: (side, name) => request(
     `/api/assets/${side}/aligned/${encodeURIComponent(name)}/quarantine`,
     { method: "POST" },
+  ),
+  quarantineAlignedBatch: (side, names) => request(
+    `/api/assets/${side}/aligned/quarantine-batch`,
+    { method: "POST", body: JSON.stringify({ names }) },
   ),
   alignedQuarantine: (side) => request(`/api/assets/${side}/quarantine`),
   restoreAligned: (side, token, name) => request(
@@ -86,6 +125,24 @@ export const runtimeApi = {
     { method: "POST" },
   ),
   importVideo: uploadVideo,
+  videoTimeline: (side) => request(`/api/tools/video/${side}/timeline`),
+  detectVideoScenes: (side, threshold) => request(`/api/tools/video/${side}/detect-scenes`, {
+    method: "POST",
+    body: JSON.stringify({ threshold }),
+  }),
+  saveVideoSegments: (side, segments) => request(`/api/tools/video/${side}/segments`, {
+    method: "PUT",
+    body: JSON.stringify({ segments }),
+  }),
+  extractVideoSegments: (side, segments, fps = 0) => request(
+    `/api/tools/video/${side}/extract-segments`,
+    { method: "POST", body: JSON.stringify({ segments, fps }) },
+  ),
+  frameArchives: (side) => request(`/api/tools/video/${side}/frame-archives`),
+  restoreFrameArchive: (side, token) => request(
+    `/api/tools/video/${side}/frame-archives/${encodeURIComponent(token)}/restore`,
+    { method: "POST" },
+  ),
   archiveCompletedJobs: () => request("/api/jobs/archive-completed", { method: "POST" }),
   preflight: (commandId, options = {}) => request(
     `/api/commands/${encodeURIComponent(commandId)}/preflight`,

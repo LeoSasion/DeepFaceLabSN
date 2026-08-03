@@ -1,4 +1,4 @@
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, readFileSync } from "node:fs";
 import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,7 +7,32 @@ const serverDirectory = path.dirname(fileURLToPath(import.meta.url));
 const webuiRoot = path.resolve(serverDirectory, "..");
 const repositoryRoot = path.resolve(webuiRoot, "..");
 const internalRoot = path.join(repositoryRoot, "_internal");
-const workspaceRoot = path.join(repositoryRoot, "workspace");
+const projectRegistryRoot = path.join(webuiRoot, ".runtime");
+const projectRegistryFile = path.join(projectRegistryRoot, "projects.json");
+const managedWorkspacesRoot = path.join(repositoryRoot, "workspaces");
+
+function readActiveProject() {
+  try {
+    const value = JSON.parse(readFileSync(projectRegistryFile, "utf8"));
+    const activeId = /^[a-z0-9][a-z0-9-]{0,47}$/.test(value?.activeId) ? value.activeId : "default";
+    const record = Array.isArray(value?.projects)
+      ? value.projects.find((project) => project?.id === activeId)
+      : null;
+    if (activeId === "default") {
+      return { id: "default", name: record?.name || "默认项目", workspaceRoot: path.join(repositoryRoot, "workspace") };
+    }
+    return {
+      id: activeId,
+      name: typeof record?.name === "string" && record.name.trim() ? record.name.trim() : activeId,
+      workspaceRoot: path.join(managedWorkspacesRoot, activeId),
+    };
+  } catch {
+    return { id: "default", name: "默认项目", workspaceRoot: path.join(repositoryRoot, "workspace") };
+  }
+}
+
+const activeProject = readActiveProject();
+const workspaceRoot = activeProject.workspaceRoot;
 const runtimeRoot = path.join(workspaceRoot, ".webui");
 
 export const PATHS = Object.freeze({
@@ -15,11 +40,18 @@ export const PATHS = Object.freeze({
   webuiRoot,
   repositoryRoot,
   internalRoot,
+  projectRegistryRoot,
+  projectRegistryFile,
+  managedWorkspacesRoot,
+  activeProject,
   workspaceRoot,
   runtimeRoot,
   jobsRoot: path.join(runtimeRoot, "jobs"),
   archiveRoot: path.join(runtimeRoot, "archive"),
+  trainingEvaluationsRoot: path.join(runtimeRoot, "training-evaluations"),
+  trainingEvaluationsArchiveRoot: path.join(runtimeRoot, "archive", "training-evaluations"),
   python: path.join(internalRoot, "python_common", "python.exe"),
+  ffmpeg: path.join(internalRoot, "ffmpeg", "ffmpeg.exe"),
   ffprobe: path.join(internalRoot, "ffmpeg", "ffprobe.exe"),
   currentMain: path.join(internalRoot, "DeepFaceLab", "main.py"),
   legacyMain: path.join(internalRoot, "DeepFaceLab_old", "main.py"),
@@ -61,6 +93,8 @@ export async function ensureRuntimeDirectories() {
   await Promise.all([
     mkdir(PATHS.jobsRoot, { recursive: true }),
     mkdir(PATHS.archiveRoot, { recursive: true }),
+    mkdir(PATHS.trainingEvaluationsRoot, { recursive: true }),
+    mkdir(PATHS.trainingEvaluationsArchiveRoot, { recursive: true }),
     mkdir(path.join(PATHS.internalRoot, "_e", "t"), { recursive: true }),
     mkdir(path.join(PATHS.internalRoot, "_e", "u", "AppData", "Local"), { recursive: true }),
     mkdir(path.join(PATHS.internalRoot, "_e", "u", "AppData", "Roaming"), { recursive: true }),

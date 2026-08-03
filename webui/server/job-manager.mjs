@@ -18,10 +18,18 @@ import {
   writeJsonAtomic,
 } from "./paths.mjs";
 import { createPtyRunner } from "./pty-runner.mjs";
+import { TrainingEvaluationManager } from "./training-evaluation-manager.mjs";
 
 const ACTIVE_STATES = new Set(["queued", "starting", "running", "waiting_input", "stopping"]);
 const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled", "orphaned"]);
-const ALLOWED_CONTROL_OPERATIONS = new Set(["save", "backup", "preview", "close", "force-kill"]);
+const ALLOWED_CONTROL_OPERATIONS = new Set([
+  "save",
+  "backup",
+  "preview",
+  "evaluate",
+  "close",
+  "force-kill",
+]);
 const MAX_EVENTS_IN_MEMORY = 1000;
 const MAX_INPUT_LENGTH = 8192;
 
@@ -66,6 +74,8 @@ function publicJob(job) {
     latestPrompt: job.latestPrompt,
     latestMetric: job.latestMetric,
     previewVersion: job.previewVersion,
+    latestEvaluationSnapshotId: job.latestEvaluationSnapshotId,
+    evaluation: job.evaluation,
     paths: {
       jobDirectory: job.directory,
       events: job.eventsFile,
@@ -79,16 +89,24 @@ function metadataFromJob(job) {
 }
 
 export class JobManager extends EventEmitter {
-  constructor({ runnerFactory = createPtyRunner, now = () => new Date() } = {}) {
+  constructor({
+    runnerFactory = createPtyRunner,
+    trainingEvaluationManager = new TrainingEvaluationManager(),
+    now = () => new Date(),
+  } = {}) {
     super();
     this.runnerFactory = runnerFactory;
+    this.trainingEvaluationManager = trainingEvaluationManager;
     this.now = now;
     this.jobs = new Map();
     this.locks = new Map();
   }
 
   async initialize() {
-    await ensureRuntimeDirectories();
+    await Promise.all([
+      ensureRuntimeDirectories(),
+      this.trainingEvaluationManager.initialize(),
+    ]);
     const entries = await readdir(PATHS.jobsRoot, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
@@ -110,6 +128,8 @@ export class JobManager extends EventEmitter {
           writeChain: Promise.resolve(),
           metadataWriteChain: Promise.resolve(),
           previewTimer: null,
+          artifactPollPending: false,
+          evaluationSnapshotIds: new Set(metadata.evaluation?.existingSnapshotIds ?? []),
         };
         if (ACTIVE_STATES.has(job.state)) {
           job.state = "orphaned";
@@ -148,9 +168,10 @@ export class JobManager extends EventEmitter {
       throw new JobError("不支持的命令", "COMMAND_NOT_ALLOWED", 400);
     }
 
-    const { definition, launchMode, parameters } = await prepareCommand(commandId, {
+    const { definition, launchMode, parameters, preflight } = await prepareCommand(commandId, {
       launchMode: options.launchMode,
       parameters: options.parameters,
+      trainingEvaluationManager: this.trainingEvaluationManager,
     });
     const id = createJobId();
     this.acquireLocks(id, definition.locks);
@@ -162,6 +183,7 @@ export class JobManager extends EventEmitter {
       previewFile: path.join(directory, "preview.png"),
       launchMode,
       parameters,
+      preflight,
     };
     let launch;
     try {
@@ -182,7 +204,9 @@ export class JobManager extends EventEmitter {
       category: definition.category,
       launchMode,
       parameters,
-      controls: [...definition.controls],
+      controls: definition.controls.filter((operation) => (
+        operation !== "evaluate" || launch.evaluation?.enabled
+      )),
       locks: [...definition.locks],
       state: "starting",
       pid: null,
@@ -198,6 +222,8 @@ export class JobManager extends EventEmitter {
       latestPrompt: null,
       latestMetric: null,
       previewVersion: null,
+      latestEvaluationSnapshotId: null,
+      evaluation: launch.evaluation ?? null,
       directory,
       metadataFile: path.join(directory, "metadata.json"),
       eventsFile: path.join(directory, "events.ndjson"),
@@ -209,6 +235,8 @@ export class JobManager extends EventEmitter {
       writeChain: Promise.resolve(),
       metadataWriteChain: Promise.resolve(),
       previewTimer: null,
+      artifactPollPending: false,
+      evaluationSnapshotIds: new Set(launch.evaluation?.existingSnapshotIds ?? []),
     };
     this.jobs.set(id, job);
     try {
@@ -459,6 +487,9 @@ export class JobManager extends EventEmitter {
   startPreviewWatcher(job) {
     let previousMtime = 0;
     job.previewTimer = setInterval(async () => {
+      if (job.artifactPollPending) return;
+      job.artifactPollPending = true;
+      let changed = false;
       try {
         const fileStat = await stat(job.previewFile);
         if (fileStat.mtimeMs > previousMtime) {
@@ -468,10 +499,36 @@ export class JobManager extends EventEmitter {
             kind: "preview",
             version: job.previewVersion,
           });
-          await this.persist(job);
+          changed = true;
         }
       } catch {
         // Preview is optional until the first Trainer "show" message arrives.
+      }
+      if (job.evaluation?.enabled) {
+        try {
+          const result = await this.trainingEvaluationManager.listSnapshots(
+            job.evaluation.modelKey,
+          );
+          for (const snapshot of [...result.snapshots].reverse()) {
+            if (job.evaluationSnapshotIds.has(snapshot.snapshotId)) continue;
+            job.evaluationSnapshotIds.add(snapshot.snapshotId);
+            job.latestEvaluationSnapshotId = snapshot.snapshotId;
+            this.record(job, "job.artifact", {
+              kind: "training-evaluation",
+              ...snapshot,
+            });
+            changed = true;
+          }
+        } catch (error) {
+          this.emit("warning", { message: "无法读取训练姿态评测快照", error });
+        }
+      }
+      try {
+        if (changed) await this.persist(job);
+      } catch (error) {
+        this.emit("warning", { message: "无法保存训练产物状态", error });
+      } finally {
+        job.artifactPollPending = false;
       }
     }, 1500);
     job.previewTimer.unref?.();

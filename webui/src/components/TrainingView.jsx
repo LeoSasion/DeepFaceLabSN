@@ -1,6 +1,8 @@
 import {
   IconAdjustmentsHorizontal,
   IconArchive,
+  IconCamera,
+  IconChartDots3,
   IconCheck,
   IconChevronRight,
   IconCircle,
@@ -34,6 +36,7 @@ const taskIcons = {
   sort: IconAdjustmentsHorizontal,
   xseg: IconSparkles,
   saehd: IconFileAnalytics,
+  diagnose: IconChartDots3,
   merge: IconRoute,
   export: IconFileAnalytics,
 };
@@ -221,6 +224,10 @@ export function TrainingWorkspace({
   onSave,
   onBackup,
   onRefresh,
+  onEvaluate,
+  onOpenDiagnostics,
+  canEvaluate,
+  latestEvaluationSnapshotId,
   onSafeStop,
 }) {
   const { language, t } = useI18n();
@@ -247,6 +254,24 @@ export function TrainingWorkspace({
           <span className={`status-pill ${isRunning ? "running" : "paused"}`}>
             {stateLabel}
           </span>
+        </div>
+        <div className="training-heading-actions">
+          <button
+            className="button compact secondary"
+            type="button"
+            onClick={onEvaluate}
+            disabled={!canEvaluate}
+            title={canEvaluate ? t("使用当前权重生成只读评估快照") : t("运行中的受控 SAEHD 任务才能生成快照")}
+          >
+            <IconCamera size={14} stroke={1.9}/>{t("评估快照")}
+          </button>
+          <button
+            className={`button compact ${latestEvaluationSnapshotId ? "primary" : "secondary"}`}
+            type="button"
+            onClick={onOpenDiagnostics}
+          >
+            <IconChartDots3 size={14} stroke={1.9}/>{t("质量诊断")}
+          </button>
         </div>
       </div>
       <div className="training-stats">

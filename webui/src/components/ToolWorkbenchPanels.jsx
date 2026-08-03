@@ -193,10 +193,10 @@ export function DatasetAuditPanel({
       </header>
 
       <section className="audit-kpi-strip" aria-label={t("审计摘要") }>
-        <div><span>{t("样本总量")}</span><strong>{audit.total.toLocaleString()}</strong><small>{t("本批分析 {count}", { count: audit.analyzedCount })}</small></div>
-        <div><span>{t("当前可用")}</span><strong>{audit.usableCount ?? 0}</strong><small>{percent((audit.usableCount ?? 0) / Math.max(audit.analyzedCount, 1))}</small></div>
-        <div className={(audit.issueItemCount ?? 0) ? "is-warning" : ""}><span>{t("发现问题")}</span><strong>{audit.issueItemCount ?? 0}</strong><small>{t("本批问题样本")}</small></div>
-        <div className={(audit.severeIssueCount ?? 0) ? "is-danger" : ""}><span>{t("高风险")}</span><strong>{audit.severeIssueCount ?? 0}</strong><small>{t("需优先处理")}</small></div>
+        <div className="is-total"><span>{t("样本总量")}</span><strong>{audit.total.toLocaleString()}</strong><small>{t("本批分析 {count}", { count: audit.analyzedCount })}</small></div>
+        <div className="is-usable"><span>{t("当前可用")}</span><strong>{audit.usableCount ?? 0}</strong><small>{percent((audit.usableCount ?? 0) / Math.max(audit.analyzedCount, 1))}</small></div>
+        <div className="is-warning"><span>{t("发现问题")}</span><strong>{audit.issueItemCount ?? 0}</strong><small>{t("本批问题样本")}</small></div>
+        <div className="is-danger"><span>{t("高风险")}</span><strong>{audit.severeIssueCount ?? 0}</strong><small>{t("需优先处理")}</small></div>
       </section>
 
       <div className="dataset-audit-layout">

@@ -1,6 +1,10 @@
 import multiprocessing
 import operator
+import os
+import sys
+import time
 from functools import partial
+from pathlib import Path
 from mainscripts.Trainer import global_mean_loss
 import numpy as np
 
@@ -1416,6 +1420,213 @@ class SAEHDModel(ModelBase):
 
             if self.pretrain_just_disabled:
                 self.update_sample_for_preview(force_new=True)
+
+    def evaluate_pose_probes(self):
+        """Publish a deterministic, read-only evaluation snapshot.
+
+        This method deliberately calls only AE_view. Optimizer/train functions are
+        never invoked, and Trainer verifies iteration/loss invariants around it.
+        """
+        manifest_path = os.environ.get("DFL_WEB_EVAL_MANIFEST", "").strip()
+        evaluation_root = os.environ.get("DFL_WEB_EVAL_ROOT", "").strip()
+        model_key = os.environ.get("DFL_WEB_EVAL_MODEL_KEY", "").strip()
+        if not manifest_path or not evaluation_root or not model_key:
+            raise ValueError("Web evaluation is not configured for this training task")
+
+        configured_webui_python = os.environ.get("DFL_WEBUI_PYTHON", "").strip()
+        webui_python = (
+            Path(configured_webui_python).resolve()
+            if configured_webui_python
+            else Path(os.environ.get("WORKSPACE", "")).resolve().parent / "webui" / "python"
+        )
+        if not webui_python.is_dir():
+            raise ValueError("Web evaluation helper directory is unavailable")
+        if str(webui_python) not in sys.path:
+            sys.path.insert(0, str(webui_python))
+        from training_evaluation import (
+            AtomicEvaluationSnapshot,
+            load_evaluation_manifest,
+            reconstruction_metrics,
+            swap_metrics,
+        )
+
+        manifest, probe_samples = load_evaluation_manifest(
+            manifest_path,
+            evaluation_root,
+            model_key,
+            {
+                "src": self.training_data_src_path,
+                "dst": self.training_data_dst_path,
+            },
+        )
+        expected_model_name = "%s_SAEHD" % manifest["modelName"]
+        if self.get_model_name() != expected_model_name:
+            raise ValueError("Loaded SAEHD model does not match the evaluation manifest")
+
+        process_options = SampleProcessor.Options(
+            random_flip=False,
+            rotation_range=[0, 0],
+            scale_range=[0, 0],
+            tx_range=[0, 0],
+            ty_range=[0, 0],
+        )
+        output_types = [
+            {
+                "sample_type": SampleProcessor.SampleType.FACE_IMAGE,
+                "warp": False,
+                "transform": False,
+                "channel_type": SampleProcessor.ChannelType.BGR,
+                "face_type": self.face_type,
+                "data_format": self.model_data_format,
+                "resolution": self.resolution,
+            },
+            {
+                "sample_type": SampleProcessor.SampleType.FACE_MASK,
+                "warp": False,
+                "transform": False,
+                "channel_type": SampleProcessor.ChannelType.G,
+                "face_mask_type": SampleProcessor.FaceMaskType.FULL_FACE,
+                "face_type": self.face_type,
+                "data_format": self.model_data_format,
+                "resolution": self.resolution,
+            },
+            {
+                "sample_type": SampleProcessor.SampleType.FACE_MASK,
+                "warp": False,
+                "transform": False,
+                "channel_type": SampleProcessor.ChannelType.G,
+                "face_mask_type": SampleProcessor.FaceMaskType.EYES_MOUTH,
+                "face_type": self.face_type,
+                "data_format": self.model_data_format,
+                "resolution": self.resolution,
+            },
+        ]
+
+        prepared = {}
+        for side, directory in (
+            ("src", self.training_data_src_path),
+            ("dst", self.training_data_dst_path),
+        ):
+            loaded_samples = SampleLoader.load(SampleType.FACE, directory)
+            by_name = {Path(sample.filename).name: sample for sample in loaded_samples}
+            prepared[side] = []
+            for probe in probe_samples[side]:
+                sample = by_name.get(probe["name"])
+                if sample is None:
+                    raise ValueError("Evaluation sample is no longer available: %s" % probe["name"])
+                image, full_mask, eyes_mouth_mask = SampleProcessor.process(
+                    [sample],
+                    process_options,
+                    output_types,
+                    False,
+                )[0]
+                prepared[side].append({
+                    "probe": probe,
+                    "image": image,
+                    "full_mask": full_mask,
+                    "eyes_mouth_mask": eyes_mouth_mask,
+                })
+
+        model_signature = {
+            "class": "SAEHD",
+            "resolution": int(self.resolution),
+            "faceType": self.options["face_type"],
+            "architecture": self.options["archi"],
+            "dataFormat": self.model_data_format,
+        }
+        snapshot = AtomicEvaluationSnapshot(
+            evaluation_root,
+            model_key,
+            manifest["manifestId"],
+            int(self.get_iter()),
+            model_signature,
+        )
+        deadline = time.monotonic() + 120.0
+        batch_size = self.get_batch_size()
+        sample_count = max(len(prepared["src"]), len(prepared["dst"]))
+
+        def to_nhwc(value):
+            return np.clip(
+                nn.to_data_format(value, "NHWC", self.model_data_format),
+                0.0,
+                1.0,
+            ).astype(np.float32)
+
+        try:
+            for offset in range(0, sample_count, batch_size):
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Web evaluation exceeded 120 seconds")
+                real_src = prepared["src"][offset:offset + batch_size]
+                real_dst = prepared["dst"][offset:offset + batch_size]
+                src_batch = [
+                    prepared["src"][(offset + index) % len(prepared["src"])]
+                    for index in range(batch_size)
+                ]
+                dst_batch = [
+                    prepared["dst"][(offset + index) % len(prepared["dst"])]
+                    for index in range(batch_size)
+                ]
+                predictions = self.AE_view(
+                    np.stack([item["image"] for item in src_batch]),
+                    np.stack([item["image"] for item in dst_batch]),
+                )
+                pred_src_src, pred_dst_dst, pred_dst_dstm, pred_src_dst, pred_src_dstm = [
+                    to_nhwc(value) for value in predictions
+                ]
+                src_images = to_nhwc(np.stack([item["image"] for item in src_batch]))
+                dst_images = to_nhwc(np.stack([item["image"] for item in dst_batch]))
+                src_masks = to_nhwc(np.stack([item["full_mask"] for item in src_batch]))
+                dst_masks = to_nhwc(np.stack([item["full_mask"] for item in dst_batch]))
+                src_eyes_mouth = to_nhwc(np.stack([item["eyes_mouth_mask"] for item in src_batch]))
+                dst_eyes_mouth = to_nhwc(np.stack([item["eyes_mouth_mask"] for item in dst_batch]))
+
+                for index, item in enumerate(real_src):
+                    snapshot.add_sample(
+                        item["probe"],
+                        {
+                            "input": src_images[index],
+                            "reconstruction": pred_src_src[index],
+                            "target-mask": src_masks[index],
+                        },
+                        {
+                            "reconstruction": reconstruction_metrics(
+                                src_images[index],
+                                pred_src_src[index],
+                                src_masks[index],
+                                src_eyes_mouth[index],
+                            ),
+                        },
+                    )
+                for index, item in enumerate(real_dst):
+                    snapshot.add_sample(
+                        item["probe"],
+                        {
+                            "input": dst_images[index],
+                            "reconstruction": pred_dst_dst[index],
+                            "swap": pred_src_dst[index],
+                            "target-mask": dst_masks[index],
+                            "predicted-mask": pred_src_dstm[index],
+                        },
+                        {
+                            "reconstruction": reconstruction_metrics(
+                                dst_images[index],
+                                pred_dst_dst[index],
+                                dst_masks[index],
+                                dst_eyes_mouth[index],
+                                pred_dst_dstm[index],
+                            ),
+                            "swap": swap_metrics(
+                                dst_images[index],
+                                pred_src_dst[index],
+                                dst_masks[index],
+                                pred_src_dstm[index],
+                            ),
+                        },
+                    )
+            return snapshot.publish()
+        except Exception:
+            snapshot.abort()
+            raise
 
     def export_dfm(self):
         output_path = self.get_strpath_storage_for_file("model.dfm")

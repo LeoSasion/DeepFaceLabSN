@@ -6,6 +6,7 @@ import {
   IconArrowRight,
   IconBoxModel2,
   IconCheck,
+  IconCopy,
   IconDeviceFloppy,
   IconPhoto,
   IconPlayerPlay,
@@ -13,6 +14,7 @@ import {
   IconRestore,
   IconRotateClockwise,
   IconShieldCheck,
+  IconSparkles,
   IconTrash,
   IconX,
 } from "@tabler/icons-react";
@@ -126,7 +128,18 @@ function imagePoint(svg, event, width, height) {
   ];
 }
 
-function AnnotationCanvas({ side, item, annotation, onSaved, onError }) {
+function AnnotationCanvas({
+  side,
+  item,
+  annotation,
+  clipboard,
+  onClipboardChange,
+  onNavigate,
+  onLoadPrevious,
+  onDirtyChange,
+  onSaved,
+  onError,
+}) {
   const { t } = useI18n();
   const svgRef = useRef(null);
   const [polygons, setPolygons] = useState([]);
@@ -134,12 +147,39 @@ function AnnotationCanvas({ side, item, annotation, onSaved, onError }) {
   const [polygonType, setPolygonType] = useState("include");
   const [saving, setSaving] = useState(false);
   const [dragging, setDragging] = useState(null);
+  const [showAppliedMask, setShowAppliedMask] = useState(true);
+  const baselineRef = useRef("[]");
 
   useEffect(() => {
-    setPolygons(annotation?.polygons ?? []);
+    const nextPolygons = annotation?.polygons ?? [];
+    setPolygons(nextPolygons);
+    baselineRef.current = JSON.stringify(nextPolygons);
+    onDirtyChange(false);
     setDraft([]);
     setDragging(null);
-  }, [annotation]);
+  }, [annotation, onDirtyChange]);
+
+  useEffect(() => {
+    onDirtyChange(JSON.stringify(polygons) !== baselineRef.current || draft.length > 0);
+  }, [draft.length, onDirtyChange, polygons]);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (!annotation) return;
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement) return;
+      const key = event.key.toLocaleLowerCase();
+      if (event.ctrlKey && key === "s") { event.preventDefault(); void save(); return; }
+      if (event.ctrlKey && key === "c") { event.preventDefault(); copyPolygons(); return; }
+      if (event.ctrlKey && key === "v") { event.preventDefault(); pastePolygons(); return; }
+      if (key === "q") setPolygonType("include");
+      else if (key === "w") setPolygonType("exclude");
+      else if (key === "g") importSuggested();
+      else if (event.key === "ArrowLeft") onNavigate(-1);
+      else if (event.key === "ArrowRight") onNavigate(1);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  });
 
   if (!annotation) {
     return <div className="asset-detail-loading">{t("正在读取 DFL 标注元数据…")}</div>;
@@ -183,12 +223,37 @@ function AnnotationCanvas({ side, item, annotation, onSaved, onError }) {
     setSaving(true);
     try {
       const result = await runtimeApi.saveAlignedAnnotation(side, item.name, polygons);
+      baselineRef.current = JSON.stringify(polygons);
+      onDirtyChange(false);
       onSaved(result);
     } catch (error) {
       onError(error);
     } finally {
       setSaving(false);
     }
+  };
+
+  const copyPolygons = () => {
+    onClipboardChange(structuredClone(polygons));
+  };
+
+  const pastePolygons = () => {
+    if (Array.isArray(clipboard) && clipboard.length) setPolygons(structuredClone(clipboard));
+  };
+
+  const inheritPrevious = async () => {
+    try {
+      const previous = await onLoadPrevious();
+      if (previous?.polygons?.length) setPolygons(structuredClone(previous.polygons));
+      else onError(new Error(t("上一张没有可继承的多边形标注")));
+    } catch (error) {
+      onError(error);
+    }
+  };
+
+  const importSuggested = () => {
+    if (!annotation.suggestedPolygons?.length) return;
+    setPolygons(structuredClone(annotation.suggestedPolygons));
   };
 
   const colors = {
@@ -216,6 +281,15 @@ function AnnotationCanvas({ side, item, annotation, onSaved, onError }) {
           </button>
         </div>
         <div className="annotation-actions">
+          <button className="button secondary" type="button" onClick={() => void inheritPrevious()}>
+            <IconCopy size={15} />{t("继承上一张")}
+          </button>
+          <button className="button secondary" type="button" onClick={copyPolygons} disabled={!polygons.length} title="Ctrl+C">{t("复制")}</button>
+          <button className="button secondary" type="button" onClick={pastePolygons} disabled={!clipboard?.length} title="Ctrl+V">{t("粘贴")}</button>
+          <button className={`button secondary ${showAppliedMask ? "is-active" : ""}`} type="button" onClick={() => setShowAppliedMask((value) => !value)} disabled={!annotation.appliedMaskDataUrl}>{t("遮罩叠加")}</button>
+          <button className="button secondary" type="button" onClick={importSuggested} disabled={!annotation.suggestedPolygons?.length} title="G">
+            <IconSparkles size={15} />{t("导入遮罩轮廓")}
+          </button>
           <button className="button secondary" type="button" onClick={() => setDraft((value) => value.slice(0, -1))} disabled={!draft.length}>
             <IconRotateClockwise size={15} />{t("撤销点")}
           </button>
@@ -250,6 +324,19 @@ function AnnotationCanvas({ side, item, annotation, onSaved, onError }) {
             height={annotation.height}
             preserveAspectRatio="none"
           />
+          {showAppliedMask && annotation.appliedMaskDataUrl ? (
+            <image
+              className="annotation-mask-overlay"
+              href={annotation.appliedMaskDataUrl}
+              x="0"
+              y="0"
+              width={annotation.width}
+              height={annotation.height}
+              opacity="0.42"
+              preserveAspectRatio="none"
+              pointerEvents="none"
+            />
+          ) : null}
           {polygons.map((polygon, polygonIndex) => (
             <g key={`${polygon.type}-${polygonIndex}`}>
               <polygon
@@ -326,6 +413,9 @@ export function DatasetView({
   const [selectedName, setSelectedName] = useState(null);
   const [annotation, setAnnotation] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [maskClipboard, setMaskClipboard] = useState([]);
+  const [maskDirty, setMaskDirty] = useState(false);
+  const handleMaskDirty = useCallback((value) => setMaskDirty(value), []);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -388,6 +478,23 @@ export function DatasetView({
   }, [assets, editMasks, onError, selectedName, side]);
 
   const selected = assets?.items.find((item) => item.name === selectedName) ?? null;
+  const selectedIndex = selected ? assets.items.findIndex((item) => item.name === selected.name) : -1;
+  const confirmDiscardMask = () => !maskDirty || window.confirm(t("当前 XSeg 标注尚未保存，确定放弃修改并切换吗？"));
+  const selectAsset = (name) => {
+    if (!confirmDiscardMask()) return;
+    setSelectedName(name);
+    setMaskDirty(false);
+  };
+  const navigateAsset = (direction) => {
+    if (!assets?.items.length || !confirmDiscardMask()) return;
+    const nextIndex = Math.min(Math.max(selectedIndex + direction, 0), assets.items.length - 1);
+    setSelectedName(assets.items[nextIndex].name);
+    setMaskDirty(false);
+  };
+  const loadPreviousAnnotation = async () => {
+    if (!assets?.items.length || selectedIndex <= 0) return null;
+    return runtimeApi.alignedAnnotation(side, assets.items[selectedIndex - 1].name);
+  };
   const sideCommands = commands.filter((command) => (
     command.side === side
     && (command.category === "dataset" || command.category === "extract" || command.category === "sort")
@@ -433,7 +540,7 @@ export function DatasetView({
                   className={side === value ? "is-active" : ""}
                   key={value}
                   type="button"
-                  onClick={() => onSideChange(value)}
+                  onClick={() => { if (confirmDiscardMask()) { setMaskDirty(false); onSideChange(value); } }}
                 >
                   {value.toUpperCase()}
                 </button>
@@ -472,7 +579,7 @@ export function DatasetView({
                 className={`asset-thumbnail ${selectedName === item.name ? "is-active" : ""}`}
                 key={item.name}
                 type="button"
-                onClick={() => setSelectedName(item.name)}
+                onClick={() => selectAsset(item.name)}
                 title={item.sourceFilename ?? item.name}
               >
                 <img src={item.imageUrl} alt="" loading="lazy" />
@@ -514,6 +621,11 @@ export function DatasetView({
                   side={side}
                   item={selected}
                   annotation={annotation}
+                  clipboard={maskClipboard}
+                  onClipboardChange={setMaskClipboard}
+                  onNavigate={navigateAsset}
+                  onLoadPrevious={loadPreviousAnnotation}
+                  onDirtyChange={handleMaskDirty}
                   onError={onError}
                   onSaved={(result) => {
                     onNotice(t("已写入 {count} 个多边形标注", { count: result.polygonCount }));
@@ -587,7 +699,40 @@ export function ModelSummaryAside({ workspace }) {
 
 export function SettingsView({ health, jobs, onRetry, onError, onNotice }) {
   const { t } = useI18n();
+  const [projects, setProjects] = useState(null);
+  const [projectName, setProjectName] = useState("");
+  const [projectId, setProjectId] = useState("");
+  const [projectBusy, setProjectBusy] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void runtimeApi.projects().then((value) => { if (!cancelled) setProjects(value); }).catch(onError);
+    return () => { cancelled = true; };
+  }, [onError]);
   const recoverable = jobs.filter((job) => terminalStates.has(job.state));
+  const activeJobCount = jobs.filter((job) => ["queued", "starting", "running", "waiting_input", "stopping"].includes(job.state)).length;
+  const createProject = async () => {
+    setProjectBusy(true);
+    try {
+      await runtimeApi.createProject({ name: projectName, id: projectId });
+      setProjects(await runtimeApi.projects());
+      setProjectName("");
+      setProjectId("");
+      onNotice(t("新项目已创建；可在任务停止后切换。"));
+    } catch (error) { onError(error); } finally { setProjectBusy(false); }
+  };
+  const activateProject = async (id, name) => {
+    if (!window.confirm(t("切换到项目“{name}”吗？本地服务会重启，当前页面随后自动刷新。", { name }))) return;
+    setProjectBusy(true);
+    try {
+      const result = await runtimeApi.activateProject(id);
+      if (!result.restartRequired) {
+        setProjectBusy(false);
+        return;
+      }
+      onNotice(t("正在切换项目并重启本地服务…"));
+      window.setTimeout(() => window.location.reload(), 1600);
+    } catch (error) { setProjectBusy(false); onError(error); }
+  };
   return (
     <section className="operation-view settings-view">
       <header className="operation-header">
@@ -611,6 +756,31 @@ export function SettingsView({ health, jobs, onRetry, onError, onNotice }) {
           <code>{t("不执行、不解析 BAT；写操作需要本机会话")}</code>
         </section>
       </div>
+      <section className="project-manager-section">
+        <header>
+          <div><IconBoxModel2 size={19} /><div><h3>{t("受管项目工作区")}</h3><p>{t("每个项目独立保存素材、模型、任务日志、诊断与恢复记录。")}</p></div></div>
+          <span className={activeJobCount ? "is-warning" : "is-ok"}>{activeJobCount ? t("{count} 个任务阻止切换", { count: activeJobCount }) : t("可以安全切换")}</span>
+        </header>
+        <div className="project-manager-grid">
+          <div className="project-list">
+            {projects?.projects.map((project) => (
+              <article className={project.active ? "is-active" : ""} key={project.id}>
+                <span>{project.active ? <IconCheck size={15} /> : <IconBoxModel2 size={15} />}</span>
+                <div><strong>{project.name}</strong><small>{project.id} · {project.managed ? t("受管目录") : t("兼容默认工作区")}</small></div>
+                <button className="button secondary" type="button" disabled={project.active || activeJobCount > 0 || projectBusy} onClick={() => void activateProject(project.id, project.name)}>{project.active ? t("当前") : t("切换")}</button>
+              </article>
+            ))}
+            {!projects ? <div className="operation-empty">{t("正在读取项目…")}</div> : null}
+          </div>
+          <form className="project-create-form" onSubmit={(event) => { event.preventDefault(); void createProject(); }}>
+            <strong>{t("新建项目")}</strong>
+            <label><span>{t("项目名称")}</span><input value={projectName} maxLength={64} onChange={(event) => setProjectName(event.target.value)} placeholder={t("例如：访谈片 A")}/></label>
+            <label><span>{t("项目标识")}</span><input value={projectId} maxLength={48} onChange={(event) => setProjectId(event.target.value)} placeholder="interview-a" /></label>
+            <small>{t("仅在仓库的 workspaces 目录中创建，不接受任意磁盘路径。创建不会自动切换。")}</small>
+            <button className="button primary" type="submit" disabled={!projectName.trim() || !projectId.trim() || projectBusy}>{projectBusy ? t("处理中…") : t("创建受管项目")}</button>
+          </form>
+        </div>
+      </section>
       <section className="recovery-section">
         <header>
           <div>
