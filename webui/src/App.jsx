@@ -9,9 +9,14 @@ import {
   SettingsView,
 } from "./components/OperationsView.jsx";
 import { WorkbenchGrid } from "./components/TrainingView.jsx";
+import { QualityDiagnosticsView } from "./components/QualityDiagnosticsView.jsx";
 import { ToolLabView } from "./components/ToolLabView.jsx";
 import { WorkspaceView } from "./components/WorkspaceView.jsx";
-import { pipelineTasks } from "./data/dashboard.js";
+import {
+  navigationWorkflowStages,
+  pipelineTasks,
+  workflowStageDestinations,
+} from "./data/dashboard.js";
 import { useI18n } from "./i18n.jsx";
 import { runtimeApi } from "./runtime/api.js";
 import { useRuntime } from "./runtime/useRuntime.js";
@@ -28,6 +33,9 @@ const pipelineCommandMap = {
 };
 
 const activeStates = new Set(["queued", "starting", "running", "waiting_input", "stopping"]);
+const frameCommandFilter = (command) => ["src.extract_frames", "dst.extract_frames"].includes(command.id);
+const faceCommandFilter = (command) => ["src.extract_faces", "dst.extract_faces"].includes(command.id);
+const cleanCommandFilter = (command) => ["src.sort_faces", "dst.sort_faces"].includes(command.id);
 
 export function App() {
   const runtime = useRuntime();
@@ -43,6 +51,8 @@ export function App() {
   const [xsegSide, setXsegSide] = useState("dst");
   const [workspaceSnapshot, setWorkspaceSnapshot] = useState(null);
   const [datasetFocus, setDatasetFocus] = useState(null);
+  const [poseAtlasFocus, setPoseAtlasFocus] = useState(null);
+  const [diagnosticSnapshotCount, setDiagnosticSnapshotCount] = useState(0);
   const [toast, setToast] = useState({ message: "", tone: "success" });
 
   const commands = useMemo(
@@ -109,6 +119,30 @@ export function App() {
       ?? null;
   }, [jobs, selectedJob]);
 
+  const evaluationJob = useMemo(() => {
+    if (trainingJob?.evaluation?.enabled) return trainingJob;
+    return jobs.find((job) => (
+      job.commandId === "train.saehd"
+      && job.evaluation?.enabled
+      && activeStates.has(job.state)
+    )) ?? jobs.find((job) => job.commandId === "train.saehd" && job.evaluation?.enabled) ?? null;
+  }, [jobs, trainingJob]);
+
+  useEffect(() => {
+    const modelKey = evaluationJob?.evaluation?.modelKey;
+    if (!modelKey) {
+      setDiagnosticSnapshotCount(0);
+      return undefined;
+    }
+    let cancelled = false;
+    void runtimeApi.trainingEvaluationSnapshots(modelKey).then((result) => {
+      if (!cancelled) setDiagnosticSnapshotCount(result.snapshots.length);
+    }).catch(() => {
+      if (!cancelled) setDiagnosticSnapshotCount(0);
+    });
+    return () => { cancelled = true; };
+  }, [evaluationJob?.evaluation?.modelKey, evaluationJob?.latestEvaluationSnapshotId]);
+
   const queue = useMemo(() => jobs.map((job) => ({
     id: job.id,
     title: job.label,
@@ -123,6 +157,15 @@ export function App() {
       label: t(sourceTask.label),
       time: t(sourceTask.time),
     };
+    if (task.id === "diagnose") {
+      return {
+        ...task,
+        state: diagnosticSnapshotCount >= 2 ? "done" : "waiting",
+        time: diagnosticSnapshotCount >= 2
+          ? t("已有 {count} 个评估快照", { count: diagnosticSnapshotCount })
+          : t("等待至少两个评估快照"),
+      };
+    }
     const commandIds = pipelineCommandMap[task.id] ?? [];
     const matchingJobs = jobs.filter((candidate) => commandIds.includes(candidate.commandId));
     const job = matchingJobs.find((candidate) => activeStates.has(candidate.state)) ?? matchingJobs[0];
@@ -147,7 +190,7 @@ export function App() {
             ? t("部分完成")
             : job.state === "orphaned" ? t("连接已丢失") : t("上次失败"),
     };
-  }), [jobs, t]);
+  }), [diagnosticSnapshotCount, jobs, t]);
 
   const workflowStates = useMemo(() => {
     const stateFor = (commandId) => {
@@ -168,6 +211,7 @@ export function App() {
       clean: combinedStateFor(["src.sort_faces", "dst.sort_faces"]),
       mask: combinedStateFor(["xseg.train", "xseg.apply_src", "xseg.apply_dst"]),
       train: stateFor("train.saehd"),
+      diagnose: diagnosticSnapshotCount >= 2 ? "done" : "waiting",
       merge: stateFor("merge.saehd"),
       encode: ["encode.mp4", "encode.mp4_lossless"].some((commandId) => stateFor(commandId) === "done")
         ? "done"
@@ -175,21 +219,37 @@ export function App() {
           ? "active"
           : "waiting",
     };
-  }, [jobs]);
+  }, [diagnosticSnapshotCount, jobs]);
 
   const handleNavigate = useCallback((id, label) => {
     setActiveNav(id);
+    const nextStage = navigationWorkflowStages[id];
+    if (nextStage) setSelectedStage(nextStage);
+    if (id === "diagnostics") {
+      setActiveTask("diagnose");
+    }
     setConsoleCollapsed(id !== "overview");
     showToast(t("已切换到「{label}」工作区", { label }));
   }, [showToast, t]);
 
   const handleStageSelect = useCallback((stage) => {
+    const destination = workflowStageDestinations[stage.id];
     setSelectedStage(stage.id);
+    if (destination?.nav) setActiveNav(destination.nav);
+    if (destination?.task) setActiveTask(destination.task);
+    setConsoleCollapsed(destination?.nav !== "overview");
     showToast(t("已定位到「{label}」阶段", { label: stage.label }));
   }, [showToast, t]);
 
   const handleTaskSelect = useCallback((task) => {
     setActiveTask(task.id);
+    if (task.id === "diagnose") {
+      setSelectedStage("diagnose");
+      setActiveNav("diagnostics");
+      setConsoleCollapsed(true);
+      showToast(t("已打开独立的质量诊断环节"));
+      return;
+    }
     if (task.id === "saehd") setSelectedStage("train");
     if (task.id === "xseg") setSelectedStage("mask");
     if (task.id === "merge") setSelectedStage("merge");
@@ -264,6 +324,31 @@ export function App() {
     }
   }, [runAction, runtime, showToast, t, trainingJob]);
 
+  const evaluateTraining = useCallback(async () => {
+    if (!evaluationJob || !evaluationJob.controls?.includes("evaluate")) {
+      showToast(t("当前训练任务不能生成评估快照"), "warning");
+      throw new Error(t("当前训练任务不能生成评估快照"));
+    }
+    return runAction(
+      () => runtime.control("evaluate", evaluationJob.id),
+      t("评估请求已送入 Trainer，不会修改训练权重"),
+    );
+  }, [evaluationJob, runAction, runtime, showToast, t]);
+
+  const openQualityDiagnostics = useCallback(() => {
+    setActiveNav("diagnostics");
+    setSelectedStage("diagnose");
+    setActiveTask("diagnose");
+    setConsoleCollapsed(true);
+  }, []);
+
+  const openPoseAtlasCell = useCallback((cellId) => {
+    setPoseAtlasFocus({ cellId, nonce: Date.now() });
+    setActiveNav("tools");
+    setConsoleCollapsed(true);
+    showToast(t("已按同一姿势格打开数据图谱：{cellId}", { cellId }));
+  }, [showToast, t]);
+
   const handleStopConfirm = useCallback(async () => {
     setStopConfirmOpen(false);
     await controlTraining("close", t("已请求安全停止；Trainer 将先保存模型"));
@@ -294,6 +379,36 @@ export function App() {
         serviceOnline={runtime.serviceState === "online"}
         onError={showError}
         onArchived={handleArchivedJobs}
+      />
+    );
+  } else if (activeNav === "workflow.frames") {
+    mainContent = (
+      <CommandCenterView
+        title={t("视频帧提取")}
+        description={t("从 SRC 与 DST 视频生成固定工作区帧序列。")}
+        commands={commands}
+        filter={frameCommandFilter}
+        onOpenCommand={openCommand}
+      />
+    );
+  } else if (activeNav === "workflow.faces") {
+    mainContent = (
+      <CommandCenterView
+        title={t("人脸提取")}
+        description={t("从 SRC 与 DST 帧序列生成 aligned 人脸数据集。")}
+        commands={commands}
+        filter={faceCommandFilter}
+        onOpenCommand={openCommand}
+      />
+    );
+  } else if (activeNav === "workflow.clean") {
+    mainContent = (
+      <CommandCenterView
+        title={t("数据清洗与排序")}
+        description={t("检查并排序 SRC / DST aligned 数据，供遮罩和训练使用。")}
+        commands={commands}
+        filter={cleanCommandFilter}
+        onOpenCommand={openCommand}
       />
     );
   } else if (activeNav === "src" || activeNav === "dst") {
@@ -332,6 +447,18 @@ export function App() {
         aside={<ModelSummaryAside workspace={workspaceSnapshot} />}
       />
     );
+  } else if (activeNav === "diagnostics") {
+    mainContent = (
+      <QualityDiagnosticsView
+        evaluationJob={evaluationJob}
+        refreshKey={evaluationJob?.latestEvaluationSnapshotId}
+        onEvaluate={evaluateTraining}
+        onOpenPoseAtlas={openPoseAtlasCell}
+        onError={showError}
+        onNotice={showToast}
+        onSnapshotCount={setDiagnosticSnapshotCount}
+      />
+    );
   } else if (activeNav === "merge") {
     mainContent = (
       <CommandCenterView
@@ -362,6 +489,7 @@ export function App() {
         onError={showError}
         onNotice={showToast}
         onNavigateDataset={openDatasetSample}
+        poseFocus={poseAtlasFocus}
       />
     );
   } else if (activeNav === "settings") {
@@ -401,6 +529,14 @@ export function App() {
           onSave: () => void controlTraining("save", t("保存请求已送入 Trainer")),
           onBackup: () => void controlTraining("backup", t("备份请求已送入 Trainer")),
           onRefresh: () => void controlTraining("preview", t("预览刷新请求已送入 Trainer")),
+          onEvaluate: () => void evaluateTraining().catch(() => {}),
+          onOpenDiagnostics: openQualityDiagnostics,
+          canEvaluate: Boolean(
+            evaluationJob
+            && ["starting", "running", "waiting_input"].includes(evaluationJob.state)
+            && evaluationJob.controls?.includes("evaluate")
+          ),
+          latestEvaluationSnapshotId: evaluationJob?.latestEvaluationSnapshotId,
           onSafeStop: () => setStopConfirmOpen(true),
         }}
         status={{
@@ -424,8 +560,9 @@ export function App() {
 
   return (
     <AppShell activeNav={activeNav} onNavigate={handleNavigate}>
-      <main className={`main-surface${activeNav === "tools" ? " is-tools" : ""}`}>
+      <main className={`main-surface${activeNav === "tools" ? " is-tools" : ""}${activeNav === "diagnostics" ? " is-diagnostics" : ""}`}>
         <ProjectHeader
+          projectName={runtime.health?.project?.name}
           workspacePath={workspacePath}
           serviceState={runtime.serviceState}
           telemetry={runtime.telemetry}

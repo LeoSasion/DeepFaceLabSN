@@ -46,6 +46,13 @@ export function applyEventToJob(job, event) {
     return { ...job, latestPrompt: event.payload.prompt, sequence: event.sequence };
   }
   if (event.type === "job.artifact") {
+    if (event.payload.kind === "training-evaluation") {
+      return {
+        ...job,
+        latestEvaluationSnapshotId: event.payload.snapshotId,
+        sequence: event.sequence,
+      };
+    }
     return { ...job, previewVersion: event.payload.version, sequence: event.sequence };
   }
   if (event.type === "job.finished") {

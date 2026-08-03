@@ -3,6 +3,7 @@ import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { buildDflEnvironment } from "./environment.mjs";
 import { PATHS, pathExists } from "./paths.mjs";
+import { createTrainingModelKey } from "./training-evaluation-manager.mjs";
 
 const GPU_PARAMETERS = [
   {
@@ -1186,9 +1187,9 @@ const definitions = Object.freeze({
     side: "both",
     interactive: true,
     parameters: TRAIN_PARAMETERS,
-    controls: ["save", "backup", "preview", "close"],
+    controls: ["save", "backup", "preview", "evaluate", "close"],
     locks: ["workspace:model", "gpu"],
-    async preflight() {
+    async preflight(context = {}) {
       await requireFile(PATHS.python, "内置 Python 不存在");
       await requireFile(PATHS.legacyMain, "legacy DeepFaceLab 入口不存在");
       await requireDirectoryWithFiles(
@@ -1199,6 +1200,51 @@ const definitions = Object.freeze({
         path.join(PATHS.workspaceRoot, "data_dst", "aligned"),
         "DST aligned 人脸集不存在或为空",
       );
+      const modelName = context.parameters?.forceModelName;
+      if (!modelName) {
+        return {
+          evaluation: {
+            enabled: false,
+            reason: "姿态评测需要在引导模式中明确指定 SAEHD 模型名称",
+          },
+        };
+      }
+      if (!context.trainingEvaluationManager) {
+        return {
+          evaluation: {
+            enabled: false,
+            reason: "本地姿态评测管理器不可用",
+          },
+        };
+      }
+      try {
+        const modelKey = createTrainingModelKey(modelName, "SAEHD");
+        const manifest = await context.trainingEvaluationManager.createOrReuseManifest(
+          modelKey,
+          { modelName, modelClass: "SAEHD" },
+        );
+        const existing = await context.trainingEvaluationManager.listSnapshots(modelKey);
+        return {
+          evaluation: {
+            enabled: true,
+            modelKey,
+            manifestId: manifest.manifestId,
+            manifestPath: context.trainingEvaluationManager.manifestPath(
+              modelKey,
+              manifest.manifestId,
+            ),
+            evaluationRoot: context.trainingEvaluationManager.modelDirectory(modelKey),
+            existingSnapshotIds: existing.snapshots.map((snapshot) => snapshot.snapshotId),
+          },
+        };
+      } catch (error) {
+        return {
+          evaluation: {
+            enabled: false,
+            reason: error instanceof Error ? error.message : "姿态评测集生成失败",
+          },
+        };
+      }
     },
     build(context) {
       const args = [
@@ -1220,13 +1266,34 @@ const definitions = Object.freeze({
       appendValue(args, "--force-gpu-idxs", context.parameters.gpuIndexes);
       appendBoolean(args, "--cpu-only", context.parameters.cpuOnly);
       appendBoolean(args, "--silent-start", context.parameters.silentStart);
+      const evaluation = context.preflight?.evaluation ?? {
+        enabled: false,
+        reason: "姿态评测预检尚未运行",
+      };
+      const evaluationEnvironment = evaluation.enabled
+        ? {
+            DFL_WEB_EVAL_MANIFEST: evaluation.manifestPath,
+            DFL_WEB_EVAL_ROOT: evaluation.evaluationRoot,
+            DFL_WEB_EVAL_MODEL_KEY: evaluation.modelKey,
+            DFL_WEBUI_PYTHON: path.join(PATHS.webuiRoot, "python"),
+          }
+        : {};
       return {
         executable: PATHS.python,
         args,
         env: buildDflEnvironment("legacy", {
           DFL_WEB_CONTROL_FILE: context.controlFile,
           DFL_WEB_PREVIEW_FILE: context.previewFile,
+          ...evaluationEnvironment,
         }),
+        evaluation: evaluation.enabled
+          ? {
+              enabled: true,
+              modelKey: evaluation.modelKey,
+              manifestId: evaluation.manifestId,
+              existingSnapshotIds: evaluation.existingSnapshotIds,
+            }
+          : { enabled: false, reason: evaluation.reason },
       };
     },
     async postflight() {
@@ -1737,10 +1804,10 @@ function requireDefinition(commandId) {
   return definitions[commandId];
 }
 
-export async function preflightCommand(commandId) {
+export async function preflightCommand(commandId, context = {}) {
   const definition = requireDefinition(commandId);
-  await definition.preflight();
-  return definition;
+  const result = await definition.preflight(context);
+  return { definition, result };
 }
 
 function validateParameterValue(schema, value) {
@@ -1848,8 +1915,12 @@ export async function prepareCommand(commandId, options = {}) {
     options.parameters ?? {},
     launchMode,
   );
-  const definition = await preflightCommand(commandId);
-  return { definition, launchMode, parameters };
+  const { definition, result: preflight } = await preflightCommand(commandId, {
+    launchMode,
+    parameters,
+    trainingEvaluationManager: options.trainingEvaluationManager,
+  });
+  return { definition, launchMode, parameters, preflight };
 }
 
 export function buildCommand(definition, context) {
@@ -1864,8 +1935,8 @@ export function buildCommand(definition, context) {
 }
 
 export async function resolveCommand(commandId, context) {
-  const definition = await preflightCommand(commandId);
-  return buildCommand(definition, context);
+  const { definition, result: preflight } = await preflightCommand(commandId, context);
+  return buildCommand(definition, { ...context, preflight });
 }
 
 export function getCommandDefinition(commandId) {

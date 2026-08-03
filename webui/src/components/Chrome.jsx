@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   IconBoxModel2,
+  IconChartDots3,
   IconCheck,
   IconChevronRight,
   IconFileExport,
@@ -59,6 +60,7 @@ const navItems = [
   { id: "dst", label: "DST 数据", icon: IconUsers },
   { id: "xseg", label: "XSeg 遮罩", icon: IconMasksTheater, tone: "violet" },
   { id: "training", label: "模型训练", icon: IconBoxModel2 },
+  { id: "diagnostics", label: "质量诊断", icon: IconChartDots3 },
   { id: "merge", label: "模型应用", icon: IconStack2 },
   { id: "export", label: "视频导出", icon: IconFileExport },
   { id: "tools", label: "工具", icon: IconTool },
@@ -114,7 +116,7 @@ export function Sidebar({ activeNav, onNavigate }) {
   );
 }
 
-export function ProjectHeader({ workspacePath, serviceState, telemetry, onNewTask, onMenu }) {
+export function ProjectHeader({ projectName, workspacePath, serviceState, telemetry, onNewTask, onMenu }) {
   const { language, setLanguage, t } = useI18n();
   const serviceOnline = serviceState === "online";
   const gpu = telemetry?.gpus?.[0];
@@ -122,7 +124,7 @@ export function ProjectHeader({ workspacePath, serviceState, telemetry, onNewTas
     <header className="project-header">
       <div className="project-copy">
         <div className="project-title-row">
-          <h1>DeepFaceLabSN</h1>
+          <h1>DeepFaceLabSN{projectName ? <small> · {projectName}</small> : null}</h1>
           <button className="icon-button quiet" type="button" aria-label={t("项目名称来自当前仓库")} disabled>
             <IconPencil size={15} stroke={1.8} />
           </button>
@@ -197,11 +199,13 @@ export function WorkflowBar({ selectedStage, stageStates = {}, onSelectStage }) 
               <span className="stage-copy">
                 <strong>{t(stage.label)}</strong>
                 <small>
-                  {actualState === "done"
+                  {selectedStage === stage.id
+                    ? t("当前视图")
+                    : actualState === "done"
                     ? t("完成")
                     : actualState === "active"
                       ? t("进行中")
-                      : selectedStage === stage.id ? t("当前视图") : t("未运行")}
+                      : t("未运行")}
                 </small>
               </span>
             </button>

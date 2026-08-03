@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { access, link, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, copyFile, link, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -9,14 +9,18 @@ import {
   formatCommand,
   getCommandDefinition,
   listCommands,
+  prepareCommand,
   validateCommandParameters,
 } from "../server/command-registry.mjs";
 import {
   auditAlignedAssets,
   buildAlignedPoseAtlas,
+  buildAlignedPoseProbe,
+  buildAlignedSimilarityGroups,
   inspectAlignedPack,
   inspectExtractionCoverage,
   listAlignedAssets,
+  previewAlignedRepair,
   resolveAlignedImage,
 } from "../server/asset-manager.mjs";
 import { buildDflEnvironment } from "../server/environment.mjs";
@@ -24,8 +28,13 @@ import { DisabledExternalWindowAdapter } from "../server/external-window-adapter
 import { JobManager } from "../server/job-manager.mjs";
 import { OutputParser, stripAnsi } from "../server/output-parser.mjs";
 import { PATHS, assertWithin } from "../server/paths.mjs";
+import { ProjectManager } from "../server/project-manager.mjs";
 import { createPtyRunner } from "../server/pty-runner.mjs";
 import { parseNvidiaSmiCsv } from "../server/telemetry.mjs";
+import {
+  createTrainingModelKey,
+  TrainingEvaluationManager,
+} from "../server/training-evaluation-manager.mjs";
 import {
   inspectExportReadiness,
   inspectWorkspace,
@@ -35,6 +44,7 @@ import {
 } from "../server/workspace-manager.mjs";
 import { applyEventToJob, mergeJobs } from "../src/runtime/useRuntime.js";
 import { buildPoseComparison } from "../src/domain/pose-comparison.js";
+import { normalizeSegments } from "../server/video-tool-manager.mjs";
 
 test("command registry exposes the approved fixed workflows", () => {
   const commands = listCommands();
@@ -99,7 +109,7 @@ test("command registry exposes the approved fixed workflows", () => {
   const training = commands.find((command) => command.id === "train.saehd");
   assert.equal(training.profile, "legacy");
   assert.equal(training.stage, "train");
-  assert.deepEqual(training.controls, ["save", "backup", "preview", "close"]);
+  assert.deepEqual(training.controls, ["save", "backup", "preview", "evaluate", "close"]);
   assert.equal(commands.find((command) => command.id === "merge.saehd").profile, "legacy");
   assert.equal(commands.find((command) => command.id === "encode.mp4").stage, "encode");
 });
@@ -128,6 +138,33 @@ test("guided parameters are allowlisted, typed, and reflected in fixed arguments
   assert.ok(launch.args.includes("128"));
   assert.ok(launch.args.includes("--force-gpu-idxs"));
   assert.ok(!launch.args.includes("--cpu-only"));
+
+  const trainingParameters = validateCommandParameters("train.saehd", {
+    targetIterations: 100000,
+    forceModelName: "web-smoke-128",
+    silentStart: true,
+    gpuIndexes: "0",
+    cpuOnly: false,
+  }, "guided");
+  const trainingLaunch = buildCommand(getCommandDefinition("train.saehd"), {
+    parameters: trainingParameters,
+    controlFile: path.join(PATHS.jobsRoot, "fixed-job", "control.jsonl"),
+    previewFile: path.join(PATHS.jobsRoot, "fixed-job", "preview.png"),
+    preflight: {
+      evaluation: {
+        enabled: true,
+        modelKey: "web-smoke-128-saehd-123456789abc",
+        manifestId: "a".repeat(24),
+        manifestPath: path.join(PATHS.trainingEvaluationsRoot, "model", "manifests", `${"a".repeat(24)}.json`),
+        evaluationRoot: path.join(PATHS.trainingEvaluationsRoot, "model"),
+        existingSnapshotIds: [],
+      },
+    },
+  }).launch;
+  assert.equal(trainingLaunch.evaluation.enabled, true);
+  assert.equal(trainingLaunch.env.DFL_WEB_EVAL_MODEL_KEY, "web-smoke-128-saehd-123456789abc");
+  assert.match(trainingLaunch.env.DFL_WEB_EVAL_MANIFEST, /training-evaluations/i);
+  assert.equal(trainingLaunch.env.DFL_WEBUI_PYTHON, path.join(PATHS.webuiRoot, "python"));
   assert.deepEqual(validateCommandParameters("src.sort_faces", {}, "cli"), {});
   assert.throws(
     () => validateCommandParameters("src.extract_faces", { detector: "shell" }, "guided"),
@@ -291,6 +328,336 @@ test("tool workbench analysis is bounded, non-destructive, and uses fixed review
     assert.equal(nextMergeReview.items.length, 1);
     assert.notEqual(nextMergeReview.items[0].name, mergeReview.items[0].name);
   }
+});
+
+test("visual similarity grouping is bounded, explainable, and read-only", async () => {
+  const assets = await listAlignedAssets("src", { limit: 1 });
+  assert.ok(assets.items.length > 0, "expected a real aligned fixture");
+  const target = resolveAlignedImage("src", encodeURIComponent(assets.items[0].name));
+  const before = await stat(target);
+  const result = await buildAlignedSimilarityGroups("src", {
+    refresh: true,
+    threshold: 0.86,
+    limit: 40,
+  });
+  const after = await stat(target);
+  assert.equal(result.method, "dct-hsv-edge-v1");
+  assert.ok(result.analyzedCount <= 40);
+  assert.ok(result.groups.every((group) => group.members.length >= 2));
+  assert.equal(after.size, before.size);
+  assert.equal(after.mtimeMs, before.mtimeMs);
+});
+
+test("alignment repair preview uses 68 real source points without mutating the JPG", async () => {
+  const coverage = await inspectExtractionCoverage("src", { refresh: true, limit: 60 });
+  const face = coverage.items.flatMap((item) => item.faces).find((item) => item.landmarks.length === 68);
+  assert.ok(face, "expected a 68-point aligned fixture");
+  const target = resolveAlignedImage("src", encodeURIComponent(face.alignedName));
+  const before = await stat(target);
+  const preview = await previewAlignedRepair("src", encodeURIComponent(face.alignedName), {
+    landmarks: face.landmarks,
+  });
+  const after = await stat(target);
+  assert.match(preview.previewDataUrl, /^data:image\/jpeg;base64,/);
+  assert.equal(preview.landmarks.length, 68);
+  assert.equal(after.size, before.size);
+  assert.equal(after.mtimeMs, before.mtimeMs);
+});
+
+test("alignment repair atomically rewrites a temporary JPG and creates a recovery copy", async (t) => {
+  const coverage = await inspectExtractionCoverage("src", { refresh: true, limit: 60 });
+  const frame = coverage.items.find((item) => item.faces.some((face) => face.landmarks.length === 68));
+  const face = frame?.faces.find((item) => item.landmarks.length === 68);
+  assert.ok(frame && face, "expected a repair fixture");
+  const root = await mkdtemp(path.join(os.tmpdir(), "dfl-alignment-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const frames = path.join(root, "frames");
+  const aligned = path.join(root, "aligned");
+  const backups = path.join(root, "backups");
+  await Promise.all([mkdir(frames), mkdir(aligned), mkdir(backups)]);
+  const sourceTarget = path.join(frames, frame.name);
+  const alignedTarget = path.join(aligned, face.alignedName);
+  await Promise.all([
+    copyFile(path.join(PATHS.workspaceRoot, "data_src", frame.name), sourceTarget),
+    copyFile(resolveAlignedImage("src", encodeURIComponent(face.alignedName)), alignedTarget),
+  ]);
+  const helper = path.join(PATHS.webuiRoot, "python", "dfl_asset_tool.py");
+  const result = spawnSync(PATHS.python, [
+    helper,
+    "alignment-apply",
+    "--file", alignedTarget,
+    "--frames", frames,
+    "--backup-directory", backups,
+  ], {
+    cwd: PATHS.currentDflRoot,
+    env: buildDflEnvironment("current"),
+    input: JSON.stringify({ landmarks: face.landmarks }),
+    encoding: "utf8",
+    timeout: 30_000,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).applied, true);
+  assert.ok((await stat(path.join(backups, face.alignedName))).size > 0);
+  assert.ok((await stat(alignedTarget)).size > 0);
+});
+
+test("managed projects cannot escape their root and refuse active-job switches", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "dfl-projects-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const manager = new ProjectManager({
+    registryRoot: path.join(root, "registry"),
+    registryFile: path.join(root, "registry", "projects.json"),
+    managedRoot: path.join(root, "workspaces"),
+    legacyWorkspace: path.join(root, "legacy"),
+  });
+  await mkdir(path.join(root, "legacy"), { recursive: true });
+  const created = await manager.create({ name: "Interview A", id: "interview-a" });
+  assert.equal(created.id, "interview-a");
+  assert.ok(created.workspaceRoot.startsWith(path.join(root, "workspaces")));
+  await assert.rejects(
+    () => manager.activate("interview-a", [{ id: "job-1", state: "running" }]),
+    (error) => error.code === "PROJECT_BUSY" && error.status === 409,
+  );
+  const activated = await manager.activate("interview-a", [{ id: "job-2", state: "succeeded" }]);
+  assert.equal(activated.restartRequired, true);
+  assert.equal((await manager.list()).activeId, "interview-a");
+});
+
+test("video segment manifests enforce bounded in-range cuts", () => {
+  const segments = normalizeSegments([
+    { start: 1.25, end: 2.5, label: "A", selected: true },
+    { start: 0, end: 1.2, label: "B", selected: false },
+  ], 6);
+  assert.deepEqual(segments.map((segment) => segment.label), ["B", "A"]);
+  assert.ok(segments.every((segment) => /^seg-[a-f0-9]{10}$/.test(segment.id)));
+  assert.throws(() => normalizeSegments([{ start: 5, end: 7 }], 6), /超出视频时长/);
+  assert.throws(() => normalizeSegments(Array.from({ length: 101 }, () => ({ start: 0, end: 1 })), 6));
+});
+
+test("pose probe manifest is deterministic, bounded, and uses the shared pose cells", async () => {
+  const first = await buildAlignedPoseProbe("src");
+  const second = await buildAlignedPoseProbe("src");
+  assert.equal(first.schemaVersion, 1);
+  assert.equal(first.cells.length, first.yawTicks.length * first.pitchTicks.length);
+  assert.ok(first.samples.length <= 180);
+  assert.ok(first.cells.every((cell) => cell.selectedCount <= 3));
+  assert.equal(new Set(first.samples.map((sample) => sample.id)).size, first.samples.length);
+  assert.deepEqual(
+    first.samples.map((sample) => sample.id),
+    second.samples.map((sample) => sample.id),
+  );
+  assert.equal(first.datasetFingerprint, second.datasetFingerprint);
+  assert.ok(first.samples.every((sample) => (
+    sample.cellId === `p${sample.pitchTick}-y${sample.yawTick}`
+  )));
+});
+
+test("training evaluation manifests are content-addressed and snapshot reads ignore pending data", async (t) => {
+  const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "dfl-training-evaluation-"));
+  t.after(() => rm(temporaryDirectory, { recursive: true, force: true }));
+  let reverseSamples = false;
+  let srcFingerprint = "a".repeat(64);
+  const yawTicks = [-15, 0, 15];
+  const pitchTicks = [15, 0, -15];
+  const makeSample = (side, yawTick, ordinal) => ({
+    id: `${side}-p0-y${yawTick}-${String(ordinal).padStart(2, "0")}`,
+    side,
+    name: `${side}-${yawTick}-${ordinal}.jpg`,
+    sha256Prefix: String(ordinal).repeat(16),
+    sourceFilename: `${side}-${yawTick}.png`,
+    cellId: `p0-y${yawTick}`,
+    yaw: yawTick,
+    pitch: 0,
+    yawTick,
+    pitchTick: 0,
+    sharpness: 0.4,
+    brightness: 0.5,
+    hasAppliedMask: false,
+  });
+  const probeBuilder = async (side) => {
+    const samples = [makeSample(side, -15, 1), makeSample(side, 15, 1)];
+    if (reverseSamples) samples.reverse();
+    return {
+      schemaVersion: 1,
+      side,
+      datasetFingerprint: side === "src" ? srcFingerprint : "b".repeat(64),
+      sampleCount: samples.length,
+      yawTicks,
+      pitchTicks,
+      samples,
+    };
+  };
+  const manager = new TrainingEvaluationManager({
+    root: path.join(temporaryDirectory, "active"),
+    archiveRoot: path.join(temporaryDirectory, "archive"),
+    probeBuilder,
+    now: () => new Date("2026-08-03T00:00:00.000Z"),
+  });
+  await manager.initialize();
+  const modelName = "web smoke 128";
+  const modelKey = createTrainingModelKey(modelName, "SAEHD");
+  const first = await manager.createOrReuseManifest(modelKey, { modelName, modelClass: "SAEHD" });
+  reverseSamples = true;
+  const reused = await manager.createOrReuseManifest(modelKey, { modelName, modelClass: "SAEHD" });
+  assert.equal(reused.manifestId, first.manifestId);
+  assert.equal((await manager.listManifests(modelKey)).manifests.length, 1);
+
+  srcFingerprint = "c".repeat(64);
+  const changed = await manager.createOrReuseManifest(modelKey, { modelName, modelClass: "SAEHD" });
+  assert.notEqual(changed.manifestId, first.manifestId);
+  const manifests = await manager.listManifests(modelKey);
+  assert.equal(manifests.manifests.length, 2);
+  assert.equal(manifests.activeManifestId, changed.manifestId);
+
+  const snapshotId = "iter-00008000-abcdef12";
+  const snapshotsRoot = path.join(manager.modelDirectory(modelKey), "snapshots");
+  await mkdir(path.join(snapshotsRoot, snapshotId), { recursive: true });
+  await writeFile(path.join(snapshotsRoot, snapshotId, "summary.json"), JSON.stringify({
+    schemaVersion: 1,
+    snapshotId,
+    modelKey,
+    manifestId: changed.manifestId,
+    iteration: 8000,
+    metricSchemaVersion: 1,
+    modelSignature: { class: "SAEHD", resolution: 128, faceType: "wf" },
+    createdAt: "2026-08-03T00:10:00.000Z",
+    samples: [],
+  }));
+  await mkdir(path.join(snapshotsRoot, "_pending-deadbeef"), { recursive: true });
+  await writeFile(path.join(snapshotsRoot, "_pending-deadbeef", "summary.json"), "{}");
+  const snapshots = await manager.listSnapshots(modelKey);
+  assert.deepEqual(snapshots.snapshots.map((snapshot) => snapshot.snapshotId), [snapshotId]);
+  assert.equal((await manager.getSnapshot(modelKey, snapshotId)).iteration, 8000);
+  assert.deepEqual(
+    (await manager.archiveSnapshots(modelKey, [snapshotId])).archivedSnapshotIds,
+    [snapshotId],
+  );
+  assert.equal((await manager.listSnapshots(modelKey)).snapshots.length, 0);
+  assert.deepEqual(
+    (await manager.restoreSnapshots(modelKey, [snapshotId])).restoredSnapshotIds,
+    [snapshotId],
+  );
+  assert.equal((await manager.listSnapshots(modelKey)).snapshots.length, 1);
+  assert.throws(
+    () => manager.snapshotDirectory(modelKey, "../outside"),
+    (error) => error.code === "SNAPSHOT_ID_INVALID",
+  );
+  await assert.rejects(
+    manager.createOrReuseManifest("unsafe-model-key", { modelName, modelClass: "SAEHD" }),
+    (error) => error.code === "MODEL_KEY_MISMATCH",
+  );
+});
+
+test("SAEHD guided preflight binds a real manifest to fixed server-owned paths", async (t) => {
+  const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "dfl-training-preflight-"));
+  t.after(() => rm(temporaryDirectory, { recursive: true, force: true }));
+  const manager = new TrainingEvaluationManager({
+    root: path.join(temporaryDirectory, "active"),
+    archiveRoot: path.join(temporaryDirectory, "archive"),
+  });
+  await manager.initialize();
+  const parameters = {
+    targetIterations: 100000,
+    forceModelName: "web-smoke-128",
+    silentStart: true,
+    gpuIndexes: "0",
+    cpuOnly: false,
+  };
+  const prepared = await prepareCommand("train.saehd", {
+    launchMode: "guided",
+    parameters,
+    trainingEvaluationManager: manager,
+  });
+  assert.equal(prepared.preflight.evaluation.enabled, true);
+  assert.equal(
+    assertWithin(manager.root, prepared.preflight.evaluation.manifestPath),
+    prepared.preflight.evaluation.manifestPath,
+  );
+  const launch = buildCommand(prepared.definition, {
+    launchMode: prepared.launchMode,
+    parameters: prepared.parameters,
+    preflight: prepared.preflight,
+    controlFile: path.join(PATHS.jobsRoot, "fixed-job", "control.jsonl"),
+    previewFile: path.join(PATHS.jobsRoot, "fixed-job", "preview.png"),
+  }).launch;
+  assert.equal(launch.evaluation.enabled, true);
+  assert.equal(launch.env.DFL_WEB_EVAL_MANIFEST, prepared.preflight.evaluation.manifestPath);
+  assert.equal(launch.env.DFL_WEB_EVAL_ROOT, prepared.preflight.evaluation.evaluationRoot);
+});
+
+test("training evaluation metrics and snapshot publication are deterministic and atomic", async (t) => {
+  const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "dfl-evaluation-python-"));
+  t.after(() => rm(temporaryDirectory, { recursive: true, force: true }));
+  const helperDirectory = path.join(PATHS.webuiRoot, "python");
+  const source = `
+import json
+import sys
+from pathlib import Path
+import numpy as np
+sys.path.insert(0, ${JSON.stringify(helperDirectory)})
+from training_evaluation import AtomicEvaluationSnapshot, reconstruction_metrics, swap_metrics
+
+root = Path(sys.argv[1])
+image = np.full((16, 16, 3), 0.5, dtype=np.float32)
+changed = image.copy()
+changed[4:12, 4:12] = 0.25
+mask = np.zeros((16, 16, 1), dtype=np.float32)
+mask[3:13, 3:13] = 1.0
+eyes = np.zeros((16, 16, 1), dtype=np.float32)
+eyes[5:8, 5:11] = 1.0
+metrics = reconstruction_metrics(image, changed, mask, eyes, mask)
+metrics["nonFiniteProbe"] = float("nan")
+swap = swap_metrics(image, changed, mask, mask)
+snapshot = AtomicEvaluationSnapshot(
+    root,
+    "web-smoke-128-saehd-123456789abc",
+    "a" * 24,
+    8000,
+    {"class": "SAEHD", "resolution": 16, "faceType": "wf"},
+)
+snapshot.add_sample(
+    {"id": "dst-p0-y0-01", "side": "dst", "cellId": "p0-y0", "yaw": 0, "pitch": 0},
+    {"input": image, "reconstruction": changed, "target-mask": mask},
+    {"reconstruction": metrics, "swap": swap},
+)
+summary = snapshot.publish()
+published_summary = json.loads((root / "snapshots" / summary["snapshotId"] / "summary.json").read_text())
+print(json.dumps({
+    "snapshotId": summary["snapshotId"],
+    "maskedMse": metrics["maskedMse"],
+    "maskDice": metrics["maskDice"],
+    "published": (root / "snapshots" / summary["snapshotId"] / "summary.json").is_file(),
+    "pending": any(path.name.startswith("_pending-") for path in (root / "snapshots").iterdir()),
+    "nonFiniteSanitized": published_summary["samples"][0]["metrics"]["reconstruction"]["nonFiniteProbe"] is None,
+}))
+`;
+  const result = spawnSync(PATHS.python, ["-c", source, temporaryDirectory], {
+    encoding: "utf8",
+    env: buildDflEnvironment("legacy"),
+    cwd: PATHS.legacyDflRoot,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.match(output.snapshotId, /^iter-00008000-[a-f0-9]{8}$/);
+  assert.ok(output.maskedMse > 0);
+  assert.equal(output.maskDice, 1);
+  assert.equal(output.published, true);
+  assert.equal(output.pending, false);
+  assert.equal(output.nonFiniteSanitized, true);
+});
+
+test("SAEHD pose evaluation is statically isolated from optimizer and save calls", async () => {
+  const modelSource = await readFile(
+    path.join(PATHS.legacyDflRoot, "models", "Model_SAEHD", "Model.py"),
+    "utf8",
+  );
+  const method = modelSource.slice(
+    modelSource.indexOf("    def evaluate_pose_probes(self):"),
+    modelSource.indexOf("    def export_dfm(self):"),
+  );
+  assert.match(method, /self\.AE_view\(/);
+  assert.match(method, /DFL_WEBUI_PYTHON/);
+  assert.doesNotMatch(method, /self\.(?:src_dst_train|D_train|D_src_dst_train|save|onSave)\(/);
 });
 
 test("pose comparison normalizes unequal datasets and identifies actionable SRC gaps", () => {
@@ -530,6 +897,18 @@ test("runtime state ignores stale snapshots and out-of-order job events", () => 
   assert.deepEqual(
     mergeJobs(current, [{ id: "job-one", state: "running", sequence: 11 }]),
     current,
+  );
+  assert.equal(
+    applyEventToJob(
+      { id: "job-one", sequence: 13, previewVersion: 10 },
+      {
+        jobId: "job-one",
+        sequence: 14,
+        type: "job.artifact",
+        payload: { kind: "training-evaluation", snapshotId: "iter-00008000-abcdef12" },
+      },
+    ).latestEvaluationSnapshotId,
+    "iter-00008000-abcdef12",
   );
   assert.deepEqual(
     applyEventToJob(current[0], {

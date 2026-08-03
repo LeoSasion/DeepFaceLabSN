@@ -6,13 +6,19 @@ import path from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 import {
   auditAlignedAssets,
+  applyAlignedRepair,
   buildAlignedPoseAtlas,
+  buildAlignedSimilarityGroups,
   inspectAlignedPack,
   inspectAlignedAnnotation,
   inspectExtractionCoverage,
   listAlignedAssets,
+  listAlignedRepairBackups,
   listAlignedQuarantine,
+  previewAlignedRepair,
   quarantineAlignedImage,
+  quarantineAlignedImages,
+  restoreAlignedRepair,
   restoreAlignedImage,
   saveAlignedAnnotation,
   streamAlignedImage,
@@ -22,7 +28,9 @@ import { describeEnvironment } from "./environment.mjs";
 import { DisabledExternalWindowAdapter } from "./external-window-adapter.mjs";
 import { JobManager } from "./job-manager.mjs";
 import { PATHS, pathExists } from "./paths.mjs";
+import { ProjectManager } from "./project-manager.mjs";
 import { getGpuTelemetry } from "./telemetry.mjs";
+import { TrainingEvaluationManager } from "./training-evaluation-manager.mjs";
 import {
   importWorkspaceVideo,
   inspectExportReadiness,
@@ -32,10 +40,19 @@ import {
   resolveWorkspaceArtifact,
   resolveWorkspaceMaterial,
 } from "./workspace-manager.mjs";
+import {
+  detectVideoScenes,
+  extractVideoSegments,
+  inspectVideoTimeline,
+  listFrameArchives,
+  restoreFrameArchive,
+  saveVideoSegments,
+} from "./video-tool-manager.mjs";
 
-const MAX_BODY_BYTES = 64 * 1024;
+const MAX_BODY_BYTES = 256 * 1024;
 const SESSION_COOKIE = "dfl_web_session";
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
+const ACTIVE_JOB_STATES = new Set(["queued", "starting", "running", "waiting_input", "stopping"]);
 const DEFAULT_ALLOWED_ORIGINS = new Set([
   "http://127.0.0.1:4173",
   "http://localhost:4173",
@@ -75,6 +92,14 @@ function sendError(response, error) {
       ...(error?.details ? { details: error.details } : {}),
     },
   });
+}
+
+function runtimeConflict(message, code, details) {
+  const error = new Error(message);
+  error.code = code;
+  error.status = 409;
+  error.details = details;
+  return error;
 }
 
 async function sendVideoArtifact(request, response, target) {
@@ -124,7 +149,12 @@ async function sendReviewImage(response, target) {
     });
   }
   const fileStat = await stat(target);
-  const contentType = path.extname(target).toLowerCase() === ".png" ? "image/png" : "image/jpeg";
+  const extension = path.extname(target).toLowerCase();
+  const contentType = extension === ".png"
+    ? "image/png"
+    : extension === ".webp"
+      ? "image/webp"
+      : "image/jpeg";
   response.writeHead(200, {
     "Content-Type": contentType,
     "Content-Length": fileStat.size,
@@ -195,16 +225,27 @@ function isWriteRequest(request) {
 
 export class RuntimeServer {
   constructor({
-    jobManager = new JobManager(),
+    trainingEvaluationManager = new TrainingEvaluationManager(),
+    jobManager = null,
     externalWindowAdapter = new DisabledExternalWindowAdapter(),
+    projectManager = new ProjectManager(),
+    onProjectActivation = (result) => {
+      if (!result.restartRequired) return;
+      const timer = setTimeout(() => process.exit(75), 250);
+      timer.unref();
+    },
     staticRoot = PATHS.staticRoot,
     allowedOrigins = DEFAULT_ALLOWED_ORIGINS,
   } = {}) {
-    this.jobManager = jobManager;
+    this.trainingEvaluationManager = trainingEvaluationManager;
+    this.jobManager = jobManager ?? new JobManager({ trainingEvaluationManager });
     this.externalWindowAdapter = externalWindowAdapter;
+    this.projectManager = projectManager;
+    this.onProjectActivation = onProjectActivation;
     this.staticRoot = staticRoot;
     this.allowedOrigins = new Set(allowedOrigins);
     this.sessionToken = randomBytes(32).toString("hex");
+    this.workspaceMutation = null;
     this.httpServer = null;
     this.webSocketServer = null;
   }
@@ -213,7 +254,10 @@ export class RuntimeServer {
     if (!LOOPBACK_HOSTS.has(host)) {
       throw new Error("本地运行时只允许监听 loopback 地址");
     }
-    await this.jobManager.initialize();
+    await Promise.all([
+      this.jobManager.initialize(),
+      this.trainingEvaluationManager.initialize(),
+    ]);
     this.webSocketServer = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
     this.httpServer = createServer((request, response) => {
       void this.handleRequest(request, response);
@@ -257,6 +301,34 @@ export class RuntimeServer {
   requestHasSession(request) {
     const token = parseCookies(request.headers.cookie)[SESSION_COOKIE];
     return safeTokenEqual(token, this.sessionToken);
+  }
+
+  assertNoWorkspaceMutation() {
+    if (this.workspaceMutation) {
+      throw runtimeConflict(
+        `工作区正在执行“${this.workspaceMutation}”，请等待完成后重试`,
+        "WORKSPACE_MUTATION_BUSY",
+        { operation: this.workspaceMutation },
+      );
+    }
+  }
+
+  async withWorkspaceMutation(operation, callback, { allowActiveJobs = false } = {}) {
+    this.assertNoWorkspaceMutation();
+    const activeJobs = this.jobManager.list().filter((job) => ACTIVE_JOB_STATES.has(job?.state));
+    if (!allowActiveJobs && activeJobs.length) {
+      throw runtimeConflict(
+        "运行中的任务会占用工作区；请先安全停止任务再修改素材或数据集",
+        "WORKSPACE_JOB_BUSY",
+        { jobIds: activeJobs.map((job) => job.id) },
+      );
+    }
+    this.workspaceMutation = operation;
+    try {
+      return await callback();
+    } finally {
+      this.workspaceMutation = null;
+    }
   }
 
   async handleRequest(request, response) {
@@ -315,6 +387,7 @@ export class RuntimeServer {
               current: describeEnvironment("current"),
               legacy: describeEnvironment("legacy"),
             },
+            project: PATHS.activeProject,
             capabilities: {
               pty: true,
               websocket: true,
@@ -339,6 +412,93 @@ export class RuntimeServer {
     if (request.method === "GET" && url.pathname === "/api/workspace") {
       return sendJson(response, 200, { ok: true, data: await inspectWorkspace() });
     }
+    if (request.method === "GET" && url.pathname === "/api/projects") {
+      return sendJson(response, 200, { ok: true, data: await this.projectManager.list() });
+    }
+    if (request.method === "POST" && url.pathname === "/api/projects") {
+      return sendJson(response, 201, {
+        ok: true,
+        data: await this.projectManager.create(await readJsonBody(request)),
+      });
+    }
+    const projectActivateMatch = url.pathname.match(/^\/api\/projects\/([a-z0-9][a-z0-9-]{0,47})\/activate$/);
+    if (request.method === "POST" && projectActivateMatch) {
+      const result = await this.withWorkspaceMutation("切换项目", () => (
+        this.projectManager.activate(projectActivateMatch[1], this.jobManager.list())
+      ));
+      this.onProjectActivation(result);
+      return sendJson(response, 200, { ok: true, data: result });
+    }
+    const evaluationManifestsMatch = url.pathname.match(
+      /^\/api\/training-evaluations\/([a-z0-9][a-z0-9_-]{0,63})\/manifests$/,
+    );
+    if (request.method === "GET" && evaluationManifestsMatch) {
+      return sendJson(response, 200, {
+        ok: true,
+        data: await this.trainingEvaluationManager.listManifests(evaluationManifestsMatch[1]),
+      });
+    }
+    const evaluationSnapshotsMatch = url.pathname.match(
+      /^\/api\/training-evaluations\/([a-z0-9][a-z0-9_-]{0,63})\/snapshots$/,
+    );
+    if (request.method === "GET" && evaluationSnapshotsMatch) {
+      return sendJson(response, 200, {
+        ok: true,
+        data: await this.trainingEvaluationManager.listSnapshots(evaluationSnapshotsMatch[1]),
+      });
+    }
+    const evaluationArchiveMatch = url.pathname.match(
+      /^\/api\/training-evaluations\/([a-z0-9][a-z0-9_-]{0,63})\/archive$/,
+    );
+    if (request.method === "POST" && evaluationArchiveMatch) {
+      const body = await readJsonBody(request);
+      return sendJson(response, 200, {
+        ok: true,
+        data: await this.trainingEvaluationManager.archiveSnapshots(
+          evaluationArchiveMatch[1],
+          body.snapshotIds,
+        ),
+      });
+    }
+    const evaluationRestoreMatch = url.pathname.match(
+      /^\/api\/training-evaluations\/([a-z0-9][a-z0-9_-]{0,63})\/restore$/,
+    );
+    if (request.method === "POST" && evaluationRestoreMatch) {
+      const body = await readJsonBody(request);
+      return sendJson(response, 200, {
+        ok: true,
+        data: await this.trainingEvaluationManager.restoreSnapshots(
+          evaluationRestoreMatch[1],
+          body.snapshotIds,
+        ),
+      });
+    }
+    const evaluationSnapshotMatch = url.pathname.match(
+      /^\/api\/training-evaluations\/([a-z0-9][a-z0-9_-]{0,63})\/snapshots\/(iter-\d{8,12}-[a-f0-9]{8,32})$/,
+    );
+    if (request.method === "GET" && evaluationSnapshotMatch) {
+      return sendJson(response, 200, {
+        ok: true,
+        data: await this.trainingEvaluationManager.getSnapshot(
+          evaluationSnapshotMatch[1],
+          evaluationSnapshotMatch[2],
+        ),
+      });
+    }
+    const evaluationSampleMatch = url.pathname.match(
+      /^\/api\/training-evaluations\/([a-z0-9][a-z0-9_-]{0,63})\/snapshots\/(iter-\d{8,12}-[a-f0-9]{8,32})\/samples\/((?:src|dst)-p-?\d+-y-?\d+-\d{2})\/(input|reconstruction|swap|target-mask|predicted-mask)$/,
+    );
+    if (request.method === "GET" && evaluationSampleMatch) {
+      return sendReviewImage(
+        response,
+        await this.trainingEvaluationManager.resolveSnapshotImage(
+          evaluationSampleMatch[1],
+          evaluationSampleMatch[2],
+          evaluationSampleMatch[3],
+          evaluationSampleMatch[4],
+        ),
+      );
+    }
     const toolAuditMatch = url.pathname.match(/^\/api\/tools\/assets\/(src|dst)\/audit$/);
     if (request.method === "GET" && toolAuditMatch) {
       return sendJson(response, 200, {
@@ -346,6 +506,17 @@ export class RuntimeServer {
         data: await auditAlignedAssets(toolAuditMatch[1], {
           refresh: url.searchParams.get("refresh") === "1",
           offset: url.searchParams.get("offset"),
+          limit: url.searchParams.get("limit"),
+        }),
+      });
+    }
+    const toolSimilarityMatch = url.pathname.match(/^\/api\/tools\/assets\/(src|dst)\/similarity$/);
+    if (request.method === "GET" && toolSimilarityMatch) {
+      return sendJson(response, 200, {
+        ok: true,
+        data: await buildAlignedSimilarityGroups(toolSimilarityMatch[1], {
+          refresh: url.searchParams.get("refresh") === "1",
+          threshold: url.searchParams.get("threshold"),
           limit: url.searchParams.get("limit"),
         }),
       });
@@ -380,6 +551,48 @@ export class RuntimeServer {
           offset: url.searchParams.get("offset"),
           limit: url.searchParams.get("limit"),
         }),
+      });
+    }
+    const videoTimelineMatch = url.pathname.match(/^\/api\/tools\/video\/(src|dst)\/timeline$/);
+    if (request.method === "GET" && videoTimelineMatch) {
+      return sendJson(response, 200, { ok: true, data: await inspectVideoTimeline(videoTimelineMatch[1]) });
+    }
+    const videoScenesMatch = url.pathname.match(/^\/api\/tools\/video\/(src|dst)\/detect-scenes$/);
+    if (request.method === "POST" && videoScenesMatch) {
+      return sendJson(response, 200, {
+        ok: true,
+        data: await detectVideoScenes(videoScenesMatch[1], await readJsonBody(request)),
+      });
+    }
+    const videoSegmentsMatch = url.pathname.match(/^\/api\/tools\/video\/(src|dst)\/segments$/);
+    if (request.method === "PUT" && videoSegmentsMatch) {
+      return sendJson(response, 200, {
+        ok: true,
+        data: await saveVideoSegments(videoSegmentsMatch[1], await readJsonBody(request)),
+      });
+    }
+    const videoExtractMatch = url.pathname.match(/^\/api\/tools\/video\/(src|dst)\/extract-segments$/);
+    if (request.method === "POST" && videoExtractMatch) {
+      return sendJson(response, 200, {
+        ok: true,
+        data: await this.withWorkspaceMutation("分段提帧", async () => (
+          extractVideoSegments(videoExtractMatch[1], await readJsonBody(request))
+        )),
+      });
+    }
+    const videoArchivesMatch = url.pathname.match(/^\/api\/tools\/video\/(src|dst)\/frame-archives$/);
+    if (request.method === "GET" && videoArchivesMatch) {
+      return sendJson(response, 200, { ok: true, data: await listFrameArchives(videoArchivesMatch[1]) });
+    }
+    const videoArchiveRestoreMatch = url.pathname.match(
+      /^\/api\/tools\/video\/(src|dst)\/frame-archives\/(\d{14}-[a-f0-9]{10})\/restore$/,
+    );
+    if (request.method === "POST" && videoArchiveRestoreMatch) {
+      return sendJson(response, 200, {
+        ok: true,
+        data: await this.withWorkspaceMutation("恢复帧归档", () => (
+          restoreFrameArchive(videoArchiveRestoreMatch[1], videoArchiveRestoreMatch[2])
+        )),
       });
     }
     const workspaceMaterialMatch = url.pathname.match(/^\/api\/workspace\/materials\/(src|dst)$/);
@@ -431,11 +644,65 @@ export class RuntimeServer {
     if (request.method === "PUT" && alignedAnnotationMatch) {
       return sendJson(response, 200, {
         ok: true,
-        data: await saveAlignedAnnotation(
-          alignedAnnotationMatch[1],
-          alignedAnnotationMatch[2],
+        data: await this.withWorkspaceMutation("保存 XSeg 标注", async () => (
+          saveAlignedAnnotation(
+            alignedAnnotationMatch[1],
+            alignedAnnotationMatch[2],
+            await readJsonBody(request),
+          )
+        )),
+      });
+    }
+    const alignedRepairPreviewMatch = url.pathname.match(
+      /^\/api\/assets\/(src|dst)\/aligned\/([^/]+)\/alignment-preview$/,
+    );
+    if (request.method === "POST" && alignedRepairPreviewMatch) {
+      return sendJson(response, 200, {
+        ok: true,
+        data: await previewAlignedRepair(
+          alignedRepairPreviewMatch[1],
+          alignedRepairPreviewMatch[2],
           await readJsonBody(request),
         ),
+      });
+    }
+    const alignedRepairApplyMatch = url.pathname.match(
+      /^\/api\/assets\/(src|dst)\/aligned\/([^/]+)\/alignment-apply$/,
+    );
+    if (request.method === "POST" && alignedRepairApplyMatch) {
+      return sendJson(response, 200, {
+        ok: true,
+        data: await this.withWorkspaceMutation("应用对齐修复", async () => (
+          applyAlignedRepair(
+            alignedRepairApplyMatch[1],
+            alignedRepairApplyMatch[2],
+            await readJsonBody(request),
+          )
+        )),
+      });
+    }
+    const alignedRepairBackupsMatch = url.pathname.match(
+      /^\/api\/assets\/(src|dst)\/alignment-backups$/,
+    );
+    if (request.method === "GET" && alignedRepairBackupsMatch) {
+      return sendJson(response, 200, {
+        ok: true,
+        data: await listAlignedRepairBackups(alignedRepairBackupsMatch[1]),
+      });
+    }
+    const alignedRepairRestoreMatch = url.pathname.match(
+      /^\/api\/assets\/(src|dst)\/alignment-backups\/([0-9]{14}-[a-f0-9]{10})\/([^/]+)\/restore$/,
+    );
+    if (request.method === "POST" && alignedRepairRestoreMatch) {
+      return sendJson(response, 200, {
+        ok: true,
+        data: await this.withWorkspaceMutation("恢复对齐备份", () => (
+          restoreAlignedRepair(
+            alignedRepairRestoreMatch[1],
+            alignedRepairRestoreMatch[2],
+            alignedRepairRestoreMatch[3],
+          )
+        )),
       });
     }
     const alignedImageMatch = url.pathname.match(
@@ -457,10 +724,22 @@ export class RuntimeServer {
     if (request.method === "POST" && quarantineImageMatch) {
       return sendJson(response, 200, {
         ok: true,
-        data: await quarantineAlignedImage(
-          quarantineImageMatch[1],
-          quarantineImageMatch[2],
-        ),
+        data: await this.withWorkspaceMutation("隔离 aligned 图片", () => (
+          quarantineAlignedImage(
+            quarantineImageMatch[1],
+            quarantineImageMatch[2],
+          )
+        )),
+      });
+    }
+    const quarantineBatchMatch = url.pathname.match(/^\/api\/assets\/(src|dst)\/aligned\/quarantine-batch$/);
+    if (request.method === "POST" && quarantineBatchMatch) {
+      return sendJson(response, 200, {
+        ok: true,
+        data: await this.withWorkspaceMutation("批量隔离 aligned 图片", async () => {
+          const body = await readJsonBody(request);
+          return quarantineAlignedImages(quarantineBatchMatch[1], body.names);
+        }),
       });
     }
     const restoreImageMatch = url.pathname.match(
@@ -469,19 +748,23 @@ export class RuntimeServer {
     if (request.method === "POST" && restoreImageMatch) {
       return sendJson(response, 200, {
         ok: true,
-        data: await restoreAlignedImage(
-          restoreImageMatch[1],
-          restoreImageMatch[2],
-          restoreImageMatch[3],
-        ),
+        data: await this.withWorkspaceMutation("恢复 aligned 图片", () => (
+          restoreAlignedImage(
+            restoreImageMatch[1],
+            restoreImageMatch[2],
+            restoreImageMatch[3],
+          )
+        )),
       });
     }
     const workspaceImportMatch = url.pathname.match(/^\/api\/workspace\/import\/(src|dst)$/);
     if (request.method === "POST" && workspaceImportMatch) {
-      const imported = await importWorkspaceVideo(workspaceImportMatch[1], request, {
-        encodedFileName: request.headers["x-file-name"],
-        replace: url.searchParams.get("replace") === "1",
-      });
+      const imported = await this.withWorkspaceMutation("导入视频素材", () => (
+        importWorkspaceVideo(workspaceImportMatch[1], request, {
+          encodedFileName: request.headers["x-file-name"],
+          replace: url.searchParams.get("replace") === "1",
+        })
+      ));
       return sendJson(response, 201, { ok: true, data: imported });
     }
     const workspaceArtifactMatch = url.pathname.match(
@@ -500,10 +783,13 @@ export class RuntimeServer {
     if (request.method === "POST" && commandPreflightMatch) {
       const body = await readJsonBody(request);
       const commandId = decodeURIComponent(commandPreflightMatch[1]);
-      const prepared = await prepareCommand(commandId, {
-        launchMode: body.launchMode,
-        parameters: body.parameters,
-      });
+      const prepared = await this.withWorkspaceMutation("检查任务参数", () => (
+        prepareCommand(commandId, {
+          launchMode: body.launchMode,
+          parameters: body.parameters,
+          trainingEvaluationManager: this.trainingEvaluationManager,
+        })
+      ), { allowActiveJobs: true });
       return sendJson(response, 200, {
         ok: true,
         data: {
@@ -513,6 +799,14 @@ export class RuntimeServer {
           profile: prepared.definition.profile,
           stage: prepared.definition.stage,
           locks: prepared.definition.locks,
+          evaluation: prepared.preflight?.evaluation
+            ? {
+                enabled: prepared.preflight.evaluation.enabled,
+                modelKey: prepared.preflight.evaluation.modelKey,
+                manifestId: prepared.preflight.evaluation.manifestId,
+                reason: prepared.preflight.evaluation.reason,
+              }
+            : null,
         },
       });
     }
@@ -527,12 +821,14 @@ export class RuntimeServer {
     }
     if (request.method === "POST" && url.pathname === "/api/jobs") {
       const body = await readJsonBody(request);
-      const job = await this.jobManager.start(body.commandId, {
-        cols: body.cols,
-        rows: body.rows,
-        launchMode: body.launchMode,
-        parameters: body.parameters,
-      });
+      const job = await this.withWorkspaceMutation("启动任务", () => (
+        this.jobManager.start(body.commandId, {
+          cols: body.cols,
+          rows: body.rows,
+          launchMode: body.launchMode,
+          parameters: body.parameters,
+        })
+      ), { allowActiveJobs: true });
       return sendJson(response, 201, { ok: true, data: job });
     }
 

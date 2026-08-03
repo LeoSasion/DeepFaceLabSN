@@ -1,6 +1,7 @@
 import os
 import sys
 import traceback
+import copy
 import queue
 import threading
 import time
@@ -34,7 +35,7 @@ class WebTrainerBridge:
     s2c queue and model-save code.
     """
 
-    allowed_operations = {'save', 'backup', 'preview', 'close'}
+    allowed_operations = {'save', 'backup', 'preview', 'evaluate', 'close'}
 
     def __init__(self):
         control_path = os.environ.get('DFL_WEB_CONTROL_FILE', '').strip()
@@ -150,6 +151,61 @@ def trainerThread (s2c, c2s, e,
                     previews = [( 'debug, press update for new', model.debug_one_iter())]
                     c2s.put ( {'op':'show', 'previews': previews} )
                 e.set() #Set the GUI Thread as Ready
+
+            def model_evaluate():
+                if debug or not hasattr(model, 'evaluate_pose_probes'):
+                    io.log_err("[WEB EVALUATION ERROR] Loaded model does not support pose evaluation")
+                    return
+
+                iteration_before = model.get_iter()
+                loss_history_before = copy.deepcopy(model.get_loss_history())
+
+                def model_file_state():
+                    targets = [model.model_data_path]
+                    targets += [
+                        Path(model.get_strpath_storage_for_file(filename))
+                        for _, filename in model.get_model_filename_list()
+                    ]
+                    state = {}
+                    for target in targets:
+                        try:
+                            stat = target.stat()
+                            state[str(target)] = (stat.st_size, stat.st_mtime_ns)
+                        except FileNotFoundError:
+                            state[str(target)] = None
+                    return state
+
+                files_before = model_file_state()
+                summary = None
+                error = None
+                try:
+                    io.log_info("\n[WEB EVALUATION] Starting deterministic pose probes...")
+                    summary = model.evaluate_pose_probes()
+                except Exception as evaluation_error:
+                    error = evaluation_error
+
+                iteration_unchanged = model.get_iter() == iteration_before
+                loss_history_after = model.get_loss_history()
+                losses_unchanged = (
+                    len(loss_history_after) == len(loss_history_before)
+                    and all(
+                        np.array_equal(after, before)
+                        for after, before in zip(loss_history_after, loss_history_before)
+                    )
+                )
+                files_unchanged = model_file_state() == files_before
+                if not iteration_unchanged or not losses_unchanged or not files_unchanged:
+                    raise RuntimeError(
+                        "Read-only evaluation invariant failed; training stopped for safety"
+                    )
+                if error is not None:
+                    io.log_err("[WEB EVALUATION ERROR] %s" % error)
+                    return
+
+                io.log_info(
+                    "[WEB EVALUATION] Published %s at iteration %d"
+                    % (summary['snapshotId'], summary['iteration'])
+                )
 
             if model.get_target_iter() != 0:
                 if is_reached_goal:
@@ -286,6 +342,8 @@ def trainerThread (s2c, c2s, e,
                         if is_reached_goal:
                             model.pass_one_iter()
                         send_preview()
+                    elif op == 'evaluate':
+                        model_evaluate()
                     elif op == 'close':
                         model_save()
                         i = -1

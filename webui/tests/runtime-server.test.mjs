@@ -38,6 +38,19 @@ class FakeJobManager extends EventEmitter {
   async archiveCompleted() { return { archived: 1, path: "archive" }; }
 }
 
+class FakeTrainingEvaluationManager {
+  async initialize() {}
+  async listManifests(modelKey) {
+    return { modelKey, activeManifestId: "a".repeat(24), manifests: [] };
+  }
+  async listSnapshots(modelKey) {
+    return { modelKey, snapshots: [] };
+  }
+  async getSnapshot(modelKey, snapshotId) {
+    return { modelKey, snapshotId, iteration: 8000, samples: [] };
+  }
+}
+
 function waitForWebSocketMessage(webSocket) {
   return new Promise((resolve, reject) => {
     webSocket.once("message", (data) => resolve(JSON.parse(data.toString("utf8"))));
@@ -47,11 +60,19 @@ function waitForWebSocketMessage(webSocket) {
 
 test("runtime server issues a loopback session and protects writes/WebSocket", async (t) => {
   const jobManager = new FakeJobManager();
-  const server = new RuntimeServer({ jobManager });
+  const server = new RuntimeServer({
+    jobManager,
+    trainingEvaluationManager: new FakeTrainingEvaluationManager(),
+  });
   const address = await server.start({ port: 0 });
   t.after(() => server.stop());
   const baseUrl = `http://127.0.0.1:${address.port}`;
   const origin = "http://127.0.0.1:4173";
+
+  await assert.rejects(
+    server.withWorkspaceMutation("测试修改", async () => true),
+    (error) => error.code === "WORKSPACE_JOB_BUSY" && error.status === 409,
+  );
 
   const healthResponse = await fetch(`${baseUrl}/api/health`, {
     headers: { Origin: origin },
@@ -114,6 +135,24 @@ test("runtime server issues a loopback session and protects writes/WebSocket", a
   assert.equal(workspaceResponse.status, 200);
   const workspaceBody = await workspaceResponse.json();
   assert.ok(Object.hasOwn(workspaceBody.data.materials, "src"));
+
+  const evaluationManifestsResponse = await fetch(
+    `${baseUrl}/api/training-evaluations/web-smoke/manifests`,
+    { headers: { Origin: origin } },
+  );
+  assert.equal(evaluationManifestsResponse.status, 200);
+  assert.equal((await evaluationManifestsResponse.json()).data.modelKey, "web-smoke");
+  const evaluationSnapshotsResponse = await fetch(
+    `${baseUrl}/api/training-evaluations/web-smoke/snapshots`,
+    { headers: { Origin: origin } },
+  );
+  assert.equal(evaluationSnapshotsResponse.status, 200);
+  const evaluationSnapshotResponse = await fetch(
+    `${baseUrl}/api/training-evaluations/web-smoke/snapshots/iter-00008000-abcdef12`,
+    { headers: { Origin: origin } },
+  );
+  assert.equal(evaluationSnapshotResponse.status, 200);
+  assert.equal((await evaluationSnapshotResponse.json()).data.iteration, 8000);
 
   const auditResponse = await fetch(`${baseUrl}/api/tools/assets/src/audit`, {
     headers: { Origin: origin },

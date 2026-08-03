@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { mkdir, readdir, rename, stat } from "node:fs/promises";
+import { copyFile, mkdir, readdir, rename, stat, unlink } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import path from "node:path";
@@ -181,6 +181,74 @@ export async function buildAlignedPoseAtlas(side) {
   };
 }
 
+function recoveryToken() {
+  return `${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${randomBytes(5).toString("hex")}`;
+}
+
+export async function buildAlignedSimilarityGroups(
+  side,
+  { refresh = false, threshold = 0.86, limit = 500 } = {},
+) {
+  const directory = alignedDirectory(side);
+  const safeThreshold = Math.min(Math.max(Number(threshold) || 0.86, 0.72), 0.98);
+  const safeLimit = Math.min(Math.max(Number(limit) || 500, 2), 500);
+  if (!(await pathExists(directory))) {
+    return {
+      side, threshold: safeThreshold, total: 0, analyzedCount: 0, invalidCount: 0,
+      truncated: false, groupCount: 0, groupedCount: 0, ungroupedCount: 0,
+      method: "dct-hsv-edge-v1", groups: [], cached: false,
+    };
+  }
+  const result = await cachedAnalysis(
+    side,
+    `similarity:${safeThreshold.toFixed(3)}:${safeLimit}`,
+    refresh,
+    () => runAssetHelper([
+      "similarity", "--directory", directory, "--threshold", String(safeThreshold),
+      "--limit", String(safeLimit),
+    ]),
+  );
+  return {
+    side,
+    ...result,
+    groups: result.groups.map((group) => ({
+      ...group,
+      members: group.members.map((member) => ({
+        ...member,
+        imageUrl: `/api/assets/${side}/aligned/${encodeURIComponent(member.name)}`,
+      })),
+    })),
+  };
+}
+
+export async function buildAlignedPoseProbe(side) {
+  const directory = alignedDirectory(side);
+  if (!(await pathExists(directory))) {
+    return {
+      schemaVersion: 1,
+      side,
+      datasetFingerprint: null,
+      totalCount: 0,
+      validCount: 0,
+      invalidCount: 0,
+      sampleCount: 0,
+      maxSamples: 180,
+      maxSamplesPerCell: 3,
+      yawTicks: [-90, -75, -60, -45, -30, -15, 0, 15, 30, 45, 60, 75, 90],
+      pitchTicks: [60, 45, 30, 15, 0, -15, -30, -45, -60],
+      cells: [],
+      samples: [],
+    };
+  }
+  return runAssetHelper([
+    "probe-manifest",
+    "--directory",
+    directory,
+    "--side",
+    side,
+  ]);
+}
+
 export async function auditAlignedAssets(side, { refresh = false, offset = 0, limit = 120 } = {}) {
   const directory = alignedDirectory(side);
   const safeOffset = Math.max(Number(offset) || 0, 0);
@@ -309,6 +377,84 @@ export async function saveAlignedAnnotation(side, encodedName, payload) {
   return result;
 }
 
+export async function previewAlignedRepair(side, encodedName, payload) {
+  const target = resolveAlignedImage(side, encodedName);
+  const frames = path.join(PATHS.workspaceRoot, `data_${side}`);
+  if (!(await pathExists(target))) {
+    throw new AssetError("aligned 图片不存在", "IMAGE_MISSING", 404);
+  }
+  return runAssetHelper([
+    "alignment-preview", "--file", target, "--frames", frames,
+  ], { landmarks: payload?.landmarks });
+}
+
+export async function applyAlignedRepair(side, encodedName, payload) {
+  const target = resolveAlignedImage(side, encodedName);
+  const frames = path.join(PATHS.workspaceRoot, `data_${side}`);
+  if (!(await pathExists(target))) {
+    throw new AssetError("aligned 图片不存在", "IMAGE_MISSING", 404);
+  }
+  const token = recoveryToken();
+  const backupDirectory = assertWithin(
+    PATHS.runtimeRoot,
+    path.join(PATHS.runtimeRoot, "alignment-backups", side, token),
+    "对齐恢复目录",
+  );
+  await mkdir(backupDirectory, { recursive: true });
+  const result = await runAssetHelper([
+    "alignment-apply", "--file", target, "--frames", frames,
+    "--backup-directory", backupDirectory,
+  ], { landmarks: payload?.landmarks });
+  invalidateAnalysis(side);
+  return { side, token, ...result, recoverable: true };
+}
+
+export async function listAlignedRepairBackups(side) {
+  alignedDirectory(side);
+  const root = path.join(PATHS.runtimeRoot, "alignment-backups", side);
+  if (!(await pathExists(root))) return [];
+  const tokens = await readdir(root, { withFileTypes: true });
+  const result = [];
+  for (const tokenEntry of tokens) {
+    if (!tokenEntry.isDirectory() || !QUARANTINE_TOKEN.test(tokenEntry.name)) continue;
+    const directory = path.join(root, tokenEntry.name);
+    const files = await readdir(directory, { withFileTypes: true });
+    for (const file of files) {
+      if (file.isFile() && IMAGE_NAME.test(file.name)) {
+        result.push({ side, token: tokenEntry.name, name: file.name });
+      }
+    }
+  }
+  return result.sort((a, b) => b.token.localeCompare(a.token));
+}
+
+export async function restoreAlignedRepair(side, token, encodedName) {
+  const target = resolveAlignedImage(side, encodedName);
+  if (!QUARANTINE_TOKEN.test(token)) {
+    throw new AssetError("对齐备份记录无效", "ALIGNMENT_BACKUP_INVALID");
+  }
+  const name = path.basename(target);
+  const root = path.join(PATHS.runtimeRoot, "alignment-backups", side);
+  const backup = assertWithin(root, path.join(root, token, name), "对齐备份");
+  if (!(await pathExists(backup))) {
+    throw new AssetError("对齐备份不存在", "ALIGNMENT_BACKUP_MISSING", 404);
+  }
+  const restoreToken = recoveryToken();
+  const undoDirectory = path.join(PATHS.runtimeRoot, "alignment-restores", side, restoreToken);
+  await mkdir(undoDirectory, { recursive: true });
+  if (await pathExists(target)) await copyFile(target, path.join(undoDirectory, name));
+  const temporary = `${target}.${process.pid}.${Date.now()}.restore`;
+  try {
+    await copyFile(backup, temporary);
+    await rename(temporary, target);
+  } catch (error) {
+    if (await pathExists(temporary)) await unlink(temporary);
+    throw error;
+  }
+  invalidateAnalysis(side);
+  return { side, token, name, restored: true, undoToken: restoreToken };
+}
+
 export async function streamAlignedImage(response, side, encodedName) {
   const target = resolveAlignedImage(side, encodedName);
   if (!(await pathExists(target))) {
@@ -329,12 +475,44 @@ export async function quarantineAlignedImage(side, encodedName) {
   if (!(await pathExists(target))) {
     throw new AssetError("aligned 图片不存在", "IMAGE_MISSING", 404);
   }
-  const token = `${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${randomBytes(5).toString("hex")}`;
+  const token = recoveryToken();
   const destinationDirectory = path.join(PATHS.runtimeRoot, "quarantine", side, token);
   await mkdir(destinationDirectory, { recursive: true });
   await rename(target, path.join(destinationDirectory, path.basename(target)));
   invalidateAnalysis(side);
   return { side, token, name: path.basename(target), recoverable: true };
+}
+
+export async function quarantineAlignedImages(side, names) {
+  if (!Array.isArray(names) || !names.length || names.length > 500) {
+    throw new AssetError("批量隔离需要 1–500 个文件", "QUARANTINE_BATCH_INVALID");
+  }
+  const uniqueNames = [...new Set(names.map((name) => String(name)))];
+  const targets = uniqueNames.map((name) => resolveAlignedImage(side, encodeURIComponent(name)));
+  for (const target of targets) {
+    if (!(await pathExists(target))) {
+      throw new AssetError(`aligned 图片不存在：${path.basename(target)}`, "IMAGE_MISSING", 404);
+    }
+  }
+  const token = recoveryToken();
+  const destinationDirectory = path.join(PATHS.runtimeRoot, "quarantine", side, token);
+  await mkdir(destinationDirectory, { recursive: true });
+  const moved = [];
+  try {
+    for (const target of targets) {
+      const name = path.basename(target);
+      await rename(target, path.join(destinationDirectory, name));
+      moved.push(name);
+    }
+  } catch (error) {
+    for (const name of moved) {
+      const source = path.join(destinationDirectory, name);
+      if (await pathExists(source)) await rename(source, path.join(alignedDirectory(side), name));
+    }
+    throw error;
+  }
+  invalidateAnalysis(side);
+  return { side, token, names: moved, count: moved.length, recoverable: true };
 }
 
 export async function listAlignedQuarantine(side) {

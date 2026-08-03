@@ -17,13 +17,15 @@ import { useI18n } from "../i18n.jsx";
 import { buildPoseComparison } from "../domain/pose-comparison.js";
 import { CommandRows } from "./OperationsView.jsx";
 import {
-  DatasetAuditPanel,
   ExportPreflightPanel,
-  ExtractionReviewPanel,
   MergeReviewPanel,
   MetadataPackPanel,
-  VideoTimelinePanel,
 } from "./ToolWorkbenchPanels.jsx";
+import {
+  AlignmentRepairPanel,
+  DatasetCleaningPanel,
+  SegmentTimelinePanel,
+} from "./AdvancedWorkbenchPanels.jsx";
 
 const QUALITY_LABELS = ["< 0.2", "0.2 – 0.4", "0.4 – 0.6", "0.6 – 0.8", "> 0.8"];
 const SIDE_AWARE_TABS = new Set(["audit", "extract", "video", "metadata"]);
@@ -194,7 +196,7 @@ function comparisonFocusCell(cells) {
     ?? fullestCell(cells, (cell) => cell.srcCount + cell.dstCount);
 }
 
-function PoseAtlas({ refreshVersion, onError, onNotice, onNavigateDataset, onOpenCommand }) {
+function PoseAtlas({ refreshVersion, focusCellId, focusNonce, onError, onNotice, onNavigateDataset, onOpenCommand }) {
   const { t } = useI18n();
   const [atlases, setAtlases] = useState(() => ({
     src: emptyAtlas("src"),
@@ -263,6 +265,13 @@ function PoseAtlas({ refreshVersion, onError, onNotice, onNavigateDataset, onOpe
     () => buildPoseComparison(atlases.src, atlases.dst),
     [atlases.dst, atlases.src],
   );
+  useEffect(() => {
+    if (!focusCellId || !focusNonce) return;
+    if (comparison.cells.some((cell) => cell.id === focusCellId)) {
+      setSelectedId(focusCellId);
+      setViewMode("compare");
+    }
+  }, [comparison.cells, focusCellId, focusNonce]);
   const activeSide = viewMode === "dst" ? "dst" : "src";
   const atlas = atlases[activeSide];
   const selected = atlas.cells.find((cell) => cell.id === selectedId) ?? null;
@@ -659,7 +668,7 @@ function MigrationMap() {
   );
 }
 
-export function ToolLabView({ commands, onOpenCommand, onError, onNotice, onNavigateDataset }) {
+export function ToolLabView({ commands, onOpenCommand, onError, onNotice, onNavigateDataset, poseFocus }) {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = useState("audit");
   const [side, setSide] = useState("src");
@@ -667,6 +676,10 @@ export function ToolLabView({ commands, onOpenCommand, onError, onNotice, onNavi
   const toolCommands = commands.filter((command) => (
     ["video", "dataset", "sort", "mask"].includes(command.category)
   ));
+
+  useEffect(() => {
+    if (poseFocus?.cellId) setActiveTab("atlas");
+  }, [poseFocus?.cellId, poseFocus?.nonce]);
 
   return (
     <section className="tool-lab-view">
@@ -718,7 +731,7 @@ export function ToolLabView({ commands, onOpenCommand, onError, onNotice, onNavi
 
       <div className="tool-lab-content">
         {activeTab === "audit" ? (
-          <DatasetAuditPanel
+          <DatasetCleaningPanel
             side={side}
             refreshVersion={refreshVersion}
             onError={onError}
@@ -727,11 +740,11 @@ export function ToolLabView({ commands, onOpenCommand, onError, onNotice, onNavi
             onOpenCommand={onOpenCommand}
           />
         ) : activeTab === "extract" ? (
-          <ExtractionReviewPanel side={side} refreshVersion={refreshVersion} onError={onError} onOpenCommand={onOpenCommand} />
+          <AlignmentRepairPanel side={side} refreshVersion={refreshVersion} onError={onError} onNotice={onNotice} onOpenCommand={onOpenCommand} />
         ) : activeTab === "merge" ? (
           <MergeReviewPanel refreshVersion={refreshVersion} onError={onError} onOpenCommand={onOpenCommand} />
         ) : activeTab === "video" ? (
-          <VideoTimelinePanel side={side} refreshVersion={refreshVersion} onError={onError} onOpenCommand={onOpenCommand} />
+          <SegmentTimelinePanel side={side} refreshVersion={refreshVersion} onError={onError} onNotice={onNotice} onOpenCommand={onOpenCommand} />
         ) : activeTab === "metadata" ? (
           <MetadataPackPanel side={side} refreshVersion={refreshVersion} onError={onError} onOpenCommand={onOpenCommand} />
         ) : activeTab === "export" ? (
@@ -739,6 +752,8 @@ export function ToolLabView({ commands, onOpenCommand, onError, onNotice, onNavi
         ) : activeTab === "atlas" ? (
           <PoseAtlas
             refreshVersion={refreshVersion}
+            focusCellId={poseFocus?.cellId}
+            focusNonce={poseFocus?.nonce}
             onError={onError}
             onNotice={onNotice}
             onNavigateDataset={onNavigateDataset}

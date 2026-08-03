@@ -1,16 +1,21 @@
 import argparse
+import base64
 import hashlib
 import json
 import math
 import os
 import pickletools
+import shutil
 import struct
 import sys
+import tempfile
 import zipfile
 from collections import Counter
 from pathlib import Path
+from statistics import median
 
 import cv2
+import numpy as np
 
 DFL_ROOT = Path(
     os.environ.get(
@@ -22,11 +27,11 @@ sys.path.insert(0, str(DFL_ROOT))
 
 from core.imagelib import SegIEPolyType, SegIEPolys
 from DFLIMG import DFLIMG
-from facelib import LandmarksProcessor
+from facelib import FaceType, LandmarksProcessor
+from pose_bins import PITCH_TICKS, YAW_TICKS, nearest_tick, pose_cell_id
+from pose_probe_contract import fingerprint_probe_directory
 
 
-YAW_TICKS = tuple(range(-90, 91, 15))
-PITCH_TICKS = tuple(range(60, -61, -15))
 LOW_QUALITY_THRESHOLD = 0.24
 QUALITY_BANDS = (0.2, 0.4, 0.6, 0.8)
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
@@ -36,6 +41,10 @@ MIN_XSEG_AUDIT_PIXELS = 64
 MAX_PACK_CONFIG_BYTES = 64 * 1024 * 1024
 MAX_PICKLE_OPS = 2_000_000
 PICKLE_MARK = object()
+PROBE_SCHEMA_VERSION = 1
+MAX_PROBE_SAMPLES_PER_SIDE = 180
+MAX_PROBE_SAMPLES_PER_CELL = 3
+MAX_SIMILARITY_ITEMS = 500
 
 
 def emit(value):
@@ -57,10 +66,6 @@ def serialize_polygons(dfl_image):
         }
         for poly in dfl_image.get_seg_ie_polys().get_polys()
     ]
-
-
-def nearest_tick(value, ticks):
-    return min(ticks, key=lambda tick: abs(tick - value))
 
 
 def image_quality(image):
@@ -708,6 +713,133 @@ def build_pose_atlas(directory):
     }
 
 
+def build_pose_probe_manifest(directory, side):
+    if side not in ("src", "dst"):
+        raise ValueError("probe side must be src or dst")
+
+    files = iter_images(directory)
+    dataset_fingerprint, file_digests = fingerprint_probe_directory(directory)
+    records = []
+    invalid_count = 0
+
+    for image_path in files:
+        try:
+            digest = file_digests[image_path.name]
+            sample = analyze_pose(image_path)
+        except Exception:
+            invalid_count += 1
+            continue
+
+        pitch_tick = nearest_tick(sample["pitch"], PITCH_TICKS)
+        yaw_tick = nearest_tick(sample["yaw"], YAW_TICKS)
+        records.append({
+            **sample,
+            "sha256Prefix": digest[:16],
+            "cellId": pose_cell_id(pitch_tick, yaw_tick),
+            "pitchTick": pitch_tick,
+            "yawTick": yaw_tick,
+        })
+
+    grouped = {
+        (pitch, yaw): []
+        for pitch in PITCH_TICKS
+        for yaw in YAW_TICKS
+    }
+    for record in records:
+        grouped[(record["pitchTick"], record["yawTick"])].append(record)
+
+    ranked = {}
+    for key, candidates in grouped.items():
+        if not candidates:
+            ranked[key] = []
+            continue
+        median_sharpness = median(item["sharpness"] for item in candidates)
+        ordered = sorted(
+            candidates,
+            key=lambda item: (
+                abs(item["sharpness"] - median_sharpness),
+                item["name"].casefold(),
+            ),
+        )
+        distinct = []
+        seen_sources = set()
+        for item in ordered:
+            source_key = (item.get("sourceFilename") or item["name"]).casefold()
+            if source_key in seen_sources:
+                continue
+            seen_sources.add(source_key)
+            distinct.append(item)
+        ranked[key] = distinct
+
+    canonical_keys = [
+        (pitch, yaw)
+        for pitch in PITCH_TICKS
+        for yaw in YAW_TICKS
+    ]
+    canonical_order = {key: index for index, key in enumerate(canonical_keys)}
+    selected_by_cell = {key: [] for key in canonical_keys}
+    selected_count = 0
+    for round_index in range(MAX_PROBE_SAMPLES_PER_CELL):
+        if selected_count >= MAX_PROBE_SAMPLES_PER_SIDE:
+            break
+        keys = canonical_keys if round_index == 0 else sorted(
+            canonical_keys,
+            key=lambda key: (-len(grouped[key]), canonical_order[key]),
+        )
+        for key in keys:
+            if selected_count >= MAX_PROBE_SAMPLES_PER_SIDE:
+                break
+            candidates = ranked[key]
+            if round_index >= len(candidates):
+                continue
+            selected_by_cell[key].append(candidates[round_index])
+            selected_count += 1
+
+    samples = []
+    cells = []
+    for pitch, yaw in canonical_keys:
+        cell_samples = selected_by_cell[(pitch, yaw)]
+        cells.append({
+            "id": pose_cell_id(pitch, yaw),
+            "pitch": pitch,
+            "yaw": yaw,
+            "count": len(grouped[(pitch, yaw)]),
+            "selectedCount": len(cell_samples),
+        })
+        for ordinal, sample in enumerate(cell_samples, start=1):
+            samples.append({
+                "id": f"{side}-{pose_cell_id(pitch, yaw)}-{ordinal:02d}",
+                "side": side,
+                "name": sample["name"],
+                "sha256Prefix": sample["sha256Prefix"],
+                "sourceFilename": sample.get("sourceFilename"),
+                "cellId": pose_cell_id(pitch, yaw),
+                "yaw": sample["yaw"],
+                "pitch": sample["pitch"],
+                "yawTick": yaw,
+                "pitchTick": pitch,
+                "sharpness": sample["sharpness"],
+                "brightness": sample["brightness"],
+                "hasAppliedMask": sample["hasAppliedMask"],
+            })
+
+    return {
+        "schemaVersion": PROBE_SCHEMA_VERSION,
+        "side": side,
+        "datasetFingerprint": dataset_fingerprint,
+        "totalCount": len(files),
+        "validCount": len(records),
+        "invalidCount": invalid_count,
+        "sampleCount": len(samples),
+        "maxSamples": MAX_PROBE_SAMPLES_PER_SIDE,
+        "maxSamplesPerCell": MAX_PROBE_SAMPLES_PER_CELL,
+        "yawTicks": list(YAW_TICKS),
+        "pitchTicks": list(PITCH_TICKS),
+        "cells": cells,
+        "samples": samples,
+    }
+
+
 def list_images(directory, offset, limit):
     files = iter_images(directory)
     items = []
@@ -739,19 +871,299 @@ def list_images(directory, offset, limit):
     return {"total": len(files), "offset": offset, "limit": limit, "items": items}
 
 
+def similarity_descriptor(image):
+    resized = cv2.resize(image, (96, 96), interpolation=cv2.INTER_AREA)
+    gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
+    gray = cv2.equalizeHist(np.uint8(gray * 255)).astype(np.float32) / 255.0
+    dct = cv2.dct(gray)[:12, :12].reshape(-1)[1:]
+    dct /= np.linalg.norm(dct) + 1e-8
+    hsv = cv2.cvtColor(resized, cv2.COLOR_BGR2HSV)
+    histogram = cv2.calcHist([hsv], [0, 1], None, [12, 8], [0, 180, 0, 256]).reshape(-1)
+    histogram /= np.linalg.norm(histogram) + 1e-8
+    edges = cv2.resize(cv2.Canny(np.uint8(gray * 255), 80, 160), (24, 24), interpolation=cv2.INTER_AREA)
+    edges = edges.astype(np.float32).reshape(-1) / 255.0
+    edges /= np.linalg.norm(edges) + 1e-8
+    descriptor = np.concatenate((dct * 0.58, histogram * 0.22, edges * 0.20))
+    return descriptor / (np.linalg.norm(descriptor) + 1e-8)
+
+
+def group_similar_images(directory, threshold=0.86, limit=MAX_SIMILARITY_ITEMS):
+    safe_threshold = min(max(float(threshold), 0.72), 0.98)
+    safe_limit = min(max(int(limit), 2), MAX_SIMILARITY_ITEMS)
+    all_files = iter_images(directory)
+    files = all_files[:safe_limit]
+    records = []
+    invalid_count = 0
+    for image_path in files:
+        image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+        if image is None:
+            invalid_count += 1
+            continue
+        try:
+            records.append({
+                "name": image_path.name,
+                "descriptor": similarity_descriptor(image),
+            })
+        except Exception:
+            invalid_count += 1
+
+    count = len(records)
+    parents = list(range(count))
+
+    def find(index):
+        while parents[index] != index:
+            parents[index] = parents[parents[index]]
+            index = parents[index]
+        return index
+
+    def union(left, right):
+        left_root = find(left)
+        right_root = find(right)
+        if left_root != right_root:
+            parents[right_root] = left_root
+
+    similarities = np.eye(count, dtype=np.float32)
+    for left in range(count):
+        for right in range(left + 1, count):
+            score = float(np.dot(records[left]["descriptor"], records[right]["descriptor"]))
+            similarities[left, right] = similarities[right, left] = score
+            if score >= safe_threshold:
+                union(left, right)
+
+    grouped = {}
+    for index in range(count):
+        grouped.setdefault(find(index), []).append(index)
+    groups = []
+    for indexes in grouped.values():
+        if len(indexes) < 2:
+            continue
+        representative = max(
+            indexes,
+            key=lambda index: float(np.mean([similarities[index, other] for other in indexes])),
+        )
+        members = sorted(
+            ({
+                "name": records[index]["name"],
+                "score": round(float(similarities[representative, index]), 4),
+                "representative": index == representative,
+            } for index in indexes),
+            key=lambda item: (-item["score"], item["name"].casefold()),
+        )
+        pair_scores = [
+            float(similarities[left, right])
+            for position, left in enumerate(indexes)
+            for right in indexes[position + 1:]
+        ]
+        groups.append({
+            "id": f"similar-{len(groups) + 1:03d}",
+            "representativeName": records[representative]["name"],
+            "memberCount": len(members),
+            "minimumScore": round(min(pair_scores), 4) if pair_scores else 1.0,
+            "meanScore": round(float(np.mean(pair_scores)), 4) if pair_scores else 1.0,
+            "members": members,
+        })
+    groups.sort(key=lambda item: (-item["memberCount"], -item["meanScore"], item["id"]))
+    grouped_count = sum(group["memberCount"] for group in groups)
+    return {
+        "schemaVersion": 1,
+        "threshold": safe_threshold,
+        "total": len(all_files),
+        "analyzedCount": count,
+        "invalidCount": invalid_count,
+        "truncated": len(all_files) > safe_limit,
+        "groupCount": len(groups),
+        "groupedCount": grouped_count,
+        "ungroupedCount": max(count - grouped_count, 0),
+        "method": "dct-hsv-edge-v1",
+        "groups": groups,
+    }
+
+
+def encode_mask_data_url(mask):
+    image = np.clip(mask * 255.0, 0, 255).astype(np.uint8)
+    ok, buffer = cv2.imencode(".png", image)
+    if not ok:
+        return None
+    return "data:image/png;base64," + base64.b64encode(buffer).decode("ascii")
+
+
+def mask_suggested_polygons(mask, width, height):
+    binary = np.uint8(np.squeeze(mask) >= 0.5) * 255
+    if binary.shape[:2] != (height, width):
+        binary = cv2.resize(binary, (width, height), interpolation=cv2.INTER_NEAREST)
+    contours, _hierarchy = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    suggested = []
+    for contour in sorted(contours, key=cv2.contourArea, reverse=True)[:8]:
+        if cv2.contourArea(contour) < max(width * height * 0.001, 16):
+            continue
+        epsilon = max(1.0, cv2.arcLength(contour, True) * 0.008)
+        points = cv2.approxPolyDP(contour, epsilon, True).reshape(-1, 2)
+        if 3 <= len(points) <= 160:
+            suggested.append({
+                "type": "include",
+                "points": [[float(x), float(y)] for x, y in points],
+            })
+    return suggested
+
+
 def inspect_image(image_path):
     image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
     if image is None:
         raise ValueError("无法读取 aligned 图片")
     dfl_image = load_dfl_image(image_path)
+    mask = dfl_image.get_xseg_mask() if dfl_image.has_xseg_mask() else None
+    if mask is not None and mask.shape[:2] != image.shape[:2]:
+        mask = cv2.resize(mask, (image.shape[1], image.shape[0]), interpolation=cv2.INTER_LINEAR)
     return {
         "name": image_path.name,
         "width": int(image.shape[1]),
         "height": int(image.shape[0]),
         "polygons": serialize_polygons(dfl_image),
         "hasAppliedMask": bool(dfl_image.has_xseg_mask()),
+        "appliedMaskDataUrl": encode_mask_data_url(mask) if mask is not None else None,
+        "suggestedPolygons": (
+            mask_suggested_polygons(mask, image.shape[1], image.shape[0]) if mask is not None else []
+        ),
         "sourceFilename": dfl_image.get_source_filename(),
     }
+
+
+def validate_source_landmarks(payload, source_image):
+    points = payload.get("landmarks") if isinstance(payload, dict) else None
+    if not isinstance(points, list) or len(points) != 68:
+        raise ValueError("对齐修复需要完整的 68 个源帧 landmarks")
+    height, width = source_image.shape[:2]
+    values = np.asarray(points, dtype=np.float32)
+    if values.shape != (68, 2) or not np.isfinite(values).all():
+        raise ValueError("landmarks 格式无效")
+    if (
+        values[:, 0].min() < 0 or values[:, 1].min() < 0
+        or values[:, 0].max() >= width or values[:, 1].max() >= height
+    ):
+        raise ValueError("landmarks 超出源帧范围")
+    return values
+
+
+def resolve_source_frame(dfl_image, frames_directory):
+    source_name = Path(dfl_image.get_source_filename() or "").name
+    if not source_name:
+        raise ValueError("aligned 图片缺少 source_filename")
+    source_path = frames_directory / source_name
+    if not source_path.is_file() or source_path.suffix.lower() not in IMAGE_EXTENSIONS:
+        raise ValueError("对应源帧不存在")
+    source_image = cv2.imread(str(source_path), cv2.IMREAD_COLOR)
+    if source_image is None:
+        raise ValueError("无法读取对应源帧")
+    return source_path, source_image
+
+
+def alignment_result(image_path, frames_directory, payload, apply=False, backup_directory=None):
+    original = load_dfl_image(image_path)
+    _source_path, source_image = resolve_source_frame(original, frames_directory)
+    source_landmarks = validate_source_landmarks(payload, source_image)
+    aligned_image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+    if aligned_image is None or aligned_image.shape[0] != aligned_image.shape[1]:
+        raise ValueError("aligned 图片必须为可读取的正方形")
+    image_size = int(aligned_image.shape[1])
+    face_type = FaceType.fromString(original.get_face_type())
+    if face_type == FaceType.MARK_ONLY:
+        raise ValueError("mark_only 图片不支持对齐重裁")
+    new_matrix = LandmarksProcessor.get_transform_mat(source_landmarks, image_size, face_type)
+    preview = cv2.warpAffine(
+        source_image,
+        new_matrix,
+        (image_size, image_size),
+        flags=cv2.INTER_LANCZOS4,
+        borderMode=cv2.BORDER_CONSTANT,
+    )
+    aligned_landmarks = LandmarksProcessor.transform_points(source_landmarks, new_matrix)
+    ok, encoded = cv2.imencode(".jpg", preview, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+    if not ok:
+        raise ValueError("无法生成对齐预览")
+    response = {
+        "name": image_path.name,
+        "previewDataUrl": "data:image/jpeg;base64," + base64.b64encode(encoded).decode("ascii"),
+        "landmarks": [[float(x), float(y)] for x, y in aligned_landmarks],
+        "sourceLandmarks": [[float(x), float(y)] for x, y in source_landmarks],
+        "applied": False,
+    }
+    if not apply:
+        return response
+    if backup_directory is None:
+        raise ValueError("对齐应用缺少恢复目录")
+    backup_directory.mkdir(parents=True, exist_ok=True)
+    backup_target = backup_directory / image_path.name
+    if backup_target.exists():
+        raise ValueError("本次对齐备份已存在")
+    shutil.copy2(image_path, backup_target)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix=f".{image_path.stem}-", suffix=image_path.suffix, dir=image_path.parent, delete=False
+        ) as stream:
+            temporary = Path(stream.name)
+        if not cv2.imwrite(str(temporary), preview, [int(cv2.IMWRITE_JPEG_QUALITY), 95]):
+            raise ValueError("无法写入对齐临时文件")
+        repaired = DFLIMG.load(temporary)
+        if repaired is None:
+            raise ValueError("无法初始化新的 DFL aligned 容器")
+        repaired.set_dict(dict(original.get_dict()))
+        repaired.set_landmarks(aligned_landmarks.tolist())
+        repaired.set_source_landmarks(source_landmarks.tolist())
+        repaired.set_image_to_face_mat(new_matrix)
+        margin = max(float(np.ptp(source_landmarks[:, 0])), float(np.ptp(source_landmarks[:, 1]))) * 0.18
+        height, width = source_image.shape[:2]
+        repaired.set_source_rect([
+            float(max(source_landmarks[:, 0].min() - margin, 0)),
+            float(max(source_landmarks[:, 1].min() - margin, 0)),
+            float(min(source_landmarks[:, 0].max() + margin, width - 1)),
+            float(min(source_landmarks[:, 1].max() + margin, height - 1)),
+        ])
+        old_matrix = original.get_image_to_face_mat()
+        original_polygons = original.get_seg_ie_polys().get_polys()
+        if old_matrix is None:
+            old_source_landmarks = np.asarray(original.get_source_landmarks(), dtype=np.float32)
+            if old_source_landmarks.shape == (68, 2) and np.isfinite(old_source_landmarks).all():
+                old_matrix = LandmarksProcessor.get_transform_mat(
+                    old_source_landmarks,
+                    image_size,
+                    face_type,
+                )
+        if old_matrix is None and (original_polygons or original.has_xseg_mask()):
+            raise ValueError("原 aligned 缺少可用变换矩阵，不能安全迁移 SegIEPolys/XSeg")
+        if old_matrix is not None:
+            old_h = np.vstack([old_matrix, [0, 0, 1]])
+            new_h = np.vstack([new_matrix, [0, 0, 1]])
+            old_to_new = (new_h @ np.linalg.inv(old_h))[:2].astype(np.float32)
+            transformed = SegIEPolys()
+            for polygon in original_polygons:
+                target = transformed.add_poly(polygon.get_type())
+                points = LandmarksProcessor.transform_points(polygon.get_pts(), old_to_new)
+                for x, y in points:
+                    target.add_pt(
+                        float(np.clip(x, 0, image_size - 1)),
+                        float(np.clip(y, 0, image_size - 1)),
+                    )
+            repaired.set_seg_ie_polys(transformed)
+            if original.has_xseg_mask():
+                mask = original.get_xseg_mask()
+                repaired.set_xseg_mask(cv2.warpAffine(
+                    mask,
+                    old_to_new,
+                    (image_size, image_size),
+                    flags=cv2.INTER_LINEAR,
+                    borderMode=cv2.BORDER_CONSTANT,
+                ))
+        repaired.save()
+        os.replace(temporary, image_path)
+        temporary = None
+    except Exception:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
+        if backup_target.exists():
+            shutil.copy2(backup_target, image_path)
+        raise
+    return {**response, "applied": True, "backupName": backup_target.name}
 
 
 def save_annotation(image_path):
@@ -818,6 +1230,10 @@ def main():
             "audit",
             "pack-inspect",
             "coverage",
+            "probe-manifest",
+            "similarity",
+            "alignment-preview",
+            "alignment-apply",
         ),
     )
     parser.add_argument("--directory", type=Path)
@@ -825,6 +1241,9 @@ def main():
     parser.add_argument("--file", type=Path)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--limit", type=int, default=60)
+    parser.add_argument("--side", choices=("src", "dst"))
+    parser.add_argument("--threshold", type=float, default=0.86)
+    parser.add_argument("--backup-directory", type=Path)
     args = parser.parse_args()
 
     if args.action == "list":
@@ -837,6 +1256,14 @@ def main():
         if args.directory is None or not args.directory.is_dir():
             raise ValueError("aligned 目录不存在")
         emit(build_pose_atlas(args.directory))
+        return
+
+    if args.action == "probe-manifest":
+        if args.directory is None or not args.directory.is_dir():
+            raise ValueError("aligned directory does not exist")
+        if args.side is None:
+            raise ValueError("probe side is required")
+        emit(build_pose_probe_manifest(args.directory, args.side))
         return
 
     if args.action in ("audit", "pack-inspect"):
@@ -857,10 +1284,26 @@ def main():
         emit(build_extraction_coverage(args.frames, args.directory, args.offset, args.limit))
         return
 
+    if args.action == "similarity":
+        if args.directory is None or not args.directory.is_dir():
+            raise ValueError("aligned directory does not exist")
+        emit(group_similar_images(args.directory, args.threshold, args.limit))
+        return
+
     if args.file is None or not args.file.is_file():
         raise ValueError("aligned 图片不存在")
     if args.action == "inspect":
         emit(inspect_image(args.file))
+    elif args.action in ("alignment-preview", "alignment-apply"):
+        if args.frames is None or not args.frames.is_dir():
+            raise ValueError("frames directory does not exist")
+        emit(alignment_result(
+            args.file,
+            args.frames,
+            json.load(sys.stdin),
+            apply=args.action == "alignment-apply",
+            backup_directory=args.backup_directory,
+        ))
     else:
         emit(save_annotation(args.file))
 
