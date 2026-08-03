@@ -14,6 +14,7 @@ import {
 } from "@tabler/icons-react";
 import { taskTypes } from "../data/dashboard.js";
 import { useI18n } from "../i18n.jsx";
+import { LoadingProgress } from "./ProgressFeedback.jsx";
 
 function useDialogFocus(open, onClose) {
   const dialogRef = useRef(null);
@@ -220,6 +221,11 @@ export function NewTaskDialog({
             );
           })}
         </div>
+        {submitting ? (
+          <LoadingProgress compact label={t("正在创建任务并连接终端…")} detail={t("窗口会在任务成功创建后关闭")} />
+        ) : preflight.state === "checking" ? (
+          <LoadingProgress compact label={t("正在执行前置检查…")} detail={t("正在核对素材、运行时与资源锁")} />
+        ) : null}
 
         <div className="wizard-body">
           <section className="wizard-main">
@@ -437,10 +443,10 @@ export function StopConfirmDialog({ open, onCancel, onConfirm }) {
       >
         <span className="stop-icon"><IconPlayerStop size={22} stroke={2} /></span>
         <h2 id="stop-title">{t("安全停止训练？")}</h2>
-        <p id="stop-description">{t("系统会先保存模型和最新预览，再结束 SAEHD 训练进程。")}</p>
+        <p id="stop-description">{t("训练已开始时会先请求保存；若仍在模型名称等启动问答阶段，则直接结束。12 秒未响应时会自动终止，避免永久停留。")}</p>
         <footer>
           <button ref={initialFocusRef} className="button secondary" type="button" onClick={onCancel}>{t("继续训练")}</button>
-          <button className="button danger" type="button" onClick={onConfirm}>{t("保存并停止")}</button>
+          <button className="button danger" type="button" onClick={onConfirm}>{t("确认安全停止")}</button>
         </footer>
       </section>
     </div>

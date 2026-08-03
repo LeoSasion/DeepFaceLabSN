@@ -4,7 +4,6 @@ import {
   IconCamera,
   IconChartDots3,
   IconCheck,
-  IconChevronRight,
   IconCircle,
   IconDeviceFloppy,
   IconFileAnalytics,
@@ -26,6 +25,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { LoadingProgress } from "./ProgressFeedback.jsx";
 import { pipelineTasks as defaultPipelineTasks } from "../data/dashboard.js";
 import { useI18n } from "../i18n.jsx";
 
@@ -40,6 +40,21 @@ const taskIcons = {
   merge: IconRoute,
   export: IconFileAnalytics,
 };
+
+const trainingStateLabels = {
+  idle: "等待任务",
+  queued: "排队中",
+  starting: "启动中",
+  running: "训练中",
+  waiting_input: "等待输入",
+  stopping: "保存并停止中",
+  succeeded: "已完成",
+  failed: "失败",
+  cancelled: "已终止",
+  orphaned: "连接已丢失",
+};
+
+const activeTrainingStates = new Set(["queued", "starting", "running", "waiting_input"]);
 
 function formatIteration(value) {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
@@ -65,7 +80,7 @@ function formatEta(seconds, t) {
   return t("{minutes}分钟", { minutes: remainingMinutes });
 }
 
-export function PipelinePanel({ activeTask, tasks = defaultPipelineTasks, onSelectTask, onOpenCommandLog }) {
+export function PipelinePanel({ activeTask, tasks = defaultPipelineTasks, onSelectTask }) {
   const { t } = useI18n();
   return (
     <section className="panel pipeline-panel" aria-labelledby="pipeline-title">
@@ -103,9 +118,6 @@ export function PipelinePanel({ activeTask, tasks = defaultPipelineTasks, onSele
           );
         })}
       </div>
-      <button className="button secondary pipeline-log-button" type="button" onClick={onOpenCommandLog}>
-        {t("查看全部命令日志")}
-      </button>
     </section>
   );
 }
@@ -121,10 +133,10 @@ function ChartTooltip({ active, payload, label }) {
   );
 }
 
-function TrainingChart({ iteration, lossHistory }) {
+function TrainingChart({ iteration, lossHistory, className = "" }) {
   const { language, t } = useI18n();
   return (
-    <div className="chart-block" aria-label={t("训练损失曲线")}>
+    <div className={`chart-block ${className}`.trim()} aria-label={t("训练损失曲线")}>
       <div className="section-label-row">
         <strong>{t("训练损失曲线")}</strong>
         <span>{t("越低越好")}</span>
@@ -196,7 +208,12 @@ function PreviewGrid({ refreshKey, previewUrl }) {
       </div>
       {previewUrl ? (
         <div className="preview-assets is-live">
-          <img className="live-preview" src={previewUrl} alt={t("SAEHD 最新训练预览")} />
+          <img
+            className="live-preview"
+            src={previewUrl}
+            alt={t("SAEHD 最新训练预览")}
+            decoding="async"
+          />
         </div>
       ) : (
         <div className="preview-empty">
@@ -214,13 +231,9 @@ export function TrainingWorkspace({
   trainingState,
   previewRefresh,
   previewUrl,
-  lossHistory,
-  iterationTime,
-  iterationsPerHour,
   etaSeconds,
   targetIterations,
-  srcLoss,
-  dstLoss,
+  startedAt,
   onSave,
   onBackup,
   onRefresh,
@@ -228,24 +241,13 @@ export function TrainingWorkspace({
   onOpenDiagnostics,
   canEvaluate,
   latestEvaluationSnapshotId,
+  pendingAction,
   onSafeStop,
 }) {
   const { language, t } = useI18n();
-  const stateLabels = {
-    idle: "等待任务",
-    queued: "排队中",
-    starting: "启动中",
-    running: "训练中",
-    waiting_input: "等待输入",
-    stopping: "保存并停止中",
-    succeeded: "已完成",
-    failed: "失败",
-    cancelled: "已终止",
-    orphaned: "连接已丢失",
-  };
-  const isRunning = ["queued", "starting", "running", "waiting_input"].includes(trainingState);
+  const isRunning = activeTrainingStates.has(trainingState);
   const canControl = ["starting", "running", "waiting_input"].includes(trainingState);
-  const stateLabel = t(stateLabels[trainingState] ?? trainingState);
+  const stateLabel = t(trainingStateLabels[trainingState] ?? trainingState);
   return (
     <section className="panel training-panel" aria-labelledby="training-title">
       <div className="training-heading">
@@ -260,7 +262,7 @@ export function TrainingWorkspace({
             className="button compact secondary"
             type="button"
             onClick={onEvaluate}
-            disabled={!canEvaluate}
+            disabled={!canEvaluate || Boolean(pendingAction)}
             title={canEvaluate ? t("使用当前权重生成只读评估快照") : t("运行中的受控 SAEHD 任务才能生成快照")}
           >
             <IconCamera size={14} stroke={1.9}/>{t("评估快照")}
@@ -274,28 +276,39 @@ export function TrainingWorkspace({
           </button>
         </div>
       </div>
-      <div className="training-stats">
-        <div><span>{t("迭代次数")}</span><strong>{iteration ? iteration.toLocaleString(language === "zh" ? "zh-CN" : "en-US") : "—"}</strong></div>
-        <div><span>{t("单次迭代")}</span><strong>{iterationTime ?? "—"}</strong></div>
-        <div><span>{t("训练速度")}</span><strong>{formatRate(iterationsPerHour)}</strong></div>
-        <div><span>{t("预计完成")}</span><strong title={targetIterations ? t("目标 {count} 次", { count: targetIterations.toLocaleString(language === "zh" ? "zh-CN" : "en-US") }) : ""}>{formatEta(etaSeconds, t)}</strong></div>
-        <div><span>{t("SRC 损失")}</span><strong>{typeof srcLoss === "number" ? srcLoss.toFixed(4) : "—"}</strong></div>
-        <div><span>{t("DST 损失")}</span><strong>{typeof dstLoss === "number" ? dstLoss.toFixed(4) : "—"}</strong></div>
-        <div><span>{t("状态")}</span><strong className={isRunning ? "green-text" : "amber-text"}>{stateLabel}</strong></div>
+      <div className="training-preview-stage">
+        {isRunning ? (
+          <LoadingProgress
+            compact
+            className="training-run-progress"
+            label={trainingState === "running" ? t("SAEHD 正在训练") : stateLabel}
+            detail={targetIterations
+              ? t("当前 {current} / 目标 {target} 次迭代", {
+                current: iteration.toLocaleString(language === "zh" ? "zh-CN" : "en-US"),
+                target: targetIterations.toLocaleString(language === "zh" ? "zh-CN" : "en-US"),
+              })
+              : t("持续读取 Trainer 的真实迭代指标")}
+            value={targetIterations > 0 ? (iteration / targetIterations) * 100 : undefined}
+            current={targetIterations > 0 ? iteration : undefined}
+            total={targetIterations > 0 ? targetIterations : undefined}
+            etaSeconds={etaSeconds}
+            startedAt={startedAt}
+            rememberDuration={false}
+          />
+        ) : null}
+        <PreviewGrid refreshKey={previewRefresh} previewUrl={previewUrl} />
       </div>
-      <TrainingChart iteration={iteration} lossHistory={lossHistory} />
-      <PreviewGrid refreshKey={previewRefresh} previewUrl={previewUrl} />
       <div className="training-actions">
-        <button className="button primary" type="button" onClick={onSave} disabled={!canControl}>
+        <button className="button primary" type="button" onClick={onSave} disabled={!canControl || Boolean(pendingAction)}>
           <IconDeviceFloppy size={17} stroke={1.9} />{t("保存")}
         </button>
-        <button className="button secondary" type="button" onClick={onBackup} disabled={!canControl}>
+        <button className="button secondary" type="button" onClick={onBackup} disabled={!canControl || Boolean(pendingAction)}>
           <IconArchive size={17} stroke={1.9} />{t("备份")}
         </button>
-        <button className="button secondary" type="button" onClick={onRefresh} disabled={!canControl}>
+        <button className="button secondary" type="button" onClick={onRefresh} disabled={!canControl || Boolean(pendingAction)}>
           <IconRefresh size={17} stroke={1.9} />{t("刷新预览")}
         </button>
-        <button className="button danger" type="button" onClick={onSafeStop} disabled={!canControl}>
+        <button className="button danger" type="button" onClick={onSafeStop} disabled={!canControl || Boolean(pendingAction)}>
           <IconShieldX size={17} stroke={1.9} />{t("安全停止")}
         </button>
       </div>
@@ -303,7 +316,7 @@ export function TrainingWorkspace({
   );
 }
 
-function MetricRow({ label, value, suffix, percent, tone = "green" }) {
+function MetricRow({ label, value, suffix, percent, tone = "green", valueTone = null }) {
   return (
     <div className="metric-row">
       <span>{label}</span>
@@ -312,18 +325,15 @@ function MetricRow({ label, value, suffix, percent, tone = "green" }) {
           <span className={`metric-fill ${tone}`} style={{ width: `${percent}%` }} />
         </span>
       ) : null}
-      <strong>{value}{suffix}</strong>
+      <strong className={valueTone ? `is-${valueTone}` : undefined}>{value}{suffix}</strong>
     </div>
   );
 }
 
 export function StatusPanel({
-  queue,
-  activeQueue,
   trainingJob,
   telemetry,
-  onSelectQueue,
-  onRefreshQueue,
+  lossHistory = [],
   onOpenModels,
 }) {
   const { language, t } = useI18n();
@@ -332,81 +342,67 @@ export function StatusPanel({
   const memoryPercent = gpu?.memoryTotalMiB
     ? Math.min(100, (gpu.memoryUsedMiB / gpu.memoryTotalMiB) * 100)
     : null;
-  const queueStateLabels = {
-    active: "进行中",
-    succeeded: "已完成",
-    failed: "失败",
-    cancelled: "已终止",
-    orphaned: "连接已丢失",
-  };
+  const trainingState = trainingJob?.state ?? "idle";
+  const isTrainingActive = activeTrainingStates.has(trainingState);
   return (
     <aside className="panel status-panel" aria-labelledby="status-title">
       <div className="panel-heading">
         <h2 id="status-title">{t("实时状态")}</h2>
-      </div>
-      <div className="metrics-list">
-        <MetricRow label={t("训练进程")} value={trainingJob?.pid ?? "—"} suffix="" />
-        <MetricRow label={t("当前迭代")} value={metric?.iteration?.toLocaleString(language === "zh" ? "zh-CN" : "en-US") ?? "—"} suffix="" />
-        <MetricRow label={t("训练速度")} value={formatRate(metric?.iterationsPerHour)} suffix="" />
-        <MetricRow label={t("预计完成")} value={formatEta(metric?.etaSeconds, t)} suffix="" />
-        <MetricRow
-          label={t("GPU 利用率")}
-          value={typeof gpu?.utilizationPercent === "number" ? Math.round(gpu.utilizationPercent) : "—"}
-          suffix={typeof gpu?.utilizationPercent === "number" ? "%" : ""}
-          percent={gpu?.utilizationPercent}
-        />
-        <MetricRow
-          label={t("显存")}
-          value={gpu ? `${(gpu.memoryUsedMiB / 1024).toFixed(1)} / ${(gpu.memoryTotalMiB / 1024).toFixed(1)}` : "—"}
-          suffix={gpu ? " GB" : ""}
-          percent={memoryPercent}
-        />
-        <MetricRow
-          label={t("GPU 温度")}
-          value={typeof gpu?.temperatureC === "number" ? Math.round(gpu.temperatureC) : "—"}
-          suffix={typeof gpu?.temperatureC === "number" ? "°C" : ""}
-          percent={gpu?.temperatureC}
-          tone={gpu?.temperatureC >= 80 ? "amber" : "green"}
-        />
-      </div>
-      <div className="status-section">
-        <h3>{t("模型目录")}</h3>
-        <div className="checkpoint-empty">
-          {t("检查点由 DFL 正式保存流程写入，不展示模拟文件。")}
-        </div>
-        <button className="text-button" type="button" onClick={onOpenModels}>
-          <IconFolderOpen size={15} stroke={1.8} />{t("复制模型目录")}
+        <button
+          className="status-model-button"
+          type="button"
+          onClick={onOpenModels}
+          title={t("检查点由 DFL 正式保存流程写入，不展示模拟文件。")}
+        >
+          <IconFolderOpen size={14} stroke={1.8} />{t("复制模型目录")}
         </button>
       </div>
-      <div className="status-section queue-section">
-        <div className="queue-heading">
-          <h3>{t("任务队列（{count}）", { count: queue.length })}</h3>
+      <div className="status-metric-section is-training">
+        <h3>{t("训练指标")}</h3>
+        <div className="metrics-list">
+          <MetricRow
+            label={t("状态")}
+            value={t(trainingStateLabels[trainingState] ?? trainingState)}
+            suffix=""
+            valueTone={isTrainingActive ? "green" : "amber"}
+          />
+          <MetricRow label={t("训练进程")} value={trainingJob?.pid ?? "—"} suffix="" />
+          <MetricRow label={t("当前迭代")} value={metric?.iteration?.toLocaleString(language === "zh" ? "zh-CN" : "en-US") ?? "—"} suffix="" />
+          <MetricRow label={t("单次迭代")} value={metric?.iterationTime ?? "—"} suffix="" />
+          <MetricRow label={t("训练速度")} value={formatRate(metric?.iterationsPerHour)} suffix="" />
+          <MetricRow label={t("预计完成")} value={formatEta(metric?.etaSeconds, t)} suffix="" />
+          <MetricRow label={t("SRC 损失")} value={typeof metric?.srcLoss === "number" ? metric.srcLoss.toFixed(4) : "—"} suffix="" />
+          <MetricRow label={t("DST 损失")} value={typeof metric?.dstLoss === "number" ? metric.dstLoss.toFixed(4) : "—"} suffix="" />
         </div>
-        <div className="queue-list">
-          {queue.length ? queue.map((item) => (
-            <button
-              className={`queue-row ${activeQueue === item.id ? "is-active" : ""} is-${item.state}`}
-              key={item.id}
-              type="button"
-              onClick={() => onSelectQueue(item)}
-            >
-              <span>
-                <strong>
-                  {language === "zh"
-                    ? `${item.title}（${t(queueStateLabels[item.state] ?? item.state)}）`
-                    : `${item.title} (${t(queueStateLabels[item.state] ?? item.state)})`}
-                </strong>
-                <small>{item.subtitle}</small>
-              </span>
-              <IconChevronRight size={16} stroke={1.6} />
-            </button>
-          )) : (
-            <div className="queue-empty">{t("队列已清空")}</div>
-          )}
+      </div>
+      <TrainingChart
+        className="status-loss-chart"
+        iteration={metric?.iteration ?? 0}
+        lossHistory={lossHistory}
+      />
+      <div className="status-metric-section is-gpu">
+        <h3>{t("GPU 状态")}</h3>
+        <div className="metrics-list">
+          <MetricRow
+            label={t("GPU 利用率")}
+            value={typeof gpu?.utilizationPercent === "number" ? Math.round(gpu.utilizationPercent) : "—"}
+            suffix={typeof gpu?.utilizationPercent === "number" ? "%" : ""}
+            percent={gpu?.utilizationPercent}
+          />
+          <MetricRow
+            label={t("显存")}
+            value={gpu ? `${(gpu.memoryUsedMiB / 1024).toFixed(1)} / ${(gpu.memoryTotalMiB / 1024).toFixed(1)}` : "—"}
+            suffix={gpu ? " GB" : ""}
+            percent={memoryPercent}
+          />
+          <MetricRow
+            label={t("GPU 温度")}
+            value={typeof gpu?.temperatureC === "number" ? Math.round(gpu.temperatureC) : "—"}
+            suffix={typeof gpu?.temperatureC === "number" ? "°C" : ""}
+            percent={gpu?.temperatureC}
+            tone={gpu?.temperatureC >= 80 ? "amber" : "green"}
+          />
         </div>
-        <button className="clear-queue-button" type="button" onClick={onRefreshQueue}>
-          <IconRefresh size={15} stroke={1.8} />{t("刷新任务状态")}
-        </button>
       </div>
     </aside>
   );

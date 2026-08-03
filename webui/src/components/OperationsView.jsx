@@ -20,6 +20,7 @@ import {
 } from "@tabler/icons-react";
 import { runtimeApi } from "../runtime/api.js";
 import { useI18n } from "../i18n.jsx";
+import { LoadingProgress } from "./ProgressFeedback.jsx";
 
 const categoryLabels = {
   dataset: "数据集工具",
@@ -146,6 +147,7 @@ function AnnotationCanvas({
   const [draft, setDraft] = useState([]);
   const [polygonType, setPolygonType] = useState("include");
   const [saving, setSaving] = useState(false);
+  const [loadingPrevious, setLoadingPrevious] = useState(false);
   const [dragging, setDragging] = useState(null);
   const [showAppliedMask, setShowAppliedMask] = useState(true);
   const baselineRef = useRef("[]");
@@ -182,7 +184,15 @@ function AnnotationCanvas({
   });
 
   if (!annotation) {
-    return <div className="asset-detail-loading">{t("正在读取 DFL 标注元数据…")}</div>;
+    return (
+      <div className="asset-detail-loading">
+        <LoadingProgress
+          tone="violet"
+          label={t("正在读取 DFL 标注元数据…")}
+          detail={t("正在加载多边形、应用遮罩与建议轮廓")}
+        />
+      </div>
+    );
   }
 
   const addPoint = (event) => {
@@ -242,12 +252,15 @@ function AnnotationCanvas({
   };
 
   const inheritPrevious = async () => {
+    setLoadingPrevious(true);
     try {
       const previous = await onLoadPrevious();
       if (previous?.polygons?.length) setPolygons(structuredClone(previous.polygons));
       else onError(new Error(t("上一张没有可继承的多边形标注")));
     } catch (error) {
       onError(error);
+    } finally {
+      setLoadingPrevious(false);
     }
   };
 
@@ -281,7 +294,7 @@ function AnnotationCanvas({
           </button>
         </div>
         <div className="annotation-actions">
-          <button className="button secondary" type="button" onClick={() => void inheritPrevious()}>
+          <button className="button secondary" type="button" onClick={() => void inheritPrevious()} disabled={loadingPrevious || saving}>
             <IconCopy size={15} />{t("继承上一张")}
           </button>
           <button className="button secondary" type="button" onClick={copyPolygons} disabled={!polygons.length} title="Ctrl+C">{t("复制")}</button>
@@ -299,11 +312,20 @@ function AnnotationCanvas({
           <button className="button secondary" type="button" onClick={() => setPolygons((value) => value.slice(0, -1))} disabled={!polygons.length}>
             <IconTrash size={15} />{t("移除末项")}
           </button>
-          <button className="button primary" type="button" onClick={() => void save()} disabled={saving || draft.length > 0}>
+          <button className="button primary" type="button" onClick={() => void save()} disabled={saving || loadingPrevious || draft.length > 0}>
             <IconDeviceFloppy size={15} />{saving ? t("保存中") : t("写入 JPG")}
           </button>
         </div>
       </div>
+      {saving || loadingPrevious ? (
+        <LoadingProgress
+          compact
+          tone="violet"
+          className="annotation-progress"
+          label={saving ? t("正在保存 XSeg 标注…") : t("正在读取上一张标注…")}
+          detail={saving ? t("正在原子写回 DFL JPG 元数据") : t("当前编辑内容保持不变")}
+        />
+      ) : null}
       <div className="annotation-canvas-wrap">
         <svg
           ref={svgRef}
@@ -413,6 +435,7 @@ export function DatasetView({
   const [selectedName, setSelectedName] = useState(null);
   const [annotation, setAnnotation] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [datasetAction, setDatasetAction] = useState(null);
   const [maskClipboard, setMaskClipboard] = useState([]);
   const [maskDirty, setMaskDirty] = useState(false);
   const handleMaskDirty = useCallback((value) => setMaskDirty(value), []);
@@ -502,22 +525,28 @@ export function DatasetView({
 
   const quarantineSelected = async () => {
     if (!selected || !window.confirm(t("把 {name} 移入可恢复隔离区吗？", { name: selected.name }))) return;
+    setDatasetAction("quarantine");
     try {
       await runtimeApi.quarantineAligned(side, selected.name);
       onNotice(t("{name} 已移入隔离区，可随时恢复", { name: selected.name }));
       await refresh();
     } catch (error) {
       onError(error);
+    } finally {
+      setDatasetAction(null);
     }
   };
 
   const restore = async (item) => {
+    setDatasetAction(`restore:${item.token}`);
     try {
       await runtimeApi.restoreAligned(side, item.token, item.name);
       onNotice(t("{name} 已恢复到 {side} aligned", { name: item.name, side: side.toUpperCase() }));
       await refresh();
     } catch (error) {
       onError(error);
+    } finally {
+      setDatasetAction(null);
     }
   };
 
@@ -552,6 +581,21 @@ export function DatasetView({
           </button>
         </div>
       </header>
+      {datasetAction ? (
+        <LoadingProgress
+          compact
+          tone={editMasks ? "violet" : "green"}
+          label={datasetAction === "quarantine" ? t("正在隔离样本…") : t("正在恢复样本…")}
+          detail={t("完成后会重新扫描当前数据集")}
+        />
+      ) : loading ? (
+        <LoadingProgress
+          compact
+          tone={editMasks ? "violet" : "green"}
+          label={assets ? t("正在刷新 aligned 数据集…") : t("正在扫描 aligned 数据集…")}
+          detail={t("正在读取样本与可恢复隔离区")}
+        />
+      ) : null}
 
       {!editMasks && sideCommands.length > 0 && (
         <div className="dataset-command-strip">
@@ -582,7 +626,7 @@ export function DatasetView({
                 onClick={() => selectAsset(item.name)}
                 title={item.sourceFilename ?? item.name}
               >
-                <img src={item.imageUrl} alt="" loading="lazy" />
+                <img src={item.imageUrl} alt="" loading="lazy" decoding="async" />
                 <span>{item.name}</span>
                 <small>
                   {item.polygonCount
@@ -611,7 +655,7 @@ export function DatasetView({
                   <small>{selected.sourceFilename ?? t("没有源文件名元数据")}</small>
                 </div>
                 {!editMasks && (
-                  <button className="button danger" type="button" onClick={() => void quarantineSelected()}>
+                  <button className="button danger" type="button" onClick={() => void quarantineSelected()} disabled={Boolean(datasetAction)}>
                     <IconArchive size={15} />{t("隔离")}
                   </button>
                 )}
@@ -634,7 +678,7 @@ export function DatasetView({
                 />
               ) : (
                 <div className="asset-inspector">
-                  <img src={selected.imageUrl} alt={t("{name} aligned 人脸", { name: selected.name })} />
+                  <img src={selected.imageUrl} alt={t("{name} aligned 人脸", { name: selected.name })} decoding="async" />
                   <dl>
                     <div><dt>{t("DFL 元数据")}</dt><dd>{selected.hasDflMetadata ? t("有效") : t("无效")}</dd></div>
                     <div><dt>{t("手绘多边形")}</dt><dd>{selected.polygonCount}</dd></div>
@@ -664,7 +708,7 @@ export function DatasetView({
               <div key={`${item.token}-${item.name}`}>
                 <span>{item.name}</span>
                 <small>{item.token.slice(0, 8)} {item.token.slice(8, 14)}</small>
-                <button className="button secondary" type="button" onClick={() => void restore(item)}>
+                <button className="button secondary" type="button" onClick={() => void restore(item)} disabled={Boolean(datasetAction)}>
                   <IconRestore size={15} />{t("恢复")}
                 </button>
               </div>
@@ -678,6 +722,13 @@ export function DatasetView({
 
 export function ModelSummaryAside({ workspace }) {
   const { t } = useI18n();
+  if (!workspace) {
+    return (
+      <aside className="model-summary-aside">
+        <LoadingProgress compact label={t("正在读取模型目录…")} detail={t("正在核对模型家族与文件状态")} />
+      </aside>
+    );
+  }
   return (
     <aside className="model-summary-aside">
       <div className="model-summary-heading">
@@ -692,7 +743,13 @@ export function ModelSummaryAside({ workspace }) {
             <small>{t("{count} 个文件", { count: model.fileCount })}</small>
           </div>
         </div>
-      )) : <div className="operation-empty">{t("尚未检测到模型。")}</div>}
+      )) : (
+        <div className="model-empty-guide">
+          <strong>{t("还没有可用模型")}</strong>
+          <span>{t("首次使用可从“训练 SAEHD”开始。")}</span>
+          <small>{t("训练生成的模型文件会自动出现在这里。")}</small>
+        </div>
+      )}
     </aside>
   );
 }
@@ -702,7 +759,8 @@ export function SettingsView({ health, jobs, onRetry, onError, onNotice }) {
   const [projects, setProjects] = useState(null);
   const [projectName, setProjectName] = useState("");
   const [projectId, setProjectId] = useState("");
-  const [projectBusy, setProjectBusy] = useState(false);
+  const [projectBusy, setProjectBusy] = useState(null);
+  const [retryBusy, setRetryBusy] = useState(null);
   useEffect(() => {
     let cancelled = false;
     void runtimeApi.projects().then((value) => { if (!cancelled) setProjects(value); }).catch(onError);
@@ -711,27 +769,27 @@ export function SettingsView({ health, jobs, onRetry, onError, onNotice }) {
   const recoverable = jobs.filter((job) => terminalStates.has(job.state));
   const activeJobCount = jobs.filter((job) => ["queued", "starting", "running", "waiting_input", "stopping"].includes(job.state)).length;
   const createProject = async () => {
-    setProjectBusy(true);
+    setProjectBusy("create");
     try {
       await runtimeApi.createProject({ name: projectName, id: projectId });
       setProjects(await runtimeApi.projects());
       setProjectName("");
       setProjectId("");
       onNotice(t("新项目已创建；可在任务停止后切换。"));
-    } catch (error) { onError(error); } finally { setProjectBusy(false); }
+    } catch (error) { onError(error); } finally { setProjectBusy(null); }
   };
   const activateProject = async (id, name) => {
     if (!window.confirm(t("切换到项目“{name}”吗？本地服务会重启，当前页面随后自动刷新。", { name }))) return;
-    setProjectBusy(true);
+    setProjectBusy("activate");
     try {
       const result = await runtimeApi.activateProject(id);
       if (!result.restartRequired) {
-        setProjectBusy(false);
+        setProjectBusy(null);
         return;
       }
       onNotice(t("正在切换项目并重启本地服务…"));
       window.setTimeout(() => window.location.reload(), 1600);
-    } catch (error) { setProjectBusy(false); onError(error); }
+    } catch (error) { setProjectBusy(null); onError(error); }
   };
   return (
     <section className="operation-view settings-view">
@@ -742,6 +800,18 @@ export function SettingsView({ health, jobs, onRetry, onError, onNotice }) {
         </div>
         <span className="operation-count">{health?.loopbackOnly ? t("仅本机访问") : t("状态未知")}</span>
       </header>
+      {!projects ? (
+        <LoadingProgress compact label={t("正在读取受管项目…")} detail={t("正在确认当前工作区与切换安全性")} />
+      ) : projectBusy ? (
+        <LoadingProgress
+          compact
+          tone={projectBusy === "activate" ? "amber" : "green"}
+          label={projectBusy === "activate" ? t("正在切换项目并重启本地服务…") : t("正在创建受管项目…")}
+          detail={projectBusy === "activate" ? t("当前页面会在服务恢复后自动刷新") : t("新项目只会写入受管工作区目录")}
+        />
+      ) : retryBusy ? (
+        <LoadingProgress compact label={t("正在从历史记录创建安全副本…")} detail={retryBusy} />
+      ) : null}
       <div className="settings-runtime">
         {["current", "legacy"].map((profile) => (
           <section key={profile}>
@@ -770,7 +840,7 @@ export function SettingsView({ health, jobs, onRetry, onError, onNotice }) {
                 <button className="button secondary" type="button" disabled={project.active || activeJobCount > 0 || projectBusy} onClick={() => void activateProject(project.id, project.name)}>{project.active ? t("当前") : t("切换")}</button>
               </article>
             ))}
-            {!projects ? <div className="operation-empty">{t("正在读取项目…")}</div> : null}
+            {!projects ? <div className="operation-empty">{t("项目清单准备中")}</div> : null}
           </div>
           <form className="project-create-form" onSubmit={(event) => { event.preventDefault(); void createProject(); }}>
             <strong>{t("新建项目")}</strong>
@@ -803,13 +873,17 @@ export function SettingsView({ health, jobs, onRetry, onError, onNotice }) {
                 className="button secondary"
                 type="button"
                 onClick={async () => {
+                  setRetryBusy(job.id);
                   try {
                     const next = await onRetry(job.id);
                     onNotice(t("已从 {source} 创建新任务 {target}", { source: job.id, target: next.id }));
                   } catch (error) {
                     onError(error);
+                  } finally {
+                    setRetryBusy(null);
                   }
                 }}
+                disabled={Boolean(retryBusy) || Boolean(projectBusy)}
               >
                 <IconRefresh size={15} />{t("重试")}
               </button>

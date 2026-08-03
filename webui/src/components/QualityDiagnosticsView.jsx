@@ -4,6 +4,7 @@ import {
   IconArrowDown,
   IconArrowRight,
   IconArrowUp,
+  IconBoxModel2,
   IconCamera,
   IconChartDots3,
   IconCheck,
@@ -18,6 +19,7 @@ import {
 } from "../domain/training-pose-regression.js";
 import { runtimeApi } from "../runtime/api.js";
 import { useI18n } from "../i18n.jsx";
+import { LoadingProgress } from "./ProgressFeedback.jsx";
 
 const OUTPUT_MODES = [
   {
@@ -134,13 +136,17 @@ function ComparisonGate({ checks, t }) {
   );
 }
 
-function DiagnosticsState({ icon: Icon = IconChartDots3, title, detail, action }) {
+function DiagnosticsState({ icon: Icon = IconChartDots3, title, detail, action, loading = false }) {
   return (
-    <div className="quality-diagnostics-state" role="status">
-      <Icon size={34} stroke={1.4} />
-      <strong>{title}</strong>
-      <span>{detail}</span>
-      {action}
+    <div className={`quality-diagnostics-state${loading ? " is-loading" : ""}`} role={loading ? undefined : "status"}>
+      {loading ? <LoadingProgress label={title} detail={detail} /> : (
+        <>
+          <Icon size={34} stroke={1.4} />
+          <strong>{title}</strong>
+          <span>{detail}</span>
+          {action}
+        </>
+      )}
     </div>
   );
 }
@@ -149,6 +155,7 @@ export function QualityDiagnosticsView({
   evaluationJob,
   refreshKey,
   onEvaluate,
+  onOpenTraining,
   onOpenPoseAtlas,
   onError,
   onNotice,
@@ -337,6 +344,14 @@ export function QualityDiagnosticsView({
         <DiagnosticsState
           title={t("尚未建立训练评估上下文")}
           detail={t("从引导模式启动 SAEHD 并明确模型名称后，训练器才能生成确定性姿势快照。")}
+          action={(
+            <div className="diagnostics-empty-actions">
+              <button className="button primary" type="button" onClick={onOpenTraining}>
+                <IconBoxModel2 size={16}/>{t("前往模型训练")}
+              </button>
+              <small>{t("先启动 SAEHD，再从训练预览生成至少两次评估快照。")}</small>
+            </div>
+          )}
         />
       </section>
     );
@@ -345,7 +360,7 @@ export function QualityDiagnosticsView({
   if (loading && !snapshots.length) {
     return (
       <section className="quality-diagnostics-view">
-        <DiagnosticsState title={t("正在读取评估快照…")} detail={t("只读取本地内容寻址快照，不会触碰训练权重。")}/>
+        <DiagnosticsState loading title={t("正在读取评估快照…")} detail={t("只读取本地内容寻址快照，不会触碰训练权重。")}/>
       </section>
     );
   }
@@ -371,6 +386,7 @@ export function QualityDiagnosticsView({
             <div><span>{t("新增流程 · 7")}</span><h2>{t("质量诊断")}</h2></div>
             <button className="button primary" type="button" onClick={handleEvaluate} disabled={!canEvaluate || evaluating}><IconCamera size={15}/>{t(evaluating ? "正在生成…" : "生成评估快照")}</button>
           </header>
+          {evaluating ? <LoadingProgress compact label={t("正在生成只读评估快照…")} detail={t("Trainer 完成后会自动加入时间线")} /> : null}
           <DiagnosticsState
             title={t("至少需要两个可比较快照")}
             detail={t("当前已有 {count} 个。训练中生成基线与当前快照后，才会计算姿势回归。", { count: snapshots.length })}
@@ -412,6 +428,11 @@ export function QualityDiagnosticsView({
           <IconCamera size={15}/>{t(evaluating ? "正在生成…" : "生成评估快照")}
         </button>
       </header>
+      {evaluating ? (
+        <LoadingProgress compact label={t("正在生成只读评估快照…")} detail={t("当前诊断结果保持可见")}/>
+      ) : loading ? (
+        <LoadingProgress compact label={t("正在刷新评估快照…")} detail={t("当前诊断结果保持可见")}/>
+      ) : null}
 
       <div className="diagnostics-timeline" aria-label={t("评估快照时间线") }>
         <div className="diagnostics-timeline-line" aria-hidden="true"/>
@@ -550,7 +571,7 @@ export function QualityDiagnosticsView({
               ].map(([label, url]) => (
                 <figure key={label}>
                   <figcaption>{label}</figcaption>
-                  {url ? <img src={url} alt={`${label} · ${selectedSampleId}`}/> : <div><IconCamera size={22}/><span>{t("图像不可用")}</span></div>}
+                  {url ? <img src={url} alt={`${label} · ${selectedSampleId}`} decoding="async"/> : <div><IconCamera size={22}/><span>{t("图像不可用")}</span></div>}
                 </figure>
               ))
             ) : <div className="diagnostics-evidence-empty">{t("选择有共同样本的姿势格以查看证据")}</div>}

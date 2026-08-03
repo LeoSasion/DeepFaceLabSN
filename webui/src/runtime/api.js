@@ -20,7 +20,7 @@ async function request(path, options = {}) {
   return payload.data;
 }
 
-async function uploadVideo(side, file, { replace = false } = {}) {
+async function uploadVideoWithFetch(side, file, replace) {
   const query = replace ? "?replace=1" : "";
   const response = await fetch(`/api/workspace/import/${side}${query}`, {
     method: "POST",
@@ -42,6 +42,50 @@ async function uploadVideo(side, file, { replace = false } = {}) {
     throw error;
   }
   return payload.data;
+}
+
+async function uploadVideo(side, file, { replace = false, onProgress } = {}) {
+  if (typeof XMLHttpRequest === "undefined" || typeof onProgress !== "function") {
+    return uploadVideoWithFetch(side, file, replace);
+  }
+
+  const query = replace ? "?replace=1" : "";
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("POST", `/api/workspace/import/${side}${query}`);
+    request.withCredentials = true;
+    request.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+    request.setRequestHeader("X-File-Name", encodeURIComponent(file.name));
+    request.upload.addEventListener("progress", (event) => {
+      onProgress({
+        loaded: event.loaded,
+        total: event.lengthComputable ? event.total : null,
+        percent: event.lengthComputable && event.total > 0
+          ? (event.loaded / event.total) * 100
+          : null,
+      });
+    });
+    request.addEventListener("load", () => {
+      let payload;
+      try {
+        payload = JSON.parse(request.responseText);
+      } catch {
+        payload = { ok: false, error: { message: `视频导入返回了无法解析的响应（HTTP ${request.status}）` } };
+      }
+      if (request.status < 200 || request.status >= 300 || payload.ok === false) {
+        const error = new Error(payload.error?.message ?? `视频导入失败（HTTP ${request.status}）`);
+        error.code = payload.error?.code ?? "IMPORT_FAILED";
+        error.details = payload.error?.details;
+        reject(error);
+        return;
+      }
+      onProgress({ loaded: file.size, total: file.size, percent: 100 });
+      resolve(payload.data);
+    });
+    request.addEventListener("error", () => reject(new Error("视频上传连接中断，请检查本地服务后重试")));
+    request.addEventListener("abort", () => reject(new Error("视频上传已取消")));
+    request.send(file);
+  });
 }
 
 export const runtimeApi = {

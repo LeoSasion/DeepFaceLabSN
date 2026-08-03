@@ -12,6 +12,7 @@ import { WorkbenchGrid } from "./components/TrainingView.jsx";
 import { QualityDiagnosticsView } from "./components/QualityDiagnosticsView.jsx";
 import { ToolLabView } from "./components/ToolLabView.jsx";
 import { WorkspaceView } from "./components/WorkspaceView.jsx";
+import { LoadingProgress } from "./components/ProgressFeedback.jsx";
 import {
   navigationWorkflowStages,
   pipelineTasks,
@@ -46,7 +47,7 @@ export function App() {
   const [previewRefresh, setPreviewRefresh] = useState(0);
   const [consoleCollapsed, setConsoleCollapsed] = useState(false);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
-  const [stopConfirmOpen, setStopConfirmOpen] = useState(false);
+  const [stopTargetJobId, setStopTargetJobId] = useState(null);
   const [taskType, setTaskType] = useState("train.saehd");
   const [xsegSide, setXsegSide] = useState("dst");
   const [workspaceSnapshot, setWorkspaceSnapshot] = useState(null);
@@ -54,6 +55,7 @@ export function App() {
   const [poseAtlasFocus, setPoseAtlasFocus] = useState(null);
   const [diagnosticSnapshotCount, setDiagnosticSnapshotCount] = useState(0);
   const [toast, setToast] = useState({ message: "", tone: "success" });
+  const [pendingAction, setPendingAction] = useState(null);
 
   const commands = useMemo(
     () => runtime.commands.map((command) => localizeCommand(command)),
@@ -101,7 +103,8 @@ export function App() {
     };
   }, [activeNav, runtime.serviceState, showToast, t]);
 
-  const runAction = useCallback(async (action, successMessage) => {
+  const runAction = useCallback(async (action, successMessage, progressLabel = t("正在处理本地请求…")) => {
+    setPendingAction(progressLabel);
     try {
       const result = await action();
       if (successMessage) showToast(successMessage);
@@ -109,6 +112,8 @@ export function App() {
     } catch (error) {
       showToast(t(error.message), "warning");
       throw error;
+    } finally {
+      setPendingAction(null);
     }
   }, [showToast, t]);
 
@@ -142,14 +147,6 @@ export function App() {
     });
     return () => { cancelled = true; };
   }, [evaluationJob?.evaluation?.modelKey, evaluationJob?.latestEvaluationSnapshotId]);
-
-  const queue = useMemo(() => jobs.map((job) => ({
-    id: job.id,
-    title: job.label,
-    subtitle: `${job.profile === "legacy" ? "DFL legacy" : "DFL current"} · PID ${job.pid ?? "—"}`,
-    state: activeStates.has(job.state) ? "active" : job.state,
-    raw: job,
-  })), [jobs]);
 
   const livePipelineTasks = useMemo(() => pipelineTasks.map((sourceTask) => {
     const task = {
@@ -275,6 +272,7 @@ export function App() {
     const job = await runAction(
       () => runtime.startJob(commandId, options),
       t("任务已启动，终端会话正在连接"),
+      t("正在创建任务并连接终端…"),
     );
     setConsoleCollapsed(false);
     return job;
@@ -317,7 +315,16 @@ export function App() {
       return;
     }
     try {
-      await runAction(() => runtime.control(operation, trainingJob.id), message);
+      await runAction(
+        () => runtime.control(operation, trainingJob.id),
+        message,
+        t({
+          save: "正在保存训练模型…",
+          backup: "正在创建训练备份…",
+          preview: "正在刷新训练预览…",
+          close: "正在安全保存并停止训练…",
+        }[operation] ?? "正在处理训练控制…"),
+      );
       if (operation === "preview") setPreviewRefresh((current) => current + 1);
     } catch {
       // runAction already surfaced a recovery-oriented toast.
@@ -332,6 +339,7 @@ export function App() {
     return runAction(
       () => runtime.control("evaluate", evaluationJob.id),
       t("评估请求已送入 Trainer，不会修改训练权重"),
+      t("正在生成只读评估快照…"),
     );
   }, [evaluationJob, runAction, runtime, showToast, t]);
 
@@ -350,9 +358,15 @@ export function App() {
   }, [showToast, t]);
 
   const handleStopConfirm = useCallback(async () => {
-    setStopConfirmOpen(false);
-    await controlTraining("close", t("已请求安全停止；Trainer 将先保存模型"));
-  }, [controlTraining, t]);
+    const targetJobId = stopTargetJobId;
+    if (!targetJobId) return;
+    setStopTargetJobId(null);
+    await runAction(
+      () => runtime.control("close", targetJobId),
+      t("已请求安全停止；启动问答会直接结束，训练中会先保存"),
+      t("正在安全停止训练…"),
+    ).catch(() => {});
+  }, [runAction, runtime, stopTargetJobId, t]);
 
   const handleCopyPath = useCallback(async (value) => {
     if (!value) return;
@@ -453,6 +467,7 @@ export function App() {
         evaluationJob={evaluationJob}
         refreshKey={evaluationJob?.latestEvaluationSnapshotId}
         onEvaluate={evaluateTraining}
+        onOpenTraining={() => handleNavigate("training", t("模型训练"))}
         onOpenPoseAtlas={openPoseAtlasCell}
         onError={showError}
         onNotice={showToast}
@@ -509,23 +524,15 @@ export function App() {
           activeTask,
           tasks: livePipelineTasks,
           onSelectTask: handleTaskSelect,
-          onOpenCommandLog: () => {
-            setConsoleCollapsed(false);
-            showToast(t("终端监视器已展开"));
-          },
         }}
         training={{
           iteration: trainingMetric?.iteration ?? 0,
           trainingState: trainingJob?.state ?? "idle",
           previewRefresh: previewVersion,
           previewUrl,
-          lossHistory: trainingHistory,
-          iterationTime: trainingMetric?.iterationTime,
-          iterationsPerHour: trainingMetric?.iterationsPerHour,
           etaSeconds: trainingMetric?.etaSeconds,
           targetIterations: trainingMetric?.targetIterations,
-          srcLoss: trainingMetric?.srcLoss,
-          dstLoss: trainingMetric?.dstLoss,
+          startedAt: trainingJob?.startedAt,
           onSave: () => void controlTraining("save", t("保存请求已送入 Trainer")),
           onBackup: () => void controlTraining("backup", t("备份请求已送入 Trainer")),
           onRefresh: () => void controlTraining("preview", t("预览刷新请求已送入 Trainer")),
@@ -537,21 +544,13 @@ export function App() {
             && evaluationJob.controls?.includes("evaluate")
           ),
           latestEvaluationSnapshotId: evaluationJob?.latestEvaluationSnapshotId,
-          onSafeStop: () => setStopConfirmOpen(true),
+          pendingAction,
+          onSafeStop: () => trainingJob?.id && setStopTargetJobId(trainingJob.id),
         }}
         status={{
-          queue,
-          activeQueue: runtime.selectedJobId,
           trainingJob,
           telemetry: runtime.telemetry,
-          onSelectQueue: (item) => {
-            runtime.selectJob(item.id);
-            setConsoleCollapsed(false);
-          },
-          onRefreshQueue: () => void runAction(
-            () => runtime.refresh(),
-            t("任务状态已刷新"),
-          ).catch(() => {}),
+          lossHistory: trainingHistory,
           onOpenModels: () => handleCopyPath(`${workspacePath}\\model`),
         }}
       />
@@ -569,6 +568,23 @@ export function App() {
           onNewTask={() => setNewTaskOpen(true)}
           onMenu={() => showToast(t("工作区：{path}", { path: workspacePath }))}
         />
+        {runtime.serviceState === "loading" ? (
+          <LoadingProgress
+            className="global-loading-progress"
+            compact
+            label={t("正在检测本地服务…")}
+            detail={t("正在读取运行时、显卡与项目状态")}
+            operationKey="runtime-bootstrap"
+          />
+        ) : pendingAction && activeNav !== "diagnostics" ? (
+          <LoadingProgress
+            className="global-loading-progress"
+            compact
+            label={pendingAction}
+            detail={t("完成后会自动更新当前视图")}
+            operationKey={`app-action:${pendingAction}`}
+          />
+        ) : null}
         {activeNav !== "tools" && (
           <WorkflowBar
             selectedStage={selectedStage}
@@ -593,9 +609,10 @@ export function App() {
           onInput={runtime.sendInput}
           onResize={runtime.resize}
           onControl={runtime.control}
-          onSafeStop={() => setStopConfirmOpen(true)}
+          onSafeStop={() => selectedJob?.id && setStopTargetJobId(selectedJob.id)}
           onCopyPath={handleCopyPath}
           onError={showError}
+          onNotice={showToast}
         />
       </main>
       <Toast
@@ -615,8 +632,8 @@ export function App() {
         onCreate={handleCreateTask}
       />
       <StopConfirmDialog
-        open={stopConfirmOpen}
-        onCancel={() => setStopConfirmOpen(false)}
+        open={Boolean(stopTargetJobId)}
+        onCancel={() => setStopTargetJobId(null)}
         onConfirm={() => void handleStopConfirm()}
       />
     </AppShell>

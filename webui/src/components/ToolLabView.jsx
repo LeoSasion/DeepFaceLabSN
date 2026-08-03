@@ -26,6 +26,7 @@ import {
   DatasetCleaningPanel,
   SegmentTimelinePanel,
 } from "./AdvancedWorkbenchPanels.jsx";
+import { LoadingProgress } from "./ProgressFeedback.jsx";
 
 const QUALITY_LABELS = ["< 0.2", "0.2 – 0.4", "0.4 – 0.6", "0.6 – 0.8", "> 0.8"];
 const SIDE_AWARE_TABS = new Set(["audit", "extract", "video", "metadata"]);
@@ -208,6 +209,7 @@ function PoseAtlas({ refreshVersion, focusCellId, focusNonce, onError, onNotice,
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [localRefresh, setLocalRefresh] = useState(0);
+  const [quarantineProgress, setQuarantineProgress] = useState(null);
   const requestVersion = useRef(0);
   const translationRef = useRef(t);
 
@@ -291,9 +293,11 @@ function PoseAtlas({ refreshVersion, focusCellId, focusNonce, onError, onNotice,
       { count: visibleLowQuality.length },
     ));
     if (!confirmed) return;
+    setQuarantineProgress({ completed: 0, total: visibleLowQuality.length });
     try {
-      for (const sample of visibleLowQuality) {
+      for (const [index, sample] of visibleLowQuality.entries()) {
         await runtimeApi.quarantineAligned(activeSide, sample.name);
+        setQuarantineProgress({ completed: index + 1, total: visibleLowQuality.length });
       }
       onNotice(t("已隔离 {count} 张低清晰度样本，可在数据集页面恢复", {
         count: visibleLowQuality.length,
@@ -301,6 +305,8 @@ function PoseAtlas({ refreshVersion, focusCellId, focusNonce, onError, onNotice,
       setLocalRefresh((value) => value + 1);
     } catch (error) {
       onError(error);
+    } finally {
+      setQuarantineProgress(null);
     }
   };
 
@@ -320,10 +326,11 @@ function PoseAtlas({ refreshVersion, focusCellId, focusNonce, onError, onNotice,
 
   if (loading && !atlases.src.cells.length && !atlases.dst.cells.length) {
     return (
-      <div className="pose-atlas-state" role="status">
-        <IconFileAnalytics size={28} />
-        <strong>{t("正在并行分析 SRC / DST aligned landmarks…")}</strong>
-        <span>{t("两边姿态与清晰度都在本地 Python 运行时计算")}</span>
+      <div className="pose-atlas-state">
+        <LoadingProgress
+          label={t("正在并行分析 SRC / DST aligned landmarks…")}
+          detail={t("两边姿态与清晰度都在本地 Python 运行时计算")}
+        />
       </div>
     );
   }
@@ -361,6 +368,17 @@ function PoseAtlas({ refreshVersion, focusCellId, focusNonce, onError, onNotice,
 
   return (
     <div className="pose-atlas-layout">
+      {quarantineProgress ? (
+        <LoadingProgress
+          compact
+          tone="amber"
+          label={t("正在隔离低清晰度样本…")}
+          detail={t("已处理 {completed} / {total} 张", quarantineProgress)}
+          value={(quarantineProgress.completed / quarantineProgress.total) * 100}
+        />
+      ) : loading ? (
+        <LoadingProgress compact label={t("正在刷新姿态地图…")} detail={t("现有分析结果保持可见")} />
+      ) : null}
       <section className="pose-atlas-main" aria-label={t("人脸姿态分布") }>
         <div className="pose-metrics">
           {viewMode === "compare" ? (
@@ -555,7 +573,7 @@ function PoseAtlas({ refreshVersion, focusCellId, focusNonce, onError, onNotice,
                   <div>
                     {cell?.samples?.length ? cell.samples.slice(0, 3).map((sample) => (
                       <button key={sample.name} type="button" title={sample.sourceFilename ?? sample.name} onClick={() => onNavigateDataset(sampleSide, sample)}>
-                        <img src={sample.imageUrl} alt="" />
+                        <img src={sample.imageUrl} alt="" loading="lazy" decoding="async" />
                         <span>{sample.sharpness.toFixed(2)}</span>
                       </button>
                     )) : <span className="pose-sample-empty">{t("该姿态暂无样本")}</span>}
@@ -583,7 +601,7 @@ function PoseAtlas({ refreshVersion, focusCellId, focusNonce, onError, onNotice,
               <div>
                 {selected.samples.slice(0, 6).map((sample) => (
                   <button key={sample.name} type="button" title={sample.sourceFilename ?? sample.name} onClick={() => onNavigateDataset(activeSide, sample)}>
-                    <img src={sample.imageUrl} alt="" />
+                    <img src={sample.imageUrl} alt="" loading="lazy" decoding="async" />
                     <span>{sample.sharpness.toFixed(2)}</span>
                   </button>
                 ))}
@@ -603,7 +621,7 @@ function PoseAtlas({ refreshVersion, focusCellId, focusNonce, onError, onNotice,
               <button type="button" onClick={() => onNavigateDataset(activeSide, selected.samples[0])} disabled={!selected.samples.length}>
                 <IconPhoto size={15} /><span>{t("在数据集浏览器中查看")}</span><IconArrowRight size={14} />
               </button>
-              <button className="is-warning" type="button" onClick={() => void quarantineVisible()} disabled={!visibleLowQuality.length}>
+              <button className="is-warning" type="button" onClick={() => void quarantineVisible()} disabled={!visibleLowQuality.length || Boolean(quarantineProgress)}>
                 <IconArchive size={15} /><span>{t("隔离可见低质样本")}</span><small>{visibleLowQuality.length}</small>
               </button>
               <button type="button" onClick={() => onOpenCommand(`${activeSide}.faces_pack`)}>

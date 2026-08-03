@@ -11,6 +11,7 @@ import {
   listCommands,
   prepareCommand,
   validateCommandParameters,
+  validateXSegTrainingLabels,
 } from "../server/command-registry.mjs";
 import {
   auditAlignedAssets,
@@ -112,6 +113,25 @@ test("command registry exposes the approved fixed workflows", () => {
   assert.deepEqual(training.controls, ["save", "backup", "preview", "evaluate", "close"]);
   assert.equal(commands.find((command) => command.id === "merge.saehd").profile, "legacy");
   assert.equal(commands.find((command) => command.id === "encode.mp4").stage, "encode");
+});
+
+test("XSeg training preflight rejects datasets without labels", () => {
+  assert.throws(
+    () => validateXSegTrainingLabels(
+      { usableLabelCount: 0 },
+      { usableLabelCount: 0 },
+    ),
+    (error) => error.code === "XSEG_LABELS_MISSING"
+      && error.details.srcLabelCount === 0
+      && error.details.dstLabelCount === 0,
+  );
+  assert.deepEqual(
+    validateXSegTrainingLabels(
+      { usableLabelCount: 2 },
+      { usableLabelCount: 3 },
+    ),
+    { srcLabelCount: 2, dstLabelCount: 3 },
+  );
 });
 
 test("fixed video runner rejects unregistered modes before spawning DFL", () => {
@@ -846,6 +866,103 @@ test("output parser extracts metrics, prompts, and strips ANSI", () => {
   assert.equal(ffmpegMetadata.push("\n15 tbc (default)\r").length, 0);
   assert.equal(parser.push("\n按 Enter 停止训练并保存进度").length, 0);
   assert.equal(stripAnsi("\u001b[31m错误\u001b[0m"), "错误");
+  const modelPrompt = new OutputParser().push(
+    "\u001b[2J\u001b[H[new] 没有发现模型，输入一个名字新建模型 :"
+      + "\u001b]0;C:\\Python\\python.exe\u0007\u001b[?25h",
+  );
+  assert.equal(modelPrompt[0].type, "terminal.prompt");
+  assert.match(modelPrompt[0].payload.prompt, /新建模型/);
+});
+
+test("safe stop ends a training task that is still waiting in startup prompts", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "dfl-safe-stop-"));
+  const manager = new JobManager();
+  manager.persist = async () => {};
+  let killed = false;
+  const job = {
+    id: "waiting-xseg",
+    commandId: "xseg.train",
+    label: "训练 XSeg",
+    shortLabel: "XSeg 训练",
+    profile: "legacy",
+    category: "training",
+    launchMode: "cli",
+    parameters: {},
+    controls: ["close"],
+    locks: [],
+    state: "waiting_input",
+    pid: 123,
+    exitCode: null,
+    signal: null,
+    sequence: 0,
+    createdAt: new Date().toISOString(),
+    startedAt: new Date().toISOString(),
+    endedAt: null,
+    stopReason: null,
+    commandLine: "python main.py train --model XSeg",
+    error: null,
+    latestPrompt: "没有发现模型，输入一个名字新建模型 :",
+    latestMetric: null,
+    latestProgress: null,
+    previewVersion: null,
+    latestEvaluationSnapshotId: null,
+    evaluation: null,
+    directory,
+    metadataFile: path.join(directory, "metadata.json"),
+    eventsFile: path.join(directory, "events.ndjson"),
+    controlFile: path.join(directory, "control.jsonl"),
+    previewFile: path.join(directory, "preview.png"),
+    runner: { kill() { killed = true; } },
+    parser: new OutputParser(),
+    events: [],
+    writeChain: Promise.resolve(),
+    metadataWriteChain: Promise.resolve(),
+    previewTimer: null,
+    stopTimer: null,
+    artifactPollPending: false,
+    evaluationSnapshotIds: new Set(),
+  };
+  manager.jobs.set(job.id, job);
+  const result = await manager.control(job.id, "close");
+  await manager.waitForWrites(job.id);
+  assert.equal(killed, true);
+  assert.equal(result.state, "stopping");
+  assert.equal(result.stopReason, "safe-stop-before-start");
+  await rm(directory, { recursive: true, force: true });
+});
+
+test("output parser exposes real tqdm percentage, counts, and ETA without duplicate events", () => {
+  const parser = new OutputParser();
+  assert.equal(parser.push("合成进度:  52%|#####################################6").length, 0);
+  const progress = parser.push("| 47/90 [00:14<00:13,  3.29it/s]");
+  assert.deepEqual(progress, [{
+    type: "job.progress",
+    payload: {
+      stage: "合成进度",
+      percent: 52,
+      current: 47,
+      total: 90,
+      elapsedSeconds: 14,
+      etaSeconds: 13,
+      rate: "3.29it/s",
+    },
+  }]);
+  assert.equal(
+    parser.push("\r合成进度:  52%|###################################### | 48/90 [00:15<00:12,  3.50it/s]")
+      .filter((event) => event.type === "job.progress").length,
+    0,
+  );
+  assert.equal(parser.push("\r\n处理中…").filter((event) => event.type === "job.progress").length, 0);
+  const nextStage = parser.push("\r计算运动矢量:   0%|               | 0/90 [00:00<?, ?it/s]");
+  assert.deepEqual(nextStage.find((event) => event.type === "job.progress")?.payload, {
+    stage: "计算运动矢量",
+    percent: 0,
+    current: 0,
+    total: 90,
+    elapsedSeconds: 0,
+    etaSeconds: null,
+    rate: null,
+  });
 });
 
 test("GPU telemetry parser handles NVIDIA CSV values and unavailable fields", () => {
@@ -900,10 +1017,22 @@ test("runtime state ignores stale snapshots and out-of-order job events", () => 
   );
   assert.equal(
     applyEventToJob(
-      { id: "job-one", sequence: 13, previewVersion: 10 },
+      { id: "job-one", sequence: 13 },
       {
         jobId: "job-one",
         sequence: 14,
+        type: "job.progress",
+        payload: { stage: "合成进度", percent: 50, current: 45, total: 90, etaSeconds: 12 },
+      },
+    ).latestProgress.percent,
+    50,
+  );
+  assert.equal(
+    applyEventToJob(
+      { id: "job-one", sequence: 14, previewVersion: 10 },
+      {
+        jobId: "job-one",
+        sequence: 15,
         type: "job.artifact",
         payload: { kind: "training-evaluation", snapshotId: "iter-00008000-abcdef12" },
       },

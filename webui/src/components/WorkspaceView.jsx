@@ -12,6 +12,7 @@ import {
 } from "@tabler/icons-react";
 import { runtimeApi } from "../runtime/api.js";
 import { useI18n } from "../i18n.jsx";
+import { LoadingProgress } from "./ProgressFeedback.jsx";
 
 function formatBytes(bytes = 0) {
   if (!bytes) return "0 B";
@@ -32,7 +33,7 @@ function formatDuration(seconds) {
     .join(":");
 }
 
-function MaterialSlot({ side, material, busy, onImport }) {
+function MaterialSlot({ side, material, busy, progress, onImport }) {
   const { language, t } = useI18n();
   const inputRef = useRef(null);
   const label = side === "src" ? t("SRC 源视频") : t("DST 目标视频");
@@ -59,14 +60,24 @@ function MaterialSlot({ side, material, busy, onImport }) {
         </span>
       </div>
       {material ? (
-        <div className="material-details">
-          <strong title={material.path}>{material.name}</strong>
-          <dl>
-            <div><dt>{t("时长")}</dt><dd>{formatDuration(material.durationSeconds)}</dd></div>
-            <div><dt>{t("分辨率")}</dt><dd>{material.width ? `${material.width} × ${material.height}` : "—"}</dd></div>
-            <div><dt>{t("大小")}</dt><dd>{formatBytes(material.bytes)}</dd></div>
-            <div><dt>{t("修改时间")}</dt><dd>{new Date(material.modifiedAt).toLocaleString(language === "zh" ? "zh-CN" : "en-US")}</dd></div>
-          </dl>
+        <div className="material-overview">
+          <video
+            className="material-preview"
+            muted
+            playsInline
+            preload="metadata"
+            src={`/api/workspace/materials/${side}`}
+            aria-label={t("{side} 素材预览", { side: side.toUpperCase() })}
+          />
+          <div className="material-details">
+            <strong title={material.path}>{material.name}</strong>
+            <dl>
+              <div><dt>{t("时长")}</dt><dd>{formatDuration(material.durationSeconds)}</dd></div>
+              <div><dt>{t("分辨率")}</dt><dd>{material.width ? `${material.width} × ${material.height}` : "—"}</dd></div>
+              <div><dt>{t("大小")}</dt><dd>{formatBytes(material.bytes)}</dd></div>
+              <div><dt>{t("修改时间")}</dt><dd>{new Date(material.modifiedAt).toLocaleString(language === "zh" ? "zh-CN" : "en-US")}</dd></div>
+            </dl>
+          </div>
         </div>
       ) : (
         <div className="material-empty">
@@ -82,6 +93,15 @@ function MaterialSlot({ side, material, busy, onImport }) {
       >
         <IconUpload size={15} />{busy ? t("正在导入…") : material ? t("更换") : t("导入")}
       </button>
+      {busy ? (
+        <LoadingProgress
+          compact
+          className="material-upload-progress"
+          label={t("正在上传 {side} 视频", { side: side.toUpperCase() })}
+          detail={progress >= 100 ? t("上传完成，正在校验并登记素材") : t("按文件真实传输量计算")}
+          value={progress < 100 ? progress : undefined}
+        />
+      ) : null}
     </section>
   );
 }
@@ -103,6 +123,7 @@ export function WorkspaceView({ serviceOnline, onError, onArchived }) {
   const [workspace, setWorkspace] = useState(null);
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(null);
+  const [importProgress, setImportProgress] = useState(null);
   const [archiving, setArchiving] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -125,13 +146,18 @@ export function WorkspaceView({ serviceOnline, onError, onArchived }) {
       t("确定更换 {side} 视频吗？旧视频会移入可恢复归档。", { side: side.toUpperCase() }),
     )) return;
     setImporting(side);
+    setImportProgress(0);
     try {
-      await runtimeApi.importVideo(side, file, { replace: replacing });
+      await runtimeApi.importVideo(side, file, {
+        replace: replacing,
+        onProgress: ({ percent }) => setImportProgress(Number.isFinite(percent) ? percent : null),
+      });
       await refresh();
     } catch (error) {
       onError(error);
     } finally {
       setImporting(null);
+      setImportProgress(null);
     }
   };
 
@@ -159,7 +185,14 @@ export function WorkspaceView({ serviceOnline, onError, onArchived }) {
   }
 
   if (loading && !workspace) {
-    return <section className="workspace-manager workspace-loading">{t("正在扫描工作区…")}</section>;
+    return (
+      <section className="workspace-manager workspace-loading">
+        <LoadingProgress
+          label={t("正在扫描工作区…")}
+          detail={t("正在核对素材、数据集、模型与输出文件")}
+        />
+      </section>
+    );
   }
 
   const data = workspace ?? {
@@ -211,6 +244,14 @@ export function WorkspaceView({ serviceOnline, onError, onArchived }) {
           <IconRefresh size={15} />{loading ? t("扫描中") : t("刷新")}
         </button>
       </header>
+      {loading && !importing ? (
+        <LoadingProgress
+          compact
+          className="workspace-refresh-progress"
+          label={t("正在刷新工作区清单…")}
+          detail={t("现有内容保持可见")}
+        />
+      ) : null}
 
       <div className="workspace-layout">
         <div className="workspace-primary">
@@ -219,12 +260,14 @@ export function WorkspaceView({ serviceOnline, onError, onArchived }) {
               side="src"
               material={data.materials.src}
               busy={importing === "src"}
+              progress={importing === "src" ? importProgress : null}
               onImport={handleImport}
             />
             <MaterialSlot
               side="dst"
               material={data.materials.dst}
               busy={importing === "dst"}
+              progress={importing === "dst" ? importProgress : null}
               onImport={handleImport}
             />
           </div>
@@ -292,6 +335,9 @@ export function WorkspaceView({ serviceOnline, onError, onArchived }) {
             <IconArchive size={15} />{archiving ? t("归档中…") : t("归档已完成任务")}
           </button>
         </div>
+        {archiving ? (
+          <LoadingProgress compact label={t("正在归档已结束任务…")} detail={t("素材、模型与输出不会被删除")} />
+        ) : null}
       </section>
     </section>
   );

@@ -14,10 +14,29 @@ import {
   IconRefresh,
   IconSend,
   IconTerminal2,
+  IconTrash,
+  IconX,
 } from "@tabler/icons-react";
 import { useI18n } from "../i18n.jsx";
+import {
+  findAdjacentTerminalJobId,
+  isTerminalSession,
+  selectTerminalTabs,
+} from "../domain/terminal-sessions.js";
+import { LoadingProgress } from "./ProgressFeedback.jsx";
 
 const TerminalSurface = lazy(() => import("./TerminalSurface.jsx"));
+const HIDDEN_TERMINAL_JOBS_STORAGE_KEY = "dfl-webui-hidden-terminal-jobs-v1";
+const noop = () => {};
+
+function readHiddenTerminalJobIds() {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(HIDDEN_TERMINAL_JOBS_STORAGE_KEY) ?? "[]");
+    return Array.isArray(stored) ? stored.filter((id) => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
 
 const stateLabels = {
   queued: "排队中",
@@ -27,11 +46,22 @@ const stateLabels = {
   stopping: "安全停止中",
   succeeded: "已完成",
   failed: "失败",
-  cancelled: "已强制终止",
+  cancelled: "已停止",
   orphaned: "连接已丢失",
 };
 
-const interactiveStates = new Set(["starting", "running", "waiting_input", "stopping"]);
+const interactiveStates = new Set(["starting", "running", "waiting_input"]);
+const progressingStates = new Set(["queued", "starting", "running", "stopping"]);
+
+function jobStateLabel(job) {
+  if (job?.state === "cancelled" && job.stopReason === "safe-stop-before-start") {
+    return "启动前已停止";
+  }
+  if (job?.state === "cancelled" && job.stopReason?.startsWith("safe-stop")) {
+    return "已安全停止";
+  }
+  return stateLabels[job?.state] ?? job?.state;
+}
 
 function formatClock(value, language) {
   if (!value) return "—";
@@ -124,10 +154,14 @@ export function ConsoleDock({
   onSafeStop,
   onCopyPath,
   onError,
+  onNotice = noop,
 }) {
   const { language, t } = useI18n();
   const [promptInput, setPromptInput] = useState("");
   const [now, setNow] = useState(Date.now());
+  const [pendingConsoleAction, setPendingConsoleAction] = useState(null);
+  const [hiddenJobIds, setHiddenJobIds] = useState(readHiddenTerminalJobIds);
+  const [showAllSessions, setShowAllSessions] = useState(false);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -135,15 +169,119 @@ export function ConsoleDock({
   }, []);
   useEffect(() => setPromptInput(""), [selectedJob?.id]);
 
+  const hiddenJobIdSet = useMemo(() => new Set(hiddenJobIds), [hiddenJobIds]);
+  const availableJobCount = jobs.reduce(
+    (count, job) => count + (hiddenJobIdSet.has(job.id) ? 0 : 1),
+    0,
+  );
+  const visibleJobs = useMemo(
+    () => selectTerminalTabs(jobs, hiddenJobIdSet, {
+      selectedJobId: selectedJob?.id,
+      showAll: showAllSessions,
+    }),
+    [hiddenJobIdSet, jobs, selectedJob?.id, showAllSessions],
+  );
+  const overflowJobCount = Math.max(0, availableJobCount - visibleJobs.length);
+  const hiddenFinishedCount = jobs.reduce(
+    (count, job) => count + (hiddenJobIdSet.has(job.id) && isTerminalSession(job) ? 1 : 0),
+    0,
+  );
+  const visibleFinishedCount = jobs.reduce(
+    (count, job) => count + (!hiddenJobIdSet.has(job.id) && isTerminalSession(job) ? 1 : 0),
+    0,
+  );
+
+  useEffect(() => {
+    window.localStorage.setItem(HIDDEN_TERMINAL_JOBS_STORAGE_KEY, JSON.stringify(hiddenJobIds));
+  }, [hiddenJobIds]);
+
+  useEffect(() => {
+    if (!selectedJob || !hiddenJobIdSet.has(selectedJob.id) || !visibleJobs.length) return;
+    onSelectJob(visibleJobs[0].id);
+  }, [hiddenJobIdSet, onSelectJob, selectedJob, visibleJobs]);
+
+  useEffect(() => {
+    if (!selectedJob && visibleJobs.length) onSelectJob(visibleJobs[0].id);
+  }, [onSelectJob, selectedJob, visibleJobs]);
+
+  const closeSessionTab = (job) => {
+    if (!isTerminalSession(job)) return;
+    const nextHidden = new Set(hiddenJobIdSet).add(job.id);
+    setHiddenJobIds([...nextHidden]);
+    if (selectedJob?.id === job.id) {
+      onSelectJob(findAdjacentTerminalJobId(jobs, nextHidden, job.id));
+    }
+    onNotice(t("已关闭会话标签，任务日志仍保留"));
+  };
+
+  const clearFinishedTabs = () => {
+    const finishedIds = jobs
+      .filter((job) => isTerminalSession(job) && !hiddenJobIdSet.has(job.id))
+      .map((job) => job.id);
+    if (!finishedIds.length) return;
+    const nextHidden = new Set([...hiddenJobIdSet, ...finishedIds]);
+    setHiddenJobIds([...nextHidden]);
+    setShowAllSessions(false);
+    if (selectedJob && nextHidden.has(selectedJob.id)) {
+      onSelectJob(jobs.find((job) => !nextHidden.has(job.id))?.id ?? null);
+    }
+    onNotice(t("已隐藏 {count} 个已结束会话，任务日志仍保留", { count: finishedIds.length }));
+  };
+
+  const restoreHiddenTabs = () => {
+    setHiddenJobIds([]);
+    onSelectJob(selectedJob?.id ?? jobs[0]?.id ?? null);
+    onNotice(t("已恢复 {count} 个会话标签", { count: hiddenFinishedCount }));
+  };
+
   const canInteract = selectedJob && interactiveStates.has(selectedJob.state);
+  const canControlTrainer = selectedJob?.state === "running" && !selectedJob.latestPrompt;
+  const canStop = selectedJob && ["starting", "running", "waiting_input"].includes(selectedJob.state);
   const isTraining = selectedJob?.category === "training";
   const duration = useMemo(
     () => formatDuration(selectedJob?.startedAt, selectedJob?.endedAt, now),
     [now, selectedJob?.endedAt, selectedJob?.startedAt],
   );
+  const jobMetric = selectedJob?.latestMetric;
+  const trainingProgressValue = jobMetric?.targetIterations > 0
+    ? (jobMetric.iteration / jobMetric.targetIterations) * 100
+    : undefined;
+  const streamedProgress = selectedJob?.latestProgress;
+  const streamedProgressAge = streamedProgress?.updatedAt
+    ? now - new Date(streamedProgress.updatedAt).getTime()
+    : Number.POSITIVE_INFINITY;
+  const visibleStreamedProgress = streamedProgress
+    && (streamedProgress.percent < 100 || streamedProgressAge < 4000)
+    ? streamedProgress
+    : null;
+  const jobProgressValue = Number.isFinite(trainingProgressValue)
+    ? trainingProgressValue
+    : visibleStreamedProgress?.percent;
+  const jobProgressDetail = Number.isFinite(trainingProgressValue)
+    ? t("按 Trainer 目标迭代计算")
+    : visibleStreamedProgress?.stage
+      ? t("当前阶段：{stage}", { stage: visibleStreamedProgress.stage })
+      : t("实时输出与状态会持续写入当前会话");
+  const jobProgressCurrent = Number.isFinite(trainingProgressValue)
+    ? jobMetric.iteration
+    : visibleStreamedProgress?.current;
+  const jobProgressTotal = Number.isFinite(trainingProgressValue)
+    ? jobMetric.targetIterations
+    : visibleStreamedProgress?.total;
+  const jobProgressEta = Number.isFinite(trainingProgressValue)
+    ? jobMetric.etaSeconds
+    : visibleStreamedProgress?.etaSeconds;
+  const jobProgressLabel = selectedJob?.state === "stopping"
+    ? t("正在安全停止 {label}", { label: selectedJob.label })
+    : selectedJob?.state === "starting"
+      ? t("{label} 正在启动", { label: selectedJob.label })
+      : t("{label} 正在运行", { label: selectedJob?.label });
 
-  const run = (action) => {
-    Promise.resolve(action()).catch(onError);
+  const run = (action, progressLabel = null) => {
+    if (progressLabel) setPendingConsoleAction(progressLabel);
+    Promise.resolve(action()).catch(onError).finally(() => {
+      if (progressLabel) setPendingConsoleAction(null);
+    });
   };
   const submitPrompt = (event) => {
     event.preventDefault();
@@ -166,7 +304,7 @@ export function ConsoleDock({
           <>
             <span className={`job-state-badge is-${selectedJob.state}`}>
               <i aria-hidden="true" />
-              {t(stateLabels[selectedJob.state] ?? selectedJob.state)}
+              {t(jobStateLabel(selectedJob))}
             </span>
             <code className="runtime-command-line" title={selectedJob.commandLine}>{selectedJob.commandLine}</code>
             <dl className="runtime-header-stats">
@@ -185,29 +323,105 @@ export function ConsoleDock({
 
       {collapsed ? null : (
         <>
-          <div className="terminal-tabs" role="tablist" aria-label={t("任务终端会话")}>
-            {jobs.length ? jobs.map((job) => (
-              <button
-                className={`terminal-tab ${selectedJob?.id === job.id ? "is-active" : ""}`}
-                type="button"
-                role="tab"
-                aria-selected={selectedJob?.id === job.id}
-                key={job.id}
-                onClick={() => onSelectJob(job.id)}
-              >
-                <i className={`session-dot is-${job.state}`} aria-hidden="true" />
-                <span>{job.shortLabel ?? job.label}</span>
-                <small>{t(stateLabels[job.state] ?? job.state)}</small>
-              </button>
-            )) : (
-              <span className="terminal-tabs-empty">{t("会话列表为空")}</span>
-            )}
+          <div className="terminal-tabs">
+            <div className="terminal-tab-list" role="tablist" aria-label={t("任务终端会话")}>
+              {visibleJobs.length ? visibleJobs.map((job) => (
+                <div
+                  className={`terminal-tab-shell ${isTerminalSession(job) ? "is-closable" : ""} ${selectedJob?.id === job.id ? "is-active" : ""}`}
+                  role="presentation"
+                  key={job.id}
+                >
+                  <button
+                    className="terminal-tab"
+                    type="button"
+                    role="tab"
+                    aria-selected={selectedJob?.id === job.id}
+                    onClick={() => onSelectJob(job.id)}
+                  >
+                    <i className={`session-dot is-${job.state}`} aria-hidden="true" />
+                    <span>{job.shortLabel ?? job.label}</span>
+                    <small>{t(jobStateLabel(job))}</small>
+                  </button>
+                  {isTerminalSession(job) ? (
+                    <button
+                      className="terminal-tab-close"
+                      type="button"
+                      title={t("关闭此标签；任务日志仍会保留")}
+                      aria-label={t("关闭 {label} 会话", { label: job.shortLabel ?? job.label })}
+                      onClick={() => closeSessionTab(job)}
+                    >
+                      <IconX size={13} stroke={2} />
+                    </button>
+                  ) : null}
+                </div>
+              )) : jobs.length ? (
+                <span className="terminal-tabs-empty">{t("已隐藏全部已结束会话，任务日志仍保留")}</span>
+              ) : (
+                <span className="terminal-tabs-empty">{t("会话列表为空")}</span>
+              )}
+            </div>
+            <div className="terminal-tabs-actions" role="group" aria-label={t("会话标签管理")}>
+              {overflowJobCount ? (
+                <button
+                  className="terminal-tabs-action"
+                  type="button"
+                  onClick={() => setShowAllSessions(true)}
+                  title={t("显示另外 {count} 个历史会话", { count: overflowJobCount })}
+                >
+                  +{overflowJobCount} {t("历史")}
+                </button>
+              ) : showAllSessions && availableJobCount > 7 ? (
+                <button className="terminal-tabs-action" type="button" onClick={() => setShowAllSessions(false)}>
+                  {t("收起历史")}
+                </button>
+              ) : null}
+              {visibleFinishedCount ? (
+                <button
+                  className="terminal-tabs-action is-clear"
+                  type="button"
+                  onClick={clearFinishedTabs}
+                  title={t("隐藏全部已结束会话，任务日志仍保留")}
+                >
+                  <IconTrash size={12} stroke={1.9} />{t("清理已结束")}
+                </button>
+              ) : null}
+              {hiddenFinishedCount ? (
+                <button
+                  className="terminal-tabs-action"
+                  type="button"
+                  onClick={restoreHiddenTabs}
+                  title={t("恢复 {count} 个已隐藏会话", { count: hiddenFinishedCount })}
+                >
+                  {t("恢复")} {hiddenFinishedCount}
+                </button>
+              ) : null}
+            </div>
           </div>
 
           {selectedJob ? (
             <div className="terminal-workspace">
               <div className="terminal-main">
-                <Suspense fallback={<div className="terminal-loading">{t("正在加载终端渲染器…")}</div>}>
+                {pendingConsoleAction ? (
+                  <LoadingProgress compact label={pendingConsoleAction} detail={t("终端输出会保留在当前会话")} />
+                ) : progressingStates.has(selectedJob.state) ? (
+                  <LoadingProgress
+                    compact
+                    label={jobProgressLabel}
+                    detail={jobProgressDetail}
+                    value={jobProgressValue}
+                    current={jobProgressCurrent}
+                    total={jobProgressTotal}
+                    etaSeconds={jobProgressEta}
+                    startedAt={selectedJob.startedAt}
+                    rememberDuration={false}
+                  />
+                ) : selectedJob.state === "waiting_input" ? (
+                  <div className="terminal-waiting-input" role="status">
+                    <strong>{t("等待终端输入")}</strong>
+                    <span>{selectedJob.latestPrompt ?? t("请在下方输入框回答 DFL 问题后继续")}</span>
+                  </div>
+                ) : null}
+                <Suspense fallback={<div className="terminal-loading"><LoadingProgress compact label={t("正在加载终端渲染器…")} detail={t("正在准备本地终端画布")}/></div>}>
                   <TerminalSurface
                     key={selectedJob.id}
                     events={events}
@@ -221,7 +435,9 @@ export function ConsoleDock({
                   <input
                     value={promptInput}
                     onChange={(event) => setPromptInput(event.target.value)}
-                    placeholder={selectedJob.latestPrompt ?? (canInteract ? t("在此输入 CLI 回答，Enter 发送") : t("任务已结束，仅可查看日志"))}
+                    placeholder={selectedJob.state === "stopping"
+                      ? t("正在安全停止，已暂停终端输入")
+                      : selectedJob.latestPrompt ?? (canInteract ? t("在此输入 CLI 回答，Enter 发送") : t("任务已结束，仅可查看日志"))}
                     aria-label={t("CLI 输入")}
                     disabled={!canInteract}
                   />
@@ -237,16 +453,16 @@ export function ConsoleDock({
                 {isTraining ? (
                   <div className="terminal-control-row">
                     <span>{t("训练控制")}</span>
-                    <button className="button secondary" type="button" onClick={() => run(() => onControl("save"))} disabled={!canInteract}>
+                    <button className="button secondary" type="button" onClick={() => run(() => onControl("save"), t("正在保存训练模型…"))} disabled={!canControlTrainer || Boolean(pendingConsoleAction)}>
                       <IconDeviceFloppy size={15} />{t("保存")}
                     </button>
-                    <button className="button secondary" type="button" onClick={() => run(() => onControl("backup"))} disabled={!canInteract}>
+                    <button className="button secondary" type="button" onClick={() => run(() => onControl("backup"), t("正在创建训练备份…"))} disabled={!canControlTrainer || Boolean(pendingConsoleAction)}>
                       <IconArchive size={15} />{t("备份")}
                     </button>
-                    <button className="button secondary" type="button" onClick={() => run(() => onControl("preview"))} disabled={!canInteract}>
+                    <button className="button secondary" type="button" onClick={() => run(() => onControl("preview"), t("正在刷新训练预览…"))} disabled={!canControlTrainer || Boolean(pendingConsoleAction)}>
                       <IconRefresh size={15} />{t("刷新预览")}
                     </button>
-                    <button className="button danger" type="button" onClick={onSafeStop} disabled={!canInteract || selectedJob.state === "stopping"}>
+                    <button className="button danger" type="button" onClick={onSafeStop} disabled={!canStop || selectedJob.state === "stopping"}>
                       <IconPlayerStop size={15} />{t("安全停止")}
                     </button>
                   </div>
@@ -281,9 +497,9 @@ export function ConsoleDock({
             <EmptyTerminal
               serviceState={serviceState}
               commands={commands}
-              onStart={(commandId) => run(() => onStart(commandId))}
+              onStart={(commandId) => run(() => onStart(commandId), t("正在创建任务并连接终端…"))}
               onOpenNewTask={onOpenNewTask}
-              onRetry={onRetry}
+              onRetry={() => run(onRetry, t("正在重新连接本地服务…"))}
             />
           )}
         </>
