@@ -26,12 +26,17 @@ const DESKTOP_BREAKPOINT = 1020;
 const DESKTOP_DESIGN_WIDTH = 1440;
 const DESKTOP_DESIGN_HEIGHT = 900;
 const MINIMUM_DESKTOP_SCALE = 0.78;
+const MAXIMUM_DESKTOP_SCALE = 1.15;
 
 function readDesktopUiScale() {
   if (typeof window === "undefined" || window.innerWidth <= DESKTOP_BREAKPOINT) return 1;
   return Math.max(
     MINIMUM_DESKTOP_SCALE,
-    Math.min(1, window.innerWidth / DESKTOP_DESIGN_WIDTH, window.innerHeight / DESKTOP_DESIGN_HEIGHT),
+    Math.min(
+      MAXIMUM_DESKTOP_SCALE,
+      window.innerWidth / DESKTOP_DESIGN_WIDTH,
+      window.innerHeight / DESKTOP_DESIGN_HEIGHT,
+    ),
   );
 }
 
@@ -105,7 +110,7 @@ export function Sidebar({ activeNav, onNavigate }) {
       <button
         className={`nav-item sidebar-settings ${activeNav === "settings" ? "is-active" : ""}`}
         type="button"
-        aria-label={t("璁剧疆")}
+        aria-label={t("设置")}
         aria-current={activeNav === "settings" ? "page" : undefined}
         onClick={() => onNavigate("settings", t("设置"))}
       >
@@ -221,7 +226,7 @@ export function WorkflowBar({ selectedStage, stageStates = {}, onSelectStage }) 
 
 export function AppShell({ children, activeNav, onNavigate }) {
   const uiScale = useDesktopUiScale();
-  const isScaled = uiScale < 0.999;
+  const isScaled = Math.abs(uiScale - 1) > 0.001;
   const scaleStyle = isScaled
     ? {
         "--desktop-ui-scale": uiScale,

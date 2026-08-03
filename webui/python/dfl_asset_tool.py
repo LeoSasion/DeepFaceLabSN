@@ -871,6 +871,29 @@ def list_images(directory, offset, limit):
     return {"total": len(files), "offset": offset, "limit": limit, "items": items}
 
 
+def summarize_xseg_labels(directory):
+    files = iter_images(directory)
+    polygon_count = 0
+    applied_mask_count = 0
+    invalid_count = 0
+    for image_path in files:
+        try:
+            dfl_image = load_dfl_image(image_path)
+            if dfl_image.get_seg_ie_polys().has_polys():
+                polygon_count += 1
+            elif dfl_image.has_xseg_mask():
+                applied_mask_count += 1
+        except Exception:
+            invalid_count += 1
+    return {
+        "total": len(files),
+        "polygonCount": polygon_count,
+        "appliedMaskCount": applied_mask_count,
+        "usableLabelCount": polygon_count + applied_mask_count,
+        "invalidCount": invalid_count,
+    }
+
+
 def similarity_descriptor(image):
     resized = cv2.resize(image, (96, 96), interpolation=cv2.INTER_AREA)
     gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
@@ -1224,6 +1247,7 @@ def main():
         "action",
         choices=(
             "list",
+            "xseg-label-summary",
             "inspect",
             "save",
             "atlas",
@@ -1250,6 +1274,12 @@ def main():
         if args.directory is None or not args.directory.is_dir():
             raise ValueError("aligned 目录不存在")
         emit(list_images(args.directory, max(args.offset, 0), min(max(args.limit, 1), 200)))
+        return
+
+    if args.action == "xseg-label-summary":
+        if args.directory is None or not args.directory.is_dir():
+            raise ValueError("aligned 目录不存在")
+        emit(summarize_xseg_labels(args.directory))
         return
 
     if args.action == "atlas":

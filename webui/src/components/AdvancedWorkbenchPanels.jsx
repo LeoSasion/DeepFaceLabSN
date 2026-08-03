@@ -19,6 +19,7 @@ import {
 import { useI18n } from "../i18n.jsx";
 import { runtimeApi } from "../runtime/api.js";
 import { DatasetAuditPanel } from "./ToolWorkbenchPanels.jsx";
+import { LoadingProgress } from "./ProgressFeedback.jsx";
 
 const REVIEW_PAGE_SIZE = 60;
 const LANDMARK_GROUPS = {
@@ -30,12 +31,16 @@ const LANDMARK_GROUPS = {
   mouth: Array.from({ length: 20 }, (_, index) => index + 48),
 };
 
-function PanelState({ icon, title, detail }) {
+function PanelState({ icon, title, detail, loading = false }) {
   return (
-    <div className="tool-workbench-state" role="status">
-      {icon}
-      <strong>{title}</strong>
-      <span>{detail}</span>
+    <div className={`tool-workbench-state${loading ? " is-loading" : ""}`} role={loading ? undefined : "status"}>
+      {loading ? <LoadingProgress className="in-panel" label={title} detail={detail} /> : (
+        <>
+          {icon}
+          <strong>{title}</strong>
+          <span>{detail}</span>
+        </>
+      )}
     </div>
   );
 }
@@ -110,9 +115,10 @@ function SimilarityAuditPanel({ side, refreshVersion, onError, onNotice, onNavig
     }
   };
 
-  if (!data) return <PanelState icon={<IconSparkles size={26} />} title={t("正在建立视觉相似候选组…")} detail={t("本地使用 DCT、色彩与边缘描述子，最多分析 500 张，不调用外部识别服务。") } />;
+  if (!data) return <PanelState loading icon={<IconSparkles size={26} />} title={t("正在建立视觉相似候选组…")} detail={t("本地使用 DCT、色彩与边缘描述子，最多分析 500 张，不调用外部识别服务。") } />;
   return (
     <div className="similarity-workbench">
+      {busy ? <LoadingProgress compact label={t("正在隔离相似候选…")} detail={t("批次共用一个可恢复令牌")} /> : null}
       <header className="similarity-toolbar">
         <div>
           <strong>{t("视觉相似候选")}</strong>
@@ -147,7 +153,7 @@ function SimilarityAuditPanel({ side, refreshVersion, onError, onNotice, onNavig
                 {group.members.map((member) => (
                   <article className={`${member.representative ? "is-representative" : ""} ${selectedSet.has(member.name) ? "is-selected" : ""}`} key={member.name}>
                     <button type="button" disabled={member.representative} onClick={() => toggle(member.name)} aria-pressed={selectedSet.has(member.name)}>
-                      <img src={member.imageUrl} alt="" loading="lazy" />
+                      <img src={member.imageUrl} alt="" loading="lazy" decoding="async" />
                       <span>{member.representative ? t("代表图") : selectedSet.has(member.name) ? t("待隔离") : t("候选")}</span>
                     </button>
                     <div><strong title={member.name}>{member.name}</strong><small>{member.score.toFixed(3)}</small></div>
@@ -191,7 +197,7 @@ export function AlignmentRepairPanel({ side, refreshVersion, onError, onNotice, 
   const [group, setGroup] = useState("all");
   const [dragging, setDragging] = useState(null);
   const [preview, setPreview] = useState(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(null);
   const [retry, setRetry] = useState(0);
   const [backups, setBackups] = useState([]);
 
@@ -263,33 +269,41 @@ export function AlignmentRepairPanel({ side, refreshVersion, onError, onNotice, 
   };
   const runPreview = async () => {
     if (!face || landmarks.length !== 68) return;
-    setBusy(true);
+    setBusy("preview");
     try {
       setPreview(await runtimeApi.previewAlignedRepair(side, face.alignedName, landmarks));
-    } catch (error) { onError(error); } finally { setBusy(false); }
+    } catch (error) { onError(error); } finally { setBusy(null); }
   };
   const applyRepair = async () => {
     if (!face || !previewMatches || !window.confirm(t("将按当前 68 点重新裁切 {name} 吗？原文件会先进入对齐恢复区。", { name: face.alignedName }))) return;
-    setBusy(true);
+    setBusy("apply");
     try {
       const result = await runtimeApi.applyAlignedRepair(side, face.alignedName, landmarks);
       onNotice(t("对齐已重裁并原子替换；恢复令牌 {token}", { token: result.token }));
       setRetry((value) => value + 1);
-    } catch (error) { onError(error); } finally { setBusy(false); }
+    } catch (error) { onError(error); } finally { setBusy(null); }
   };
   const restore = async (backup) => {
     if (!window.confirm(t("恢复 {name} 的对齐备份吗？当前版本也会保留一份撤销副本。", { name: backup.name }))) return;
+    setBusy("restore");
     try {
       await runtimeApi.restoreAlignedRepair(side, backup.token, backup.name);
       onNotice(t("已恢复 {name}", { name: backup.name }));
       setRetry((value) => value + 1);
-    } catch (error) { onError(error); }
+    } catch (error) { onError(error); } finally { setBusy(null); }
   };
 
-  if (!coverage) return <PanelState icon={<IconRoute size={26} />} title={t("正在关联源帧与 aligned 元数据…")} detail={t("修复只对已有 68 点人脸开放。") } />;
+  if (!coverage) return <PanelState loading icon={<IconRoute size={26} />} title={t("正在关联源帧与 aligned 元数据…")} detail={t("修复只对已有 68 点人脸开放。") } />;
   if (!coverage.total) return <PanelState icon={<IconPhoto size={26} />} title={t("还没有源帧")} detail={t("先提取视频帧，再进入对齐修复。") } />;
   return (
     <div className="alignment-repair-workbench">
+      {busy ? (
+        <LoadingProgress
+          compact
+          label={t({ preview: "正在生成修复预览…", apply: "正在应用对齐修复…", restore: "正在恢复对齐备份…" }[busy])}
+          detail={t("原图始终保留可恢复副本")}
+        />
+      ) : null}
       <header className="alignment-toolbar">
         <div><strong>{t("对齐修复工作台")}</strong><span>{t("拖动源帧 landmarks，预览确认后重新裁切；不会只改元数据。")}</span></div>
         <div className="frame-stepper">
@@ -332,7 +346,7 @@ export function AlignmentRepairPanel({ side, refreshVersion, onError, onNotice, 
           <div className="alignment-face-picker">
             {frame?.faces.map((item, itemIndex) => (
               <button className={itemIndex === faceIndex ? "is-active" : ""} type="button" key={item.alignedName} onClick={() => setFaceIndex(itemIndex)}>
-                <img src={item.alignedUrl} alt="" /><span>{item.alignedName}</span>
+                <img src={item.alignedUrl} alt="" loading="lazy" decoding="async" /><span>{item.alignedName}</span>
               </button>
             ))}
             {frame && !frame.faces.length ? <span>{t("该帧没有可修复的 aligned 人脸")}</span> : null}
@@ -363,13 +377,13 @@ export function AlignmentRepairPanel({ side, refreshVersion, onError, onNotice, 
           </section>
           <section className="alignment-preview-card">
             <header><strong>{t("重裁预览")}</strong><span>{preview ? t("待确认") : t("尚未生成")}</span></header>
-            {preview ? <img src={preview.previewDataUrl} alt="" /> : face ? <img src={face.alignedUrl} alt="" /> : <div>{t("选择已有 aligned 人脸")}</div>}
+            {preview ? <img src={preview.previewDataUrl} alt="" decoding="async" /> : face ? <img src={face.alignedUrl} alt="" decoding="async" /> : <div>{t("选择已有 aligned 人脸")}</div>}
             <button className="button secondary" type="button" disabled={!face || landmarks.length !== 68 || busy} onClick={() => void runPreview()}><IconRefresh size={15} />{t("生成新裁切预览")}</button>
             <button className="button primary" type="button" disabled={!previewMatches || busy} onClick={() => void applyRepair()}><IconCheck size={15} />{t("确认并原子替换")}</button>
           </section>
           <section className="alignment-backups">
             <header><strong>{t("最近恢复点")}</strong><span>{backups.length}</span></header>
-            {backups.slice(0, 4).map((backup) => <button key={`${backup.token}-${backup.name}`} type="button" onClick={() => void restore(backup)}><IconRestore size={14} /><span>{backup.name}<small>{backup.token}</small></span></button>)}
+            {backups.slice(0, 4).map((backup) => <button key={`${backup.token}-${backup.name}`} type="button" disabled={Boolean(busy)} onClick={() => void restore(backup)}><IconRestore size={14} /><span>{backup.name}<small>{backup.token}</small></span></button>)}
             {!backups.length ? <small>{t("首次应用修复后会在这里出现")}</small> : null}
           </section>
           <button className="alignment-manual-link" type="button" onClick={() => onOpenCommand(`${side}.extract_faces`)}><IconPlayerPlay size={15} />{t("需要重跑检测器？打开提取任务")}</button>
@@ -464,10 +478,17 @@ export function SegmentTimelinePanel({ side, refreshVersion, onError, onNotice, 
     } catch (error) { onError(error); } finally { setBusy(null); }
   };
 
-  if (!timeline) return <PanelState icon={<IconScissors size={26} />} title={t("正在读取素材时间线…")} detail={t("场景和分段清单保存在当前项目内。") } />;
+  if (!timeline) return <PanelState loading icon={<IconScissors size={26} />} title={t("正在读取素材时间线…")} detail={t("场景和分段清单保存在当前项目内。") } />;
   if (!timeline.material) return <PanelState icon={<IconPhoto size={26} />} title={t("{side} 视频尚未导入", { side: side.toUpperCase() })} detail={t("导入素材后即可检测场景和批量分段提帧。") } />;
   return (
     <div className="segment-timeline-workbench">
+      {busy ? (
+        <LoadingProgress
+          compact
+          label={t({ save: "正在保存分段清单…", detect: "正在检测场景边界…", extract: "正在提取选中分段…", restore: "正在恢复帧归档…" }[busy])}
+          detail={t("当前时间线保持可见，完成后自动刷新")}
+        />
+      ) : null}
       <section className="segment-video-column">
         <video ref={videoRef} controls preload="metadata" src={timeline.material.url} onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} />
         <div className="scene-timeline" aria-label={t("场景时间线") }>

@@ -128,6 +128,24 @@ export async function listAlignedAssets(side, { offset = 0, limit = 60 } = {}) {
   };
 }
 
+export async function summarizeXSegLabels(side) {
+  const directory = alignedDirectory(side);
+  if (!(await pathExists(directory))) {
+    return {
+      side,
+      total: 0,
+      polygonCount: 0,
+      appliedMaskCount: 0,
+      usableLabelCount: 0,
+      invalidCount: 0,
+    };
+  }
+  return {
+    side,
+    ...await runAssetHelper(["xseg-label-summary", "--directory", directory]),
+  };
+}
+
 async function cachedAnalysis(side, key, refresh, loader) {
   const cacheKey = `${side}:${key}`;
   const cached = analysisCache.get(cacheKey);

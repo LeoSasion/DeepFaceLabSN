@@ -42,6 +42,9 @@ export function applyEventToJob(job, event) {
   if (event.type === "job.metric") {
     return { ...job, latestMetric: event.payload, sequence: event.sequence };
   }
+  if (event.type === "job.progress") {
+    return { ...job, latestProgress: event.payload, sequence: event.sequence };
+  }
   if (event.type === "terminal.prompt") {
     return { ...job, latestPrompt: event.payload.prompt, sequence: event.sequence };
   }

@@ -17,6 +17,7 @@ import {
 } from "@tabler/icons-react";
 import { useI18n } from "../i18n.jsx";
 import { runtimeApi } from "../runtime/api.js";
+import { LoadingProgress } from "./ProgressFeedback.jsx";
 
 const ISSUE_LABELS = {
   unreadable_image: "图片无法读取",
@@ -45,11 +46,10 @@ function formatBytes(bytes) {
 }
 
 function LoadingState({ label }) {
+  const { t } = useI18n();
   return (
-    <div className="tool-workbench-state" role="status">
-      <span className="tool-skeleton" />
-      <span className="tool-skeleton is-short" />
-      <strong>{label}</strong>
+    <div className="tool-workbench-state is-loading">
+      <LoadingProgress className="in-panel" label={label} detail={t("仅在本地读取与分析，不会调用外部服务")} />
     </div>
   );
 }
@@ -100,6 +100,7 @@ export function DatasetAuditPanel({
   const [query, setQuery] = useState("");
   const [selectedName, setSelectedName] = useState(null);
   const [offset, setOffset] = useState(0);
+  const [actionBusy, setActionBusy] = useState(false);
 
   useEffect(() => setOffset(0), [side]);
 
@@ -153,12 +154,15 @@ export function DatasetAuditPanel({
   const quarantineSelected = async () => {
     if (!selected) return;
     if (!window.confirm(t("将 {name} 移入可恢复隔离区吗？", { name: selected.name }))) return;
+    setActionBusy(true);
     try {
       await runtimeApi.quarantineAligned(side, selected.name);
       onNotice(t("{name} 已移入可恢复隔离区", { name: selected.name }));
       setRetry((value) => value + 1);
     } catch (nextError) {
       onError(nextError);
+    } finally {
+      setActionBusy(false);
     }
   };
 
@@ -179,6 +183,9 @@ export function DatasetAuditPanel({
 
   return (
     <div className="audit-workbench">
+      {actionBusy ? (
+        <LoadingProgress compact label={t("正在隔离审计样本…")} detail={t("完成后会重新计算本批质量摘要")} />
+      ) : null}
       <header className="audit-ready-header">
         <div className="audit-ready-state">
           <span><IconShieldCheck size={21} /></span>
@@ -246,7 +253,7 @@ export function DatasetAuditPanel({
                 >
                   <span className="audit-card-check"><IconCheck size={11} /></span>
                   <span className={`audit-card-mask ${item.hasAppliedMask ? "is-xseg" : "is-empty"}`}><IconMask size={10} />{item.hasAppliedMask ? "XSEG" : t("无遮罩")}</span>
-                  <img src={item.imageUrl} alt="" loading="lazy" />
+                  <img src={item.imageUrl} alt="" loading="lazy" decoding="async" />
                   <span className="audit-card-title"><strong>{item.name}</strong><small>{(item.qualityScore ?? 0).toFixed(2)}</small></span>
                   <i className="audit-card-score"><b style={{ width: percent(item.qualityScore) }} /></i>
                   <span className="audit-card-meta"><small>{item.sourceFilename ?? t("无源帧信息")}</small>{item.issues[0] && <em>{t(ISSUE_LABELS[item.issues[0]] ?? item.issues[0])}</em>}</span>
@@ -263,7 +270,7 @@ export function DatasetAuditPanel({
             <>
               <header><div><span>{t("质量检查器")}</span><strong>{selected.name}</strong></div><small>{selectedIndex + 1} / {visibleItems.length}</small></header>
               <div className="audit-inspector-preview">
-                <img className="tool-inspector-image" src={selected.imageUrl} alt="" />
+                <img className="tool-inspector-image" src={selected.imageUrl} alt="" decoding="async" />
                 <span className={selected.hasAppliedMask ? "is-xseg" : ""}>{selected.hasAppliedMask ? t("含 XSeg 遮罩") : t("无 XSeg 遮罩")}</span>
               </div>
               <div className="audit-inspector-tabs"><strong>{t("质量报告")}</strong><span>{formatBytes(selected.bytes)}</span></div>
@@ -294,7 +301,7 @@ export function DatasetAuditPanel({
         <dl><div><dt>{t("本批问题")}</dt><dd>{audit.issueItemCount ?? 0}</dd></div><div><dt>{t("XSeg 判定")}</dt><dd>{audit.xsegSharpnessCount ?? 0}</dd></div><div><dt>{t("平均质量")}</dt><dd>{audit.meanQualityScore.toFixed(3)}</dd></div></dl>
         <div className="audit-dock-actions">
           <button type="button" disabled={!selected} onClick={() => selected && onNavigateDataset(side, selected)}><IconPhoto size={15} />{t("在数据集中查看")}</button>
-          <button className="is-warning" type="button" disabled={!selected} onClick={() => void quarantineSelected()}><IconArchive size={15} />{t("移入隔离区")}</button>
+          <button className="is-warning" type="button" disabled={!selected || actionBusy} onClick={() => void quarantineSelected()}><IconArchive size={15} />{t("移入隔离区")}</button>
           <button className="is-primary" type="button" onClick={() => onOpenCommand(`${side}.sort_faces`)}><IconCode size={15} />{t("打开排序命令")}<IconArrowRight size={14} /></button>
         </div>
       </footer>
@@ -369,7 +376,7 @@ export function ExtractionReviewPanel({ side, refreshVersion, onError, onOpenCom
         </div>
         {selected ? (
           <div className="extraction-canvas" style={{ aspectRatio: `${selected.width || 16} / ${selected.height || 9}` }}>
-            <img src={selected.frameUrl} alt="" />
+            <img src={selected.frameUrl} alt="" decoding="async" />
             {selected.width && selected.height && (
               <svg viewBox={`0 0 ${selected.width} ${selected.height}`} aria-label={t("已提取人脸覆盖层") }>
                 {selected.faces.map((face) => face.rect && (
@@ -389,7 +396,7 @@ export function ExtractionReviewPanel({ side, refreshVersion, onError, onOpenCom
         <p>{t("覆盖层来自 aligned 文件内的 source_rect 和 source_landmarks，不会重新运行或伪造检测器结果。")}</p>
         <div className="extraction-face-list">
           {selected?.faces.map((face) => (
-            <div key={face.alignedName}><img src={face.alignedUrl} alt="" /><span>{face.alignedName}</span></div>
+            <div key={face.alignedName}><img src={face.alignedUrl} alt="" loading="lazy" decoding="async" /><span>{face.alignedName}</span></div>
           ))}
           {selected && !selected.faces.length && <div className="tool-inline-empty">{t("这帧尚无 aligned 人脸")}</div>}
         </div>

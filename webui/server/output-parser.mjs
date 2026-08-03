@@ -1,9 +1,13 @@
 const ansiPattern = /\u001B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
+const oscPattern = /\u001B\][^\u0007]*(?:\u0007|\u001B\\)/g;
 const iterationPattern =
   /\[#\s*(\d+)\]\[([^\]]+)\]\[(-?\d+(?:\.\d+)?)\]\[(-?\d+(?:\.\d+)?)\]/g;
+const progressPattern =
+  /^(.{0,160}?)\s*(\d{1,3})%\|[^|\r\n]*\|\s*([\d,]+)\s*\/\s*([\d,]+)\s*\[\s*([\d:]+|\?)\s*<\s*([\d:?]+)(?:,\s*([^\]]+))?\]/gm;
 
 const promptPatterns = [
-  /(?:请选择|选择一个|请输入|是否|继续\?|确认\?|which .*?\?|choose .*?\?|enter .*?:)\s*$/i,
+  /(?:请选择|选择一个|请输入|输入一个|是否|继续\?|确认\?|which .*?\?|choose .*?\?|enter .*?:)\s*$/i,
+  /输入一个.+(?:[:：])\s*$/i,
   /\[(?:y\/n|Y\/n|y\/N)\]\s*$/i,
   /(?:\?:|：)\s*$/,
 ];
@@ -22,17 +26,31 @@ function parseIterationTime(value) {
   return match[2].toLowerCase() === "s" ? number * 1000 : number;
 }
 
+function parseProgressTime(value) {
+  const text = String(value ?? "").trim();
+  if (!text || text.includes("?")) return null;
+  const parts = text.split(":").map((part) => Number.parseInt(part, 10));
+  if (!parts.length || parts.length > 3 || parts.some((part) => !Number.isFinite(part))) return null;
+  return parts.reduce((seconds, part) => (seconds * 60) + part, 0);
+}
+
+function parseProgressNumber(value) {
+  const number = Number.parseInt(String(value).replaceAll(",", ""), 10);
+  return Number.isSafeInteger(number) && number >= 0 ? number : null;
+}
+
 const fatalPatterns = [
   { pattern: /ffmpeg fail/i, message: "DFL 内部 ffmpeg 执行失败" },
 ];
 
 export function stripAnsi(value) {
-  return String(value).replace(ansiPattern, "");
+  return String(value).replace(oscPattern, "").replace(ansiPattern, "");
 }
 
 export class OutputParser {
   #tail = "";
   #lastPrompt = "";
+  #lastProgressSignature = "";
 
   push(chunk) {
     const clean = stripAnsi(chunk).replaceAll("\0", "");
@@ -62,6 +80,36 @@ export class OutputParser {
           dstLoss: Number.parseFloat(match[4]),
         },
       });
+    }
+
+    const progressMatches = [...normalized.matchAll(progressPattern)];
+    const progressMatch = progressMatches.at(-1);
+    if (progressMatch) {
+      const current = parseProgressNumber(progressMatch[3]);
+      const total = parseProgressNumber(progressMatch[4]);
+      const percent = Math.max(0, Math.min(100, Number.parseInt(progressMatch[2], 10)));
+      const stage = progressMatch[1].replace(/:\s*$/, "").trim().slice(-120) || null;
+      const elapsedSeconds = parseProgressTime(progressMatch[5]);
+      const etaSeconds = parseProgressTime(progressMatch[6]);
+      const rate = progressMatch[7]?.trim();
+      // A percentage change is the useful UI cadence; per-item tqdm output can otherwise
+      // double the terminal event volume for very large datasets.
+      const signature = [stage, percent, total].join("|");
+      if (current != null && total > 0 && signature !== this.#lastProgressSignature) {
+        this.#lastProgressSignature = signature;
+        events.push({
+          type: "job.progress",
+          payload: {
+            stage,
+            percent,
+            current,
+            total,
+            elapsedSeconds,
+            etaSeconds,
+            rate: rate && !rate.includes("?") ? rate : null,
+          },
+        });
+      }
     }
 
     const ignored = ignoredPromptPatterns.some((pattern) => pattern.test(latest));

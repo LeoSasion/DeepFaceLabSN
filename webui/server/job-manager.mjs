@@ -32,6 +32,7 @@ const ALLOWED_CONTROL_OPERATIONS = new Set([
 ]);
 const MAX_EVENTS_IN_MEMORY = 1000;
 const MAX_INPUT_LENGTH = 8192;
+const SAFE_STOP_GRACE_MS = 12_000;
 
 export class JobError extends Error {
   constructor(message, code = "JOB_ERROR", status = 400, details) {
@@ -73,6 +74,7 @@ function publicJob(job) {
     error: job.error,
     latestPrompt: job.latestPrompt,
     latestMetric: job.latestMetric,
+    latestProgress: job.latestProgress,
     previewVersion: job.previewVersion,
     latestEvaluationSnapshotId: job.latestEvaluationSnapshotId,
     evaluation: job.evaluation,
@@ -128,6 +130,7 @@ export class JobManager extends EventEmitter {
           writeChain: Promise.resolve(),
           metadataWriteChain: Promise.resolve(),
           previewTimer: null,
+          stopTimer: null,
           artifactPollPending: false,
           evaluationSnapshotIds: new Set(metadata.evaluation?.existingSnapshotIds ?? []),
         };
@@ -221,6 +224,7 @@ export class JobManager extends EventEmitter {
       error: null,
       latestPrompt: null,
       latestMetric: null,
+      latestProgress: null,
       previewVersion: null,
       latestEvaluationSnapshotId: null,
       evaluation: launch.evaluation ?? null,
@@ -235,6 +239,7 @@ export class JobManager extends EventEmitter {
       writeChain: Promise.resolve(),
       metadataWriteChain: Promise.resolve(),
       previewTimer: null,
+      stopTimer: null,
       artifactPollPending: false,
       evaluationSnapshotIds: new Set(launch.evaluation?.existingSnapshotIds ?? []),
     };
@@ -314,6 +319,13 @@ export class JobManager extends EventEmitter {
         };
         job.latestMetric = parsed.payload;
       }
+      if (parsed.type === "job.progress") {
+        parsed.payload = {
+          ...parsed.payload,
+          updatedAt: this.now().toISOString(),
+        };
+        job.latestProgress = parsed.payload;
+      }
       if (parsed.type === "job.error") job.error = parsed.payload.message;
       this.record(job, parsed.type, parsed.payload);
     }
@@ -325,7 +337,7 @@ export class JobManager extends EventEmitter {
     job.exitCode = exitCode;
     job.signal = signal;
     job.endedAt = this.now().toISOString();
-    if (exitCode === 0 && !job.error && job.stopReason !== "force-kill") {
+    if (exitCode === 0 && !job.error && !job.stopReason) {
       const definition = getCommandDefinition(job.commandId);
       try {
         await definition?.postflight?.();
@@ -341,13 +353,15 @@ export class JobManager extends EventEmitter {
         });
       }
     }
-    job.state = exitCode === 0 && !job.error
-      ? "succeeded"
-      : job.stopReason === "force-kill"
-        ? "cancelled"
+    job.state = job.stopReason
+      ? "cancelled"
+      : exitCode === 0 && !job.error
+        ? "succeeded"
         : "failed";
     if (job.previewTimer) clearInterval(job.previewTimer);
     job.previewTimer = null;
+    if (job.stopTimer) clearTimeout(job.stopTimer);
+    job.stopTimer = null;
     job.runner?.dispose?.();
     job.runner = null;
     this.releaseLocks(job);
@@ -399,6 +413,8 @@ export class JobManager extends EventEmitter {
     if (operation === "force-kill") {
       job.stopReason = "force-kill";
       job.state = "stopping";
+      if (job.stopTimer) clearTimeout(job.stopTimer);
+      job.stopTimer = null;
       this.record(job, "job.state", { state: "stopping", operation });
       job.runner.kill();
       await this.persist(job);
@@ -406,6 +422,22 @@ export class JobManager extends EventEmitter {
     }
     if (!job.controls.includes(operation)) {
       throw new JobError("该任务不支持此控制操作", "CONTROL_NOT_SUPPORTED", 409);
+    }
+
+    if (operation === "close" && job.state === "waiting_input") {
+      job.stopReason = "safe-stop-before-start";
+      job.state = "stopping";
+      this.record(job, "job.state", {
+        state: "stopping",
+        operation,
+        stopReason: job.stopReason,
+      });
+      this.record(job, "terminal.output", {
+        data: "\r\n\u001b[38;2;240;199;91m[WEB]\u001b[0m 训练尚未开始，已结束当前模型创建问答；此阶段没有需要保存的模型。\r\n",
+      });
+      job.runner.kill();
+      await this.persist(job);
+      return publicJob(job);
     }
 
     await appendFile(
@@ -416,6 +448,22 @@ export class JobManager extends EventEmitter {
     if (operation === "close") {
       job.stopReason = "safe-stop";
       job.state = "stopping";
+      this.record(job, "job.state", {
+        state: "stopping",
+        operation,
+        stopReason: job.stopReason,
+      });
+      if (job.stopTimer) clearTimeout(job.stopTimer);
+      job.stopTimer = setTimeout(() => {
+        if (!job.runner || TERMINAL_STATES.has(job.state)) return;
+        job.stopReason = "safe-stop-timeout";
+        this.record(job, "terminal.output", {
+          data: "\r\n\u001b[38;2;240;199;91m[WEB]\u001b[0m Trainer 在 12 秒内未响应安全停止，已自动结束进程，避免任务永久停留。\r\n",
+        });
+        job.runner.kill();
+        void this.persist(job);
+      }, SAFE_STOP_GRACE_MS);
+      job.stopTimer.unref?.();
     }
     this.record(job, "job.control", { operation });
     await this.persist(job);

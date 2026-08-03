@@ -2,6 +2,7 @@ import { readdirSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { buildDflEnvironment } from "./environment.mjs";
+import { summarizeXSegLabels } from "./asset-manager.mjs";
 import { PATHS, pathExists } from "./paths.mjs";
 import { createTrainingModelKey } from "./training-evaluation-manager.mjs";
 
@@ -475,6 +476,19 @@ async function requireDirectoryMatching(target, pattern, message) {
   if (!entries.some((entry) => pattern.test(entry))) {
     throw new CommandValidationError(message, "INPUT_MISSING", { path: target });
   }
+}
+
+export function validateXSegTrainingLabels(srcSummary, dstSummary) {
+  const srcCount = Number(srcSummary?.usableLabelCount) || 0;
+  const dstCount = Number(dstSummary?.usableLabelCount) || 0;
+  if (srcCount + dstCount === 0) {
+    throw new CommandValidationError(
+      "未检测到可训练的 XSeg 标注。请先在 SRC 或 DST 数据集中打开 XSeg Web 遮罩编辑器，至少保存 1 张多边形标注；也可以使用已写入图片的 XSeg 遮罩。",
+      "XSEG_LABELS_MISSING",
+      { srcLabelCount: srcCount, dstLabelCount: dstCount },
+    );
+  }
+  return { srcLabelCount: srcCount, dstLabelCount: dstCount };
 }
 
 function findWorkspaceVideo(name) {
@@ -1411,6 +1425,11 @@ const definitions = Object.freeze({
         path.join(PATHS.workspaceRoot, "data_dst", "aligned"),
         "DST aligned 人脸集不存在或为空",
       );
+      const [srcLabels, dstLabels] = await Promise.all([
+        summarizeXSegLabels("src"),
+        summarizeXSegLabels("dst"),
+      ]);
+      return { xsegLabels: validateXSegTrainingLabels(srcLabels, dstLabels) };
     },
     build(context) {
       const args = [
