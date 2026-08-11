@@ -152,7 +152,7 @@ export function ConsoleDock({
   onResize,
   onControl,
   onSafeStop,
-  onCopyPath,
+  onCopyText,
   onError,
   onNotice = noop,
 }) {
@@ -306,9 +306,7 @@ export function ConsoleDock({
               <i aria-hidden="true" />
               {t(jobStateLabel(selectedJob))}
             </span>
-            <code className="runtime-command-line" title={selectedJob.commandLine}>{selectedJob.commandLine}</code>
             <dl className="runtime-header-stats">
-              <div><dt>PID</dt><dd>{selectedJob.pid ?? "—"}</dd></div>
               <div><dt>{t("时长")}</dt><dd>{duration}</dd></div>
               <div><dt>{t("运行时")}</dt><dd>{selectedJob.profile === "legacy" ? "DFL legacy" : "DFL current"}</dd></div>
             </dl>
@@ -402,7 +400,12 @@ export function ConsoleDock({
             <div className="terminal-workspace">
               <div className="terminal-main">
                 {pendingConsoleAction ? (
-                  <LoadingProgress compact label={pendingConsoleAction} detail={t("终端输出会保留在当前会话")} />
+                  <LoadingProgress
+                    compact
+                    label={pendingConsoleAction}
+                    detail={t("终端输出会保留在当前会话")}
+                    operationKey={`console-action:${selectedJob.id}`}
+                  />
                 ) : progressingStates.has(selectedJob.state) ? (
                   <LoadingProgress
                     compact
@@ -413,6 +416,7 @@ export function ConsoleDock({
                     total={jobProgressTotal}
                     etaSeconds={jobProgressEta}
                     startedAt={selectedJob.startedAt}
+                    operationKey={`job:${selectedJob.id}`}
                     rememberDuration={false}
                   />
                 ) : selectedJob.state === "waiting_input" ? (
@@ -421,7 +425,7 @@ export function ConsoleDock({
                     <span>{selectedJob.latestPrompt ?? t("请在下方输入框回答 DFL 问题后继续")}</span>
                   </div>
                 ) : null}
-                <Suspense fallback={<div className="terminal-loading"><LoadingProgress compact label={t("正在加载终端渲染器…")} detail={t("正在准备本地终端画布")}/></div>}>
+                <Suspense fallback={<div className="terminal-loading"><LoadingProgress compact label={t("正在加载终端渲染器…")} detail={t("正在准备本地终端画布")} operationKey={`terminal-renderer:${selectedJob.id}`}/></div>}>
                   <TerminalSurface
                     key={selectedJob.id}
                     events={events}
@@ -475,6 +479,7 @@ export function ConsoleDock({
                 </div>
                 <dl>
                   <div><dt>{t("命令")}</dt><dd>{selectedJob.label}</dd></div>
+                  <div><dt>PID</dt><dd>{selectedJob.pid ?? "—"}</dd></div>
                   <div><dt>{t("开始时间")}</dt><dd>{formatClock(selectedJob.startedAt, language)}</dd></div>
                   <div><dt>{t("退出码")}</dt><dd>{selectedJob.exitCode ?? "—"}</dd></div>
                   <div><dt>{t("最后序号")}</dt><dd>{selectedJob.sequence ?? 0}</dd></div>
@@ -486,7 +491,19 @@ export function ConsoleDock({
                     <p>{selectedJob.latestPrompt}</p>
                   </div>
                 ) : null}
-                <button className="inspector-path" type="button" onClick={() => onCopyPath(selectedJob.paths?.jobDirectory)}>
+                {selectedJob.commandLine ? (
+                  <button
+                    className="inspector-path inspector-command"
+                    type="button"
+                    title={selectedJob.commandLine}
+                    onClick={() => onCopyText(selectedJob.commandLine, t("完整命令已复制"))}
+                  >
+                    <IconTerminal2 size={15} />
+                    <span><small>{t("完整命令")}</small><code>{selectedJob.commandLine}</code></span>
+                    <IconCopy size={14} />
+                  </button>
+                ) : null}
+                <button className="inspector-path" type="button" onClick={() => onCopyText(selectedJob.paths?.jobDirectory, t("任务目录已复制"))}>
                   <IconFolderOpen size={15} />
                   <span><small>{t("任务目录")}</small>{selectedJob.paths?.jobDirectory ?? "—"}</span>
                   <IconCopy size={14} />

@@ -18,6 +18,7 @@ import {
   buildAlignedPoseAtlas,
   buildAlignedPoseProbe,
   buildAlignedSimilarityGroups,
+  inspectAlignedAnnotation,
   inspectAlignedPack,
   inspectExtractionCoverage,
   listAlignedAssets,
@@ -282,10 +283,24 @@ test("allowed paths cannot escape their parent", () => {
 });
 
 test("aligned asset browser reads real DFL metadata through the fixed helper", async () => {
-  const assets = await listAlignedAssets("src", { offset: 0, limit: 2 });
+  const assets = await listAlignedAssets("src", { offset: 0, limit: 10 });
   assert.equal(assets.side, "src");
   assert.ok(assets.total >= assets.items.length);
   assert.ok(assets.items.every((item) => item.imageUrl.startsWith("/api/assets/src/aligned/")));
+  const valid = assets.items.find((item) => item.hasDflMetadata);
+  assert.ok(valid, "expected a real DFL aligned fixture");
+  const target = resolveAlignedImage("src", encodeURIComponent(valid.name));
+  const before = await stat(target);
+  const annotation = await inspectAlignedAnnotation("src", encodeURIComponent(valid.name));
+  const after = await stat(target);
+  assert.ok(annotation.width > 0 && annotation.height > 0);
+  assert.equal(annotation.landmarks.length, 68);
+  assert.ok(annotation.landmarks.flat().every(Number.isFinite));
+  assert.equal(annotation.sourceRectAligned.length, 4);
+  assert.ok(annotation.sourceRectAligned.flat().every(Number.isFinite));
+  assert.equal(typeof annotation.faceType, "string");
+  assert.equal(after.size, before.size);
+  assert.equal(after.mtimeMs, before.mtimeMs);
 });
 
 test("pose atlas aggregates real DFL landmarks into bounded review bins", async () => {

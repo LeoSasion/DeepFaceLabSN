@@ -163,7 +163,13 @@ export const runtimeApi = {
     `/api/assets/${side}/aligned/quarantine-batch`,
     { method: "POST", body: JSON.stringify({ names }) },
   ),
-  alignedQuarantine: (side) => request(`/api/assets/${side}/quarantine`),
+  alignedQuarantine: (side, { offset = 0, limit = 60 } = {}) => request(
+    `/api/assets/${side}/quarantine?offset=${offset}&limit=${limit}`,
+  ),
+  quarantinedAnnotation: (side, token, name) => request(
+    `/api/assets/${side}/quarantine/${encodeURIComponent(token)}`
+      + `/${encodeURIComponent(name)}/annotation`,
+  ),
   restoreAligned: (side, token, name) => request(
     `/api/assets/${side}/quarantine/${encodeURIComponent(token)}/${encodeURIComponent(name)}/restore`,
     { method: "POST" },

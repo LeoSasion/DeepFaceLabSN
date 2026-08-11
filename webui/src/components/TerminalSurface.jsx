@@ -25,7 +25,7 @@ export default function TerminalSurface({ events, interactive, onInput, onResize
       disableStdin: !interactive,
       drawBoldTextInBrightColors: false,
       fontFamily: '"Cascadia Code", "SFMono-Regular", Consolas, monospace',
-      fontSize: 11,
+      fontSize: 12,
       letterSpacing: 0,
       lineHeight: 1.28,
       scrollback: 6000,

@@ -1,8 +1,19 @@
-import { createReadStream } from "node:fs";
-import { copyFile, mkdir, readdir, rename, stat, unlink } from "node:fs/promises";
+import {
+  copyFile,
+  link,
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  realpath,
+  rename,
+  stat,
+  unlink,
+} from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
 import { buildDflEnvironment } from "./environment.mjs";
 import { PATHS, assertWithin, pathExists } from "./paths.mjs";
 
@@ -29,7 +40,16 @@ function alignedDirectory(side) {
   return path.join(PATHS.workspaceRoot, `data_${side}`, "aligned");
 }
 
-export function resolveAlignedImage(side, encodedName) {
+function quarantineDirectory(side) {
+  alignedDirectory(side);
+  return assertWithin(
+    PATHS.runtimeRoot,
+    path.join(PATHS.runtimeRoot, "quarantine", side),
+    "隔离目录",
+  );
+}
+
+function decodeImageName(encodedName) {
   let name;
   try {
     name = decodeURIComponent(encodedName);
@@ -39,7 +59,237 @@ export function resolveAlignedImage(side, encodedName) {
   if (!IMAGE_NAME.test(name) || path.basename(name) !== name) {
     throw new AssetError("图片文件名不在允许范围内", "IMAGE_NAME_INVALID");
   }
+  return name;
+}
+
+function validateQuarantineToken(token) {
+  if (!QUARANTINE_TOKEN.test(token)) {
+    throw new AssetError("隔离记录无效", "QUARANTINE_TOKEN_INVALID");
+  }
+  return token;
+}
+
+async function lstatIfPresent(target, options) {
+  try {
+    return await lstat(target, options);
+  } catch (error) {
+    if (error?.code === "ENOENT" || error?.code === "ENOTDIR") return null;
+    throw error;
+  }
+}
+
+async function verifyPlainDirectory(target, label, code = "QUARANTINE_PATH_UNSAFE") {
+  const info = await lstatIfPresent(target);
+  if (!info) {
+    throw new AssetError(`${label}不存在`, code, 404);
+  }
+  if (!info.isDirectory() || info.isSymbolicLink()) {
+    throw new AssetError(`${label}不是安全的本地目录`, code, 400);
+  }
+}
+
+async function verifyAlignedDirectory(side) {
+  const directory = alignedDirectory(side);
+  const directoryInfo = await lstatIfPresent(directory);
+  if (!directoryInfo) return null;
+  const dataDirectory = path.dirname(directory);
+  await verifyPlainDirectory(dataDirectory, "数据集目录", "ALIGNED_PATH_UNSAFE");
+  if (!directoryInfo.isDirectory() || directoryInfo.isSymbolicLink()) {
+    throw new AssetError("aligned 目录不是安全的本地目录", "ALIGNED_PATH_UNSAFE", 400);
+  }
+  const [workspaceRealPath, directoryRealPath] = await Promise.all([
+    realpath(PATHS.workspaceRoot),
+    realpath(directory),
+  ]);
+  try {
+    assertWithin(workspaceRealPath, directoryRealPath, "aligned 目录");
+  } catch {
+    throw new AssetError("aligned 目录超出工作区", "ALIGNED_PATH_UNSAFE", 400);
+  }
+  return directory;
+}
+
+async function resolveExistingAlignedImage(side, encodedName) {
+  const target = resolveAlignedImage(side, encodedName);
+  const directory = await verifyAlignedDirectory(side);
+  if (!directory) {
+    throw new AssetError("aligned 图片不存在", "IMAGE_MISSING", 404);
+  }
+  const fileInfo = await lstatIfPresent(target);
+  if (!fileInfo) {
+    throw new AssetError("aligned 图片不存在", "IMAGE_MISSING", 404);
+  }
+  if (!fileInfo.isFile() || fileInfo.isSymbolicLink()) {
+    throw new AssetError("aligned 图片不是安全的本地图片", "ALIGNED_PATH_UNSAFE", 400);
+  }
+  const [directoryRealPath, targetRealPath] = await Promise.all([
+    realpath(directory),
+    realpath(target),
+  ]);
+  try {
+    assertWithin(directoryRealPath, targetRealPath, "aligned 图片");
+  } catch {
+    throw new AssetError("aligned 图片超出工作区", "ALIGNED_PATH_UNSAFE", 400);
+  }
+  return target;
+}
+
+function sameFileIdentity(left, right) {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+async function openVerifiedImage(
+  target,
+  label,
+  unsafeCode,
+  { containmentRoot = path.dirname(target), boundaryRoot = PATHS.workspaceRoot } = {},
+) {
+  let fileHandle;
+  try {
+    fileHandle = await open(target, "r");
+  } catch (error) {
+    if (error?.code === "ENOENT" || error?.code === "ENOTDIR") {
+      throw new AssetError(`${label}不存在`, "IMAGE_MISSING", 404);
+    }
+    throw error;
+  }
+  try {
+    const openedInfo = await fileHandle.stat({ bigint: true });
+    const [boundaryRealPath, containmentRealPath, targetRealPath] = await Promise.all([
+      realpath(boundaryRoot),
+      realpath(containmentRoot),
+      realpath(target),
+    ]);
+    try {
+      assertWithin(boundaryRealPath, containmentRealPath, label);
+      assertWithin(containmentRealPath, targetRealPath, label);
+    } catch {
+      throw new AssetError(`${label}超出允许范围`, unsafeCode, 400);
+    }
+    // Check the path after canonicalization so an ancestor swap cannot redirect the opened handle.
+    const pathInfo = await lstat(target, { bigint: true });
+    if (
+      !openedInfo.isFile()
+      || !pathInfo.isFile()
+      || pathInfo.isSymbolicLink()
+      || !sameFileIdentity(openedInfo, pathInfo)
+    ) {
+      throw new AssetError(`${label}在读取前发生了不安全的路径变化`, unsafeCode, 400);
+    }
+    return { fileHandle, fileInfo: openedInfo };
+  } catch (error) {
+    await fileHandle.close().catch(() => {});
+    if (error?.code === "ENOENT" || error?.code === "ENOTDIR") {
+      throw new AssetError(`${label}不存在`, "IMAGE_MISSING", 404);
+    }
+    throw error;
+  }
+}
+
+async function ensureSafeAlignedDirectory(side) {
+  const directory = alignedDirectory(side);
+  const dataDirectory = path.dirname(directory);
+  const dataInfo = await lstatIfPresent(dataDirectory);
+  if (dataInfo) {
+    await verifyPlainDirectory(dataDirectory, "数据集目录", "ALIGNED_PATH_UNSAFE");
+  } else {
+    await mkdir(dataDirectory);
+  }
+  const alignedInfo = await lstatIfPresent(directory);
+  if (alignedInfo) {
+    await verifyPlainDirectory(directory, "aligned 目录", "ALIGNED_PATH_UNSAFE");
+  } else {
+    await mkdir(directory);
+  }
+  return verifyAlignedDirectory(side);
+}
+
+async function verifyQuarantineRoot(side) {
+  const root = quarantineDirectory(side);
+  if (!(await pathExists(root))) return null;
+  const base = path.dirname(root);
+  await verifyPlainDirectory(PATHS.runtimeRoot, "运行时目录");
+  await verifyPlainDirectory(base, "隔离根目录");
+  await verifyPlainDirectory(root, "数据集隔离目录");
+  const [workspaceRealPath, runtimeRealPath, rootRealPath] = await Promise.all([
+    realpath(PATHS.workspaceRoot),
+    realpath(PATHS.runtimeRoot),
+    realpath(root),
+  ]);
+  try {
+    assertWithin(workspaceRealPath, runtimeRealPath, "运行时目录");
+    assertWithin(runtimeRealPath, rootRealPath, "数据集隔离目录");
+  } catch {
+    throw new AssetError("隔离目录超出运行时目录", "QUARANTINE_PATH_UNSAFE", 400);
+  }
+  return root;
+}
+
+async function ensureQuarantineRoot(side) {
+  const root = quarantineDirectory(side);
+  const base = path.dirname(root);
+  const runtimeInfo = await lstatIfPresent(PATHS.runtimeRoot);
+  if (runtimeInfo) await verifyPlainDirectory(PATHS.runtimeRoot, "运行时目录");
+  else await mkdir(PATHS.runtimeRoot);
+  const baseInfo = await lstatIfPresent(base);
+  if (baseInfo) await verifyPlainDirectory(base, "隔离根目录");
+  else await mkdir(base);
+  const rootInfo = await lstatIfPresent(root);
+  if (rootInfo) await verifyPlainDirectory(root, "数据集隔离目录");
+  else await mkdir(root);
+  await verifyQuarantineRoot(side);
+  return root;
+}
+
+async function createQuarantineTokenDirectory(side) {
+  const root = await ensureQuarantineRoot(side);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const token = recoveryToken();
+    const directory = assertWithin(root, path.join(root, token), "隔离记录目录");
+    try {
+      await mkdir(directory);
+      return { token, directory };
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+    }
+  }
+  throw new AssetError("无法创建唯一的隔离记录", "QUARANTINE_TOKEN_COLLISION", 500);
+}
+
+export function resolveAlignedImage(side, encodedName) {
+  const name = decodeImageName(encodedName);
   return assertWithin(alignedDirectory(side), path.join(alignedDirectory(side), name), "aligned 图片");
+}
+
+export async function resolveQuarantinedImage(side, token, encodedName) {
+  validateQuarantineToken(token);
+  const name = decodeImageName(encodedName);
+  const root = await verifyQuarantineRoot(side);
+  if (!root) {
+    throw new AssetError("隔离文件不存在", "QUARANTINE_MISSING", 404);
+  }
+  const tokenDirectory = assertWithin(root, path.join(root, token), "隔离记录目录");
+  const target = assertWithin(tokenDirectory, path.join(tokenDirectory, name), "隔离文件");
+  if (!(await pathExists(tokenDirectory)) || !(await pathExists(target))) {
+    throw new AssetError("隔离文件不存在", "QUARANTINE_MISSING", 404);
+  }
+  await verifyPlainDirectory(tokenDirectory, "隔离记录目录");
+  const fileInfo = await lstat(target);
+  if (!fileInfo.isFile() || fileInfo.isSymbolicLink()) {
+    throw new AssetError("隔离文件不是安全的本地图片", "QUARANTINE_PATH_UNSAFE", 400);
+  }
+  const [rootRealPath, tokenRealPath, targetRealPath] = await Promise.all([
+    realpath(root),
+    realpath(tokenDirectory),
+    realpath(target),
+  ]);
+  try {
+    assertWithin(rootRealPath, tokenRealPath, "隔离记录目录");
+    assertWithin(tokenRealPath, targetRealPath, "隔离文件");
+  } catch {
+    throw new AssetError("隔离文件超出允许范围", "QUARANTINE_PATH_UNSAFE", 400);
+  }
+  return target;
 }
 
 function runAssetHelper(args, input) {
@@ -105,8 +355,8 @@ function runAssetHelper(args, input) {
 }
 
 export async function listAlignedAssets(side, { offset = 0, limit = 60 } = {}) {
-  const directory = alignedDirectory(side);
-  if (!(await pathExists(directory))) {
+  const directory = await verifyAlignedDirectory(side);
+  if (!directory) {
     return { side, total: 0, offset: 0, limit, items: [] };
   }
   const result = await runAssetHelper([
@@ -129,8 +379,8 @@ export async function listAlignedAssets(side, { offset = 0, limit = 60 } = {}) {
 }
 
 export async function summarizeXSegLabels(side) {
-  const directory = alignedDirectory(side);
-  if (!(await pathExists(directory))) {
+  const directory = await verifyAlignedDirectory(side);
+  if (!directory) {
     return {
       side,
       total: 0,
@@ -164,8 +414,8 @@ function invalidateAnalysis(side) {
 }
 
 export async function buildAlignedPoseAtlas(side) {
-  const directory = alignedDirectory(side);
-  if (!(await pathExists(directory))) {
+  const directory = await verifyAlignedDirectory(side);
+  if (!directory) {
     return {
       side,
       total: 0,
@@ -207,10 +457,10 @@ export async function buildAlignedSimilarityGroups(
   side,
   { refresh = false, threshold = 0.86, limit = 500 } = {},
 ) {
-  const directory = alignedDirectory(side);
+  const directory = await verifyAlignedDirectory(side);
   const safeThreshold = Math.min(Math.max(Number(threshold) || 0.86, 0.72), 0.98);
   const safeLimit = Math.min(Math.max(Number(limit) || 500, 2), 500);
-  if (!(await pathExists(directory))) {
+  if (!directory) {
     return {
       side, threshold: safeThreshold, total: 0, analyzedCount: 0, invalidCount: 0,
       truncated: false, groupCount: 0, groupedCount: 0, ungroupedCount: 0,
@@ -240,8 +490,8 @@ export async function buildAlignedSimilarityGroups(
 }
 
 export async function buildAlignedPoseProbe(side) {
-  const directory = alignedDirectory(side);
-  if (!(await pathExists(directory))) {
+  const directory = await verifyAlignedDirectory(side);
+  if (!directory) {
     return {
       schemaVersion: 1,
       side,
@@ -268,10 +518,10 @@ export async function buildAlignedPoseProbe(side) {
 }
 
 export async function auditAlignedAssets(side, { refresh = false, offset = 0, limit = 120 } = {}) {
-  const directory = alignedDirectory(side);
+  const directory = await verifyAlignedDirectory(side);
   const safeOffset = Math.max(Number(offset) || 0, 0);
   const safeLimit = Math.min(Math.max(Number(limit) || 120, 1), 500);
-  if (!(await pathExists(directory))) {
+  if (!directory) {
     return {
       side,
       total: 0,
@@ -317,8 +567,8 @@ export async function auditAlignedAssets(side, { refresh = false, offset = 0, li
 }
 
 export async function inspectAlignedPack(side, { refresh = false } = {}) {
-  const directory = alignedDirectory(side);
-  if (!(await pathExists(directory))) {
+  const directory = await verifyAlignedDirectory(side);
+  if (!directory) {
     return { side, present: false, status: "aligned_missing", warnings: [], cached: false };
   }
   const result = await cachedAnalysis(side, "pack", refresh, () => (
@@ -331,11 +581,11 @@ export async function inspectExtractionCoverage(
   side,
   { refresh = false, offset = 0, limit = 120 } = {},
 ) {
-  const directory = alignedDirectory(side);
+  const directory = await verifyAlignedDirectory(side);
   const frames = path.join(PATHS.workspaceRoot, `data_${side}`);
   const safeOffset = Math.max(Number(offset) || 0, 0);
   const safeLimit = Math.min(Math.max(Number(limit) || 120, 1), 500);
-  if (!(await pathExists(directory)) || !(await pathExists(frames))) {
+  if (!directory || !(await pathExists(frames))) {
     return {
       side,
       total: 0,
@@ -378,40 +628,28 @@ export async function inspectExtractionCoverage(
 }
 
 export async function inspectAlignedAnnotation(side, encodedName) {
-  const target = resolveAlignedImage(side, encodedName);
-  if (!(await pathExists(target))) {
-    throw new AssetError("aligned 图片不存在", "IMAGE_MISSING", 404);
-  }
+  const target = await resolveExistingAlignedImage(side, encodedName);
   return runAssetHelper(["inspect", "--file", target]);
 }
 
 export async function saveAlignedAnnotation(side, encodedName, payload) {
-  const target = resolveAlignedImage(side, encodedName);
-  if (!(await pathExists(target))) {
-    throw new AssetError("aligned 图片不存在", "IMAGE_MISSING", 404);
-  }
+  const target = await resolveExistingAlignedImage(side, encodedName);
   const result = await runAssetHelper(["save", "--file", target], payload);
   invalidateAnalysis(side);
   return result;
 }
 
 export async function previewAlignedRepair(side, encodedName, payload) {
-  const target = resolveAlignedImage(side, encodedName);
+  const target = await resolveExistingAlignedImage(side, encodedName);
   const frames = path.join(PATHS.workspaceRoot, `data_${side}`);
-  if (!(await pathExists(target))) {
-    throw new AssetError("aligned 图片不存在", "IMAGE_MISSING", 404);
-  }
   return runAssetHelper([
     "alignment-preview", "--file", target, "--frames", frames,
   ], { landmarks: payload?.landmarks });
 }
 
 export async function applyAlignedRepair(side, encodedName, payload) {
-  const target = resolveAlignedImage(side, encodedName);
+  const target = await resolveExistingAlignedImage(side, encodedName);
   const frames = path.join(PATHS.workspaceRoot, `data_${side}`);
-  if (!(await pathExists(target))) {
-    throw new AssetError("aligned 图片不存在", "IMAGE_MISSING", 404);
-  }
   const token = recoveryToken();
   const backupDirectory = assertWithin(
     PATHS.runtimeRoot,
@@ -447,6 +685,7 @@ export async function listAlignedRepairBackups(side) {
 }
 
 export async function restoreAlignedRepair(side, token, encodedName) {
+  await ensureSafeAlignedDirectory(side);
   const target = resolveAlignedImage(side, encodedName);
   if (!QUARANTINE_TOKEN.test(token)) {
     throw new AssetError("对齐备份记录无效", "ALIGNMENT_BACKUP_INVALID");
@@ -460,7 +699,10 @@ export async function restoreAlignedRepair(side, token, encodedName) {
   const restoreToken = recoveryToken();
   const undoDirectory = path.join(PATHS.runtimeRoot, "alignment-restores", side, restoreToken);
   await mkdir(undoDirectory, { recursive: true });
-  if (await pathExists(target)) await copyFile(target, path.join(undoDirectory, name));
+  if (await pathExists(target)) {
+    await resolveExistingAlignedImage(side, encodedName);
+    await copyFile(target, path.join(undoDirectory, name));
+  }
   const temporary = `${target}.${process.pid}.${Date.now()}.restore`;
   try {
     await copyFile(backup, temporary);
@@ -473,30 +715,66 @@ export async function restoreAlignedRepair(side, token, encodedName) {
   return { side, token, name, restored: true, undoToken: restoreToken };
 }
 
-export async function streamAlignedImage(response, side, encodedName) {
-  const target = resolveAlignedImage(side, encodedName);
-  if (!(await pathExists(target))) {
-    throw new AssetError("aligned 图片不存在", "IMAGE_MISSING", 404);
+async function streamImageFile(response, target, { label, unsafeCode }) {
+  const { fileHandle, fileInfo } = await openVerifiedImage(target, label, unsafeCode);
+  try {
+    const contentType = path.extname(target).toLowerCase() === ".png" ? "image/png" : "image/jpeg";
+    response.writeHead(200, {
+      "Content-Type": contentType,
+      "Content-Length": Number(fileInfo.size),
+      "Cache-Control": "private, max-age=30",
+    });
+    try {
+      await pipeline(fileHandle.createReadStream({ autoClose: false }), response);
+    } catch {
+      // Headers may already be committed; terminate only this response and keep the runtime alive.
+      if (!response.destroyed) response.destroy();
+    }
+  } finally {
+    await fileHandle.close().catch(() => {});
   }
-  const fileStat = await stat(target);
-  const contentType = path.extname(target).toLowerCase() === ".png" ? "image/png" : "image/jpeg";
-  response.writeHead(200, {
-    "Content-Type": contentType,
-    "Content-Length": fileStat.size,
-    "Cache-Control": "private, max-age=30",
+}
+
+export async function streamAlignedImage(response, side, encodedName) {
+  const target = await resolveExistingAlignedImage(side, encodedName);
+  return streamImageFile(response, target, {
+    label: "aligned 图片",
+    unsafeCode: "ALIGNED_PATH_UNSAFE",
   });
-  return createReadStream(target).pipe(response);
+}
+
+export async function inspectQuarantinedAnnotation(side, token, encodedName) {
+  const target = await resolveQuarantinedImage(side, token, encodedName);
+  return runAssetHelper(["inspect", "--file", target]);
+}
+
+export async function streamQuarantinedImage(response, side, token, encodedName) {
+  const target = await resolveQuarantinedImage(side, token, encodedName);
+  return streamImageFile(response, target, {
+    label: "隔离图片",
+    unsafeCode: "QUARANTINE_PATH_UNSAFE",
+  });
+}
+
+export async function streamAlignedPoster(response, side) {
+  const directory = await verifyAlignedDirectory(side);
+  if (!directory) {
+    throw new AssetError("aligned 预览图不存在", "IMAGE_MISSING", 404);
+  }
+  const names = (await readdir(directory, { withFileTypes: true }))
+    .filter((entry) => entry.isFile() && !entry.isSymbolicLink() && IMAGE_NAME.test(entry.name))
+    .map((entry) => entry.name)
+    .sort((left, right) => left.localeCompare(right, "en", { numeric: true }));
+  if (!names.length) {
+    throw new AssetError("aligned 预览图不存在", "IMAGE_MISSING", 404);
+  }
+  return streamAlignedImage(response, side, encodeURIComponent(names[0]));
 }
 
 export async function quarantineAlignedImage(side, encodedName) {
-  const target = resolveAlignedImage(side, encodedName);
-  if (!(await pathExists(target))) {
-    throw new AssetError("aligned 图片不存在", "IMAGE_MISSING", 404);
-  }
-  const token = recoveryToken();
-  const destinationDirectory = path.join(PATHS.runtimeRoot, "quarantine", side, token);
-  await mkdir(destinationDirectory, { recursive: true });
-  await rename(target, path.join(destinationDirectory, path.basename(target)));
+  const target = await resolveExistingAlignedImage(side, encodedName);
+  const { token, directory } = await createQuarantineTokenDirectory(side);
+  await rename(target, path.join(directory, path.basename(target)));
   invalidateAnalysis(side);
   return { side, token, name: path.basename(target), recoverable: true };
 }
@@ -506,15 +784,10 @@ export async function quarantineAlignedImages(side, names) {
     throw new AssetError("批量隔离需要 1–500 个文件", "QUARANTINE_BATCH_INVALID");
   }
   const uniqueNames = [...new Set(names.map((name) => String(name)))];
-  const targets = uniqueNames.map((name) => resolveAlignedImage(side, encodeURIComponent(name)));
-  for (const target of targets) {
-    if (!(await pathExists(target))) {
-      throw new AssetError(`aligned 图片不存在：${path.basename(target)}`, "IMAGE_MISSING", 404);
-    }
-  }
-  const token = recoveryToken();
-  const destinationDirectory = path.join(PATHS.runtimeRoot, "quarantine", side, token);
-  await mkdir(destinationDirectory, { recursive: true });
+  const targets = await Promise.all(uniqueNames.map((name) => (
+    resolveExistingAlignedImage(side, encodeURIComponent(name))
+  )));
+  const { token, directory: destinationDirectory } = await createQuarantineTokenDirectory(side);
   const moved = [];
   try {
     for (const target of targets) {
@@ -533,44 +806,84 @@ export async function quarantineAlignedImages(side, names) {
   return { side, token, names: moved, count: moved.length, recoverable: true };
 }
 
-export async function listAlignedQuarantine(side) {
-  alignedDirectory(side);
-  const root = path.join(PATHS.runtimeRoot, "quarantine", side);
-  if (!(await pathExists(root))) return [];
-  const tokens = await readdir(root, { withFileTypes: true });
-  const result = [];
-  for (const tokenEntry of tokens) {
-    if (!tokenEntry.isDirectory() || !QUARANTINE_TOKEN.test(tokenEntry.name)) continue;
-    const directory = path.join(root, tokenEntry.name);
-    const files = await readdir(directory, { withFileTypes: true });
-    for (const file of files) {
-      if (file.isFile() && IMAGE_NAME.test(file.name)) {
-        result.push({ side, token: tokenEntry.name, name: file.name });
-      }
-    }
+export async function listAlignedQuarantine(side, { offset = 0, limit = 60 } = {}) {
+  const safeOffset = Math.max(Number(offset) || 0, 0);
+  const safeLimit = Math.min(Math.max(Number(limit) || 60, 1), 200);
+  const root = await verifyQuarantineRoot(side);
+  if (!root) {
+    return { side, total: 0, offset: safeOffset, limit: safeLimit, items: [] };
   }
-  return result.sort((a, b) => b.token.localeCompare(a.token));
+  const result = await runAssetHelper([
+    "quarantine-list",
+    "--directory",
+    root,
+    "--offset",
+    String(safeOffset),
+    "--limit",
+    String(safeLimit),
+  ]);
+  return {
+    side,
+    ...result,
+    items: result.items.map((item) => ({
+      ...item,
+      imageUrl: (
+        `/api/assets/${side}/quarantine/${encodeURIComponent(item.token)}`
+        + `/${encodeURIComponent(item.name)}`
+      ),
+    })),
+  };
 }
 
 export async function restoreAlignedImage(side, token, encodedName) {
   const destination = resolveAlignedImage(side, encodedName);
-  if (!QUARANTINE_TOKEN.test(token)) {
-    throw new AssetError("隔离记录无效", "QUARANTINE_TOKEN_INVALID");
-  }
   const name = path.basename(destination);
-  const source = assertWithin(
-    path.join(PATHS.runtimeRoot, "quarantine", side),
-    path.join(PATHS.runtimeRoot, "quarantine", side, token, name),
-    "隔离文件",
+  const source = await resolveQuarantinedImage(side, token, encodedName);
+  await ensureSafeAlignedDirectory(side);
+  const { fileHandle, fileInfo: sourceInfo } = await openVerifiedImage(
+    source,
+    "隔离图片",
+    "QUARANTINE_PATH_UNSAFE",
   );
-  if (!(await pathExists(source))) {
-    throw new AssetError("隔离文件不存在", "QUARANTINE_MISSING", 404);
+  let installed = false;
+  try {
+    try {
+      // A hard-link install is complete-or-absent and refuses to overwrite an existing name.
+      await link(source, destination);
+      installed = true;
+    } catch (error) {
+      if (error?.code === "EEXIST") {
+        throw new AssetError("aligned 中已有同名图片，不能覆盖恢复", "RESTORE_CONFLICT", 409);
+      }
+      throw error;
+    }
+    const {
+      fileHandle: destinationHandle,
+      fileInfo: destinationInfo,
+    } = await openVerifiedImage(destination, "恢复目标", "RESTORE_INSTALL_UNSAFE");
+    try {
+      if (!sameFileIdentity(sourceInfo, destinationInfo)) {
+        throw new AssetError("恢复目标未能安全提交", "RESTORE_INSTALL_UNSAFE", 500);
+      }
+    } finally {
+      await destinationHandle.close().catch(() => {});
+    }
+  } catch (error) {
+    if (installed) await unlink(destination).catch(() => {});
+    throw error;
+  } finally {
+    await fileHandle.close().catch(() => {});
   }
-  if (await pathExists(destination)) {
-    throw new AssetError("aligned 中已有同名图片，不能覆盖恢复", "RESTORE_CONFLICT", 409);
+  try {
+    await unlink(source);
+  } catch (error) {
+    try {
+      await unlink(destination);
+    } catch {
+      // Keep the original unlink failure; the source remains the recovery authority.
+    }
+    throw error;
   }
-  await mkdir(path.dirname(destination), { recursive: true });
-  await rename(source, destination);
   invalidateAnalysis(side);
   return { side, token, name, restored: true };
 }

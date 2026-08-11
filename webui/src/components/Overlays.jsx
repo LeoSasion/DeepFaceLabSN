@@ -222,9 +222,9 @@ export function NewTaskDialog({
           })}
         </div>
         {submitting ? (
-          <LoadingProgress compact label={t("正在创建任务并连接终端…")} detail={t("窗口会在任务成功创建后关闭")} />
+          <LoadingProgress inline compact label={t("正在创建任务并连接终端…")} detail={t("窗口会在任务成功创建后关闭")} operationKey="task-create" />
         ) : preflight.state === "checking" ? (
-          <LoadingProgress compact label={t("正在执行前置检查…")} detail={t("正在核对素材、运行时与资源锁")} />
+          <LoadingProgress inline compact label={t("正在执行前置检查…")} detail={t("正在核对素材、运行时与资源锁")} operationKey="task-preflight" />
         ) : null}
 
         <div className="wizard-body">

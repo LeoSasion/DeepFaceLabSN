@@ -4,9 +4,8 @@ Status: **PASS** — no open P0, P1, or P2 findings for the 1440 × 815 desktop 
 
 ## Target and evidence
 
-- Selected source: `C:\Users\Administrator\.codex\generated_images\019fc15f-bdb3-7e40-b653-15b3a6036663\exec-e6b5de67-fe82-4c27-844f-65a2d6db8fc6.png`
-- Implemented state: `C:\Users\Administrator\.codex\visualizations\2026\08\02\019fc15f-bdb3-7e40-b653-15b3a6036663\quality-diagnostics-implementation-compact.png`
-- Same-size comparison: `C:\Users\Administrator\.codex\visualizations\2026\08\02\019fc15f-bdb3-7e40-b653-15b3a6036663\quality-diagnostics-comparison-compact.png`
+- Canonical diagnostics overview: [`../docs/images/product-diagnostics.png`](../docs/images/product-diagnostics.png)
+- Pose atlas implementation: [`../docs/images/product-pose-atlas.png`](../docs/images/product-pose-atlas.png)
 
 The source was normalized to the implementation viewport before the side-by-side comparison. The user-requested information-architecture correction is treated as authoritative: diagnostics is a new stage 7 between training and merge, producing a nine-stage workflow. The implementation also keeps the complete 9 × 13 Pitch/Yaw map instead of the source image's abbreviated five Pitch rows.
 
@@ -59,10 +58,8 @@ The source was normalized to the implementation viewport before the side-by-side
 
 ## Target and state
 
-- Source visual truth: `C:\Users\ADMINI~1\AppData\Local\Temp\codex-clipboard-1b4fb967-131a-4d1a-9443-6471662e4b30.png`
-- Browser implementation: `C:\Users\Administrator\.codex\visualizations\2026\08\02\019fc15f-bdb3-7e40-b653-15b3a6036663\audit-summary-after-ready.png`
-- Full-view comparison: `C:\Users\Administrator\.codex\visualizations\2026\08\02\019fc15f-bdb3-7e40-b653-15b3a6036663\audit-summary-full-comparison.png`
-- Focused comparison: `C:\Users\Administrator\.codex\visualizations\2026\08\02\019fc15f-bdb3-7e40-b653-15b3a6036663\audit-summary-focused-comparison.png`
+- Canonical audit implementation: [`../docs/images/product-quality-audit.png`](../docs/images/product-quality-audit.png)
+- Full diagnostics context: [`../docs/images/product-diagnostics.png`](../docs/images/product-diagnostics.png)
 - Source pixels: 1123 × 765. Implementation pixels/CSS viewport: 1294 × 720 at device density 1.
 - State: Tool Lab → Data Audit → SRC aligned → audit ready.
 - Normalization: the full source was resized proportionally to 720 px high beside the 1294 × 720 implementation. The selected KPI regions were cropped from the actual source and implementation, contained without distortion in two 1100 × 150 panels, and stacked in one comparison image.
@@ -96,8 +93,7 @@ The source was normalized to the implementation viewport before the side-by-side
 
 ## User correction pass — continuous horizontal summary
 
-- Current SRC implementation: `C:\Users\Administrator\.codex\visualizations\2026\08\02\019fc15f-bdb3-7e40-b653-15b3a6036663\audit-summary-horizontal.png`
-- Current DST issue-state implementation: `C:\Users\Administrator\.codex\visualizations\2026\08\02\019fc15f-bdb3-7e40-b653-15b3a6036663\audit-summary-horizontal-dst.png`
+- Current implementation: [`../docs/images/product-quality-audit.png`](../docs/images/product-quality-audit.png)
 - **P2 · Container language.** The four individually bordered cards and colored top rules from the first pass did not match the product's continuous operational panels.
 - **Fix.** Replaced the cards with one neutral bordered panel and 1 px internal separators matching the training and audit surfaces. Semantic meaning now lives in text color instead of decorative borders.
 - **P2 · Density.** The 90 px vertical stacks left too much empty space for four short metrics.

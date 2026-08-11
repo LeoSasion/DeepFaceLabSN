@@ -218,6 +218,12 @@ test("runtime server issues a loopback session and protects writes/WebSocket", a
     });
     assert.equal(materialResponse.status, 206);
     assert.equal((await materialResponse.arrayBuffer()).byteLength, 32);
+
+    const posterResponse = await fetch(`${baseUrl}/api/assets/src/poster`, {
+      headers: { Origin: origin },
+    });
+    assert.equal(posterResponse.status, 200);
+    assert.match(posterResponse.headers.get("content-type"), /^image\//);
   }
 
   const telemetryResponse = await fetch(`${baseUrl}/api/telemetry`, {

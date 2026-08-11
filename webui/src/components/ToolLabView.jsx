@@ -375,9 +375,12 @@ function PoseAtlas({ refreshVersion, focusCellId, focusNonce, onError, onNotice,
           label={t("正在隔离低清晰度样本…")}
           detail={t("已处理 {completed} / {total} 张", quarantineProgress)}
           value={(quarantineProgress.completed / quarantineProgress.total) * 100}
+          current={quarantineProgress.completed}
+          total={quarantineProgress.total}
+          operationKey="pose-atlas-quarantine"
         />
       ) : loading ? (
-        <LoadingProgress compact label={t("正在刷新姿态地图…")} detail={t("现有分析结果保持可见")} />
+        <LoadingProgress compact label={t("正在刷新姿态地图…")} detail={t("现有分析结果保持可见")} operationKey="pose-atlas-refresh" />
       ) : null}
       <section className="pose-atlas-main" aria-label={t("人脸姿态分布") }>
         <div className="pose-metrics">
@@ -686,9 +689,132 @@ function MigrationMap() {
   );
 }
 
-export function ToolLabView({ commands, onOpenCommand, onError, onNotice, onNavigateDataset, poseFocus }) {
+const IMAGE_TOOL_MODES = [
+  {
+    id: "clarity",
+    label: "清晰度增强",
+    title: "清晰度增强",
+    description: "单图超分、轻度去模糊与细节保护的非破坏预览。",
+    action: "生成增强预览",
+    fields: [
+      ["处理策略", "超分 2× + 轻度去模糊"],
+      ["输出方式", "新文件预览，不覆盖原图"],
+    ],
+  },
+  {
+    id: "single-frame",
+    label: "单图合成",
+    title: "单图合成",
+    description: "以当前 aligned 人脸和已选 DFL 模型生成单帧换脸结果。",
+    action: "生成单帧结果",
+    fields: [
+      ["DFL 模型", "待选择 DFL 模型"],
+      ["输出方式", "单帧 PNG 对照图"],
+    ],
+  },
+  {
+    id: "ai-edit",
+    label: "AI 图像编辑",
+    title: "AI 图像编辑",
+    description: "调用 Gemini 或 GPT Image，并以自定义提示词临时编辑素材。",
+    action: "生成临时编辑图",
+    fields: [
+      ["图像服务", "Gemini / GPT Image"],
+      ["输出方式", "临时预览，不覆盖原图"],
+    ],
+  },
+];
+
+function normalizeImageToolId(toolId) {
+  if (toolId === "enhance") return "clarity";
+  if (toolId === "single-merge") return "single-frame";
+  return IMAGE_TOOL_MODES.some((tool) => tool.id === toolId) ? toolId : "clarity";
+}
+
+function ImageToolsPlaceholder({ activeTool, onToolChange, side, toolFocus }) {
+  const { t } = useI18n();
+  const tool = IMAGE_TOOL_MODES.find((item) => item.id === activeTool) ?? IMAGE_TOOL_MODES[0];
+  const sample = toolFocus?.sample ?? null;
+  const sampleSide = String(toolFocus?.side ?? side ?? "src").toUpperCase();
+
+  return (
+    <section className={`image-tools-placeholder is-${tool.id}`} aria-labelledby="image-tools-title">
+      <header className="image-tools-heading">
+        <div>
+          <span className="image-tools-kicker">{t("单图素材工具")}</span>
+          <h2 id="image-tools-title">{t(tool.title)}</h2>
+          <p>{t(tool.description)}</p>
+        </div>
+        <span className="image-tools-status">{t("规划中")}</span>
+      </header>
+
+      <div className="image-tools-mode-switch" role="tablist" aria-label={t("图像工具模式") }>
+        {IMAGE_TOOL_MODES.map((item) => (
+          <button
+            aria-selected={activeTool === item.id}
+            className={activeTool === item.id ? "is-active" : ""}
+            key={item.id}
+            role="tab"
+            type="button"
+            onClick={() => onToolChange(item.id)}
+          >
+            {item.id === "single-frame" ? <IconRoute size={16} /> : item.id === "ai-edit" ? <IconTool size={16} /> : <IconPhoto size={16} />}
+            {t(item.label)}
+          </button>
+        ))}
+      </div>
+
+      <div className="image-tools-workbench">
+        <div className="image-tools-preview" aria-label={t("当前素材预览") }>
+          {sample?.imageUrl ? (
+            <img src={sample.imageUrl} alt={t("{name} 素材预览", { name: sample.name ?? sampleSide })} decoding="async" />
+          ) : (
+            <div className="image-tools-empty">
+              <IconPhoto size={32} />
+              <strong>{t("尚未选择素材")}</strong>
+              <p>{t("请先从 SRC 或 DST 数据集选择图片。")}</p>
+            </div>
+          )}
+        </div>
+
+        <aside className="image-tools-settings" aria-label={t("规划参数") }>
+          <header>
+            <span>{t("当前素材")}</span>
+            <strong>{sample?.name ?? t("未选择")}</strong>
+          </header>
+          <dl>
+            <div><dt>{t("数据集")}</dt><dd>{sampleSide}</dd></div>
+            {tool.fields.map(([label, value]) => (
+              <div key={label}><dt>{t(label)}</dt><dd>{t(value)}</dd></div>
+            ))}
+          </dl>
+          {tool.id === "ai-edit" && (
+            <label className="image-tools-prompt">
+              <span>{t("自定义提示词")}</span>
+              <textarea disabled rows={4} placeholder={t("接入 API 后输入自定义提示词")} />
+            </label>
+          )}
+          <div className="image-tools-safety-note">
+            <IconAlertTriangle size={16} />
+            <div>
+              <strong>{t("当前仅为界面占位")}</strong>
+              <p>{t("当前不会上传、生成或修改任何文件。")}</p>
+              {tool.id === "ai-edit" && <p>{t("正式接入时，上传前必须明确确认图像服务商和本次素材范围。")}</p>}
+            </div>
+          </div>
+          <button className="button primary image-tools-submit" disabled type="button" title={t("功能接入后可用")}>
+            <IconPlayerPlay size={16} />{t(tool.action)}
+          </button>
+        </aside>
+      </div>
+    </section>
+  );
+}
+
+export function ToolLabView({ commands, onOpenCommand, onError, onNotice, onNavigateDataset, poseFocus, toolFocus }) {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = useState("audit");
+  const [activeImageTool, setActiveImageTool] = useState("clarity");
   const [side, setSide] = useState("src");
   const [refreshVersion, setRefreshVersion] = useState(0);
   const toolCommands = commands.filter((command) => (
@@ -698,6 +824,13 @@ export function ToolLabView({ commands, onOpenCommand, onError, onNotice, onNavi
   useEffect(() => {
     if (poseFocus?.cellId) setActiveTab("atlas");
   }, [poseFocus?.cellId, poseFocus?.nonce]);
+
+  useEffect(() => {
+    if (!toolFocus?.toolId) return;
+    setActiveTab("image-tools");
+    setActiveImageTool(normalizeImageToolId(toolFocus.toolId));
+    if (["src", "dst"].includes(toolFocus.side)) setSide(toolFocus.side);
+  }, [toolFocus?.nonce, toolFocus?.side, toolFocus?.toolId]);
 
   return (
     <section className="tool-lab-view">
@@ -723,13 +856,16 @@ export function ToolLabView({ commands, onOpenCommand, onError, onNotice, onNavi
         <button className={activeTab === "atlas" ? "is-active" : ""} type="button" onClick={() => setActiveTab("atlas")}>
           <IconTool size={16} />{t("姿态图谱")}
         </button>
+        <button className={activeTab === "image-tools" ? "is-active" : ""} type="button" onClick={() => setActiveTab("image-tools")}>
+          <IconPhoto size={16} />{t("图像工具")}
+        </button>
         <button className={activeTab === "migration" ? "is-active" : ""} type="button" onClick={() => setActiveTab("migration")}>
           <IconCheck size={16} />{t("覆盖清单")}
         </button>
         <button className={activeTab === "commands" ? "is-active" : ""} type="button" onClick={() => setActiveTab("commands")}>
           <IconCode size={16} />{t("命令目录")}
         </button>
-        {!["commands", "migration"].includes(activeTab) && (
+        {!["commands", "migration", "image-tools"].includes(activeTab) && (
           <div className="tool-lab-actions">
             {SIDE_AWARE_TABS.has(activeTab) && (
               <div className="side-switch" role="group" aria-label={t("数据集") }>
@@ -776,6 +912,13 @@ export function ToolLabView({ commands, onOpenCommand, onError, onNotice, onNavi
             onNotice={onNotice}
             onNavigateDataset={onNavigateDataset}
             onOpenCommand={onOpenCommand}
+          />
+        ) : activeTab === "image-tools" ? (
+          <ImageToolsPlaceholder
+            activeTool={activeImageTool}
+            onToolChange={setActiveImageTool}
+            side={side}
+            toolFocus={toolFocus}
           />
         ) : activeTab === "migration" ? (
           <MigrationMap />

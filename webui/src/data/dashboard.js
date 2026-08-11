@@ -42,8 +42,8 @@ export const pipelineTasks = [
   { id: "xseg", index: 5, label: "XSeg 训练与应用", time: "未运行", state: "waiting", tone: "violet", supported: true },
   { id: "saehd", index: 6, label: "训练 SAEHD", time: "未运行", state: "waiting", tone: "green", supported: true },
   { id: "diagnose", index: 7, label: "质量诊断", time: "等待评估快照", state: "waiting", tone: "green", supported: true },
-  { id: "merge", index: 8, label: "合成 SAEHD 人脸", time: "未运行", state: "waiting", tone: "amber", supported: true },
-  { id: "export", index: 9, label: "导出 MP4", time: "未运行", state: "waiting", tone: "amber", supported: true },
+  { id: "merge", index: 8, label: "合成 SAEHD 人脸", time: "未运行", state: "waiting", tone: "default", supported: true },
+  { id: "export", index: 9, label: "导出 MP4", time: "未运行", state: "waiting", tone: "default", supported: true },
 ];
 
 export const taskTypes = [

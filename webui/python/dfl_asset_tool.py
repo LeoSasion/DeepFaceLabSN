@@ -5,6 +5,7 @@ import json
 import math
 import os
 import pickletools
+import re
 import shutil
 import struct
 import sys
@@ -45,6 +46,7 @@ PROBE_SCHEMA_VERSION = 1
 MAX_PROBE_SAMPLES_PER_SIDE = 180
 MAX_PROBE_SAMPLES_PER_CELL = 3
 MAX_SIMILARITY_ITEMS = 500
+QUARANTINE_TOKEN_PATTERN = re.compile(r"^\d{14}-[a-f0-9]{10}$")
 
 
 def emit(value):
@@ -68,6 +70,59 @@ def serialize_polygons(dfl_image):
     ]
 
 
+def serialize_finite_points(points, expected_length=None):
+    """Return finite 2D points without letting one malformed metadata field break inspection."""
+    try:
+        values = np.asarray(points, dtype=np.float32)
+    except (TypeError, ValueError):
+        return []
+    if values.ndim != 2 or values.shape[1] != 2:
+        return []
+    if expected_length is not None and values.shape[0] != expected_length:
+        return []
+    if not np.isfinite(values).all():
+        return []
+    return [[float(x), float(y)] for x, y in values]
+
+
+def inspect_dfl_geometry(dfl_image):
+    try:
+        raw_landmarks = dfl_image.get_landmarks()
+    except (AttributeError, KeyError, TypeError, ValueError):
+        raw_landmarks = None
+    landmarks = serialize_finite_points(raw_landmarks, expected_length=68)
+    source_rect = None
+    source_rect_aligned = None
+    try:
+        rect = np.asarray(dfl_image.get_source_rect(), dtype=np.float32).reshape(-1)
+        if rect.shape == (4,) and np.isfinite(rect).all():
+            source_rect = [float(value) for value in rect]
+            matrix = np.asarray(dfl_image.get_image_to_face_mat(), dtype=np.float32)
+            if matrix.shape == (2, 3) and np.isfinite(matrix).all():
+                x0, y0, x1, y1 = rect
+                corners = np.asarray(
+                    [[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
+                    dtype=np.float32,
+                )
+                source_rect_aligned = serialize_finite_points(
+                    cv2.transform(corners[None, ...], matrix)[0],
+                    expected_length=4,
+                ) or None
+    except (AttributeError, KeyError, TypeError, ValueError, cv2.error):
+        source_rect = None
+        source_rect_aligned = None
+    try:
+        face_type = dfl_image.get_face_type()
+    except (AttributeError, KeyError, TypeError, ValueError):
+        face_type = None
+    return {
+        "faceType": str(face_type) if face_type is not None else None,
+        "landmarks": landmarks,
+        "sourceRect": source_rect,
+        "sourceRectAligned": source_rect_aligned,
+    }
+
+
 def image_quality(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     laplacian_variance = float(cv2.Laplacian(gray, cv2.CV_64F).var())
@@ -86,7 +141,11 @@ def iter_images(directory):
     return sorted(
         path
         for path in directory.iterdir()
-        if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
+        if (
+            not path.is_symlink()
+            and path.is_file()
+            and path.suffix.lower() in IMAGE_EXTENSIONS
+        )
     )
 
 
@@ -840,35 +899,65 @@ def build_pose_probe_manifest(directory, side):
     }
 
 
+def describe_list_image(image_path):
+    try:
+        dfl_image = load_dfl_image(image_path)
+        polygons = serialize_polygons(dfl_image)
+        return {
+            "name": image_path.name,
+            "hasDflMetadata": True,
+            "polygonCount": len(polygons),
+            "pointCount": sum(len(poly["points"]) for poly in polygons),
+            "hasAppliedMask": bool(dfl_image.has_xseg_mask()),
+            "sourceFilename": dfl_image.get_source_filename(),
+        }
+    except Exception:
+        return {
+            "name": image_path.name,
+            "hasDflMetadata": False,
+            "polygonCount": 0,
+            "pointCount": 0,
+            "hasAppliedMask": False,
+            "sourceFilename": None,
+        }
+
+
 def list_images(directory, offset, limit):
     files = iter_images(directory)
-    items = []
-    for image_path in files[offset : offset + limit]:
-        try:
-            dfl_image = load_dfl_image(image_path)
-            polygons = serialize_polygons(dfl_image)
-            items.append(
-                {
-                    "name": image_path.name,
-                    "hasDflMetadata": True,
-                    "polygonCount": len(polygons),
-                    "pointCount": sum(len(poly["points"]) for poly in polygons),
-                    "hasAppliedMask": bool(dfl_image.has_xseg_mask()),
-                    "sourceFilename": dfl_image.get_source_filename(),
-                }
-            )
-        except Exception:
-            items.append(
-                {
-                    "name": image_path.name,
-                    "hasDflMetadata": False,
-                    "polygonCount": 0,
-                    "pointCount": 0,
-                    "hasAppliedMask": False,
-                    "sourceFilename": None,
-                }
-            )
+    items = [describe_list_image(image_path) for image_path in files[offset : offset + limit]]
     return {"total": len(files), "offset": offset, "limit": limit, "items": items}
+
+
+def list_quarantined_images(directory, offset, limit):
+    records = []
+    token_directories = sorted(
+        (
+            entry
+            for entry in directory.iterdir()
+            if (
+                not entry.is_symlink()
+                and entry.is_dir()
+                and QUARANTINE_TOKEN_PATTERN.fullmatch(entry.name)
+            )
+        ),
+        key=lambda entry: entry.name,
+        reverse=True,
+    )
+    for token_directory in token_directories:
+        for image_path in iter_images(token_directory):
+            if image_path.is_symlink():
+                continue
+            records.append((token_directory.name, image_path))
+    page = records[offset : offset + limit]
+    return {
+        "total": len(records),
+        "offset": offset,
+        "limit": limit,
+        "items": [
+            {**describe_list_image(image_path), "token": token}
+            for token, image_path in page
+        ],
+    }
 
 
 def summarize_xseg_labels(directory):
@@ -1041,6 +1130,7 @@ def inspect_image(image_path):
         "name": image_path.name,
         "width": int(image.shape[1]),
         "height": int(image.shape[0]),
+        **inspect_dfl_geometry(dfl_image),
         "polygons": serialize_polygons(dfl_image),
         "hasAppliedMask": bool(dfl_image.has_xseg_mask()),
         "appliedMaskDataUrl": encode_mask_data_url(mask) if mask is not None else None,
@@ -1247,6 +1337,7 @@ def main():
         "action",
         choices=(
             "list",
+            "quarantine-list",
             "xseg-label-summary",
             "inspect",
             "save",
@@ -1274,6 +1365,20 @@ def main():
         if args.directory is None or not args.directory.is_dir():
             raise ValueError("aligned 目录不存在")
         emit(list_images(args.directory, max(args.offset, 0), min(max(args.limit, 1), 200)))
+        return
+
+    if args.action == "quarantine-list":
+        if (
+            args.directory is None
+            or args.directory.is_symlink()
+            or not args.directory.is_dir()
+        ):
+            raise ValueError("隔离目录不存在或不安全")
+        emit(list_quarantined_images(
+            args.directory,
+            max(args.offset, 0),
+            min(max(args.limit, 1), 200),
+        ))
         return
 
     if args.action == "xseg-label-summary":

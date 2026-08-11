@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   IconAlertTriangle,
   IconArchive,
@@ -6,10 +6,16 @@ import {
   IconArrowRight,
   IconBoxModel2,
   IconCheck,
+  IconClipboard,
   IconCopy,
   IconDeviceFloppy,
+  IconEye,
+  IconEyeOff,
+  IconHelpCircle,
+  IconMinus,
   IconPhoto,
   IconPlayerPlay,
+  IconPlus,
   IconRefresh,
   IconRestore,
   IconRotateClockwise,
@@ -35,6 +41,21 @@ const categoryLabels = {
 };
 
 const terminalStates = new Set(["succeeded", "failed", "cancelled", "orphaned"]);
+const thumbnailMinWidths = [72, 88, 108, 132];
+const datasetPageSize = 200;
+const emptyDatasetCollection = (side) => ({ side, total: 0, offset: 0, limit: datasetPageSize, items: [] });
+const datasetAssetKey = (item) => (item?.token ? `${item.token}:${item.name}` : item?.name ?? "");
+const landmarkSegments = [
+  [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+  [17, 18, 19, 20, 21],
+  [22, 23, 24, 25, 26],
+  [27, 28, 29, 30],
+  [30, 31, 32, 33, 34, 35],
+  [36, 37, 38, 39, 40, 41, 36],
+  [42, 43, 44, 45, 46, 47, 42],
+  [48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 48],
+  [60, 61, 62, 63, 64, 65, 66, 67, 60],
+];
 
 function profileLabel(profile) {
   return profile === "legacy" ? "DFL legacy" : "DFL current";
@@ -134,6 +155,7 @@ function AnnotationCanvas({
   item,
   annotation,
   clipboard,
+  locked = false,
   onClipboardChange,
   onNavigate,
   onLoadPrevious,
@@ -151,6 +173,9 @@ function AnnotationCanvas({
   const [dragging, setDragging] = useState(null);
   const [showAppliedMask, setShowAppliedMask] = useState(true);
   const baselineRef = useRef("[]");
+  const saveInFlightRef = useRef(false);
+  const editorBusy = locked || saving || loadingPrevious;
+  const hasUnsavedChanges = JSON.stringify(polygons) !== baselineRef.current || draft.length > 0;
 
   useEffect(() => {
     const nextPolygons = annotation?.polygons ?? [];
@@ -162,8 +187,8 @@ function AnnotationCanvas({
   }, [annotation, onDirtyChange]);
 
   useEffect(() => {
-    onDirtyChange(JSON.stringify(polygons) !== baselineRef.current || draft.length > 0);
-  }, [draft.length, onDirtyChange, polygons]);
+    onDirtyChange(hasUnsavedChanges);
+  }, [hasUnsavedChanges, onDirtyChange]);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -172,6 +197,7 @@ function AnnotationCanvas({
       const key = event.key.toLocaleLowerCase();
       if (event.ctrlKey && key === "s") { event.preventDefault(); void save(); return; }
       if (event.ctrlKey && key === "c") { event.preventDefault(); copyPolygons(); return; }
+      if (editorBusy) return;
       if (event.ctrlKey && key === "v") { event.preventDefault(); pastePolygons(); return; }
       if (key === "q") setPolygonType("include");
       else if (key === "w") setPolygonType("exclude");
@@ -196,7 +222,7 @@ function AnnotationCanvas({
   }
 
   const addPoint = (event) => {
-    if (dragging || event.button !== 0) return;
+    if (editorBusy || dragging || event.button !== 0) return;
     const svg = svgRef.current;
     if (!svg) return;
     setDraft((current) => [
@@ -206,6 +232,7 @@ function AnnotationCanvas({
   };
 
   const finishPolygon = () => {
+    if (editorBusy) return;
     if (draft.length < 3) {
       onError(new Error(t("至少需要 3 个点才能闭合多边形")));
       return;
@@ -215,7 +242,7 @@ function AnnotationCanvas({
   };
 
   const movePoint = (event) => {
-    if (!dragging || !svgRef.current) return;
+    if (editorBusy || !dragging || !svgRef.current) return;
     const point = imagePoint(svgRef.current, event, annotation.width, annotation.height);
     setPolygons((current) => current.map((polygon, polygonIndex) => (
       polygonIndex !== dragging.polygonIndex
@@ -230,15 +257,23 @@ function AnnotationCanvas({
   };
 
   const save = async () => {
+    if (editorBusy || saveInFlightRef.current) return;
+    if (draft.length > 0) {
+      onError(new Error(t("请先闭合当前多边形再保存")));
+      return;
+    }
+    const submittedPolygons = structuredClone(polygons);
+    saveInFlightRef.current = true;
     setSaving(true);
     try {
-      const result = await runtimeApi.saveAlignedAnnotation(side, item.name, polygons);
-      baselineRef.current = JSON.stringify(polygons);
+      const result = await runtimeApi.saveAlignedAnnotation(side, item.name, submittedPolygons);
+      baselineRef.current = JSON.stringify(submittedPolygons);
       onDirtyChange(false);
       onSaved(result);
     } catch (error) {
       onError(error);
     } finally {
+      saveInFlightRef.current = false;
       setSaving(false);
     }
   };
@@ -248,10 +283,11 @@ function AnnotationCanvas({
   };
 
   const pastePolygons = () => {
-    if (Array.isArray(clipboard) && clipboard.length) setPolygons(structuredClone(clipboard));
+    if (!editorBusy && Array.isArray(clipboard) && clipboard.length) setPolygons(structuredClone(clipboard));
   };
 
   const inheritPrevious = async () => {
+    if (editorBusy) return;
     setLoadingPrevious(true);
     try {
       const previous = await onLoadPrevious();
@@ -265,7 +301,7 @@ function AnnotationCanvas({
   };
 
   const importSuggested = () => {
-    if (!annotation.suggestedPolygons?.length) return;
+    if (editorBusy || !annotation.suggestedPolygons?.length) return;
     setPolygons(structuredClone(annotation.suggestedPolygons));
   };
 
@@ -273,14 +309,28 @@ function AnnotationCanvas({
     include: { stroke: "#42d89a", fill: "rgba(52, 211, 153, 0.22)" },
     exclude: { stroke: "#ff7a7a", fill: "rgba(255, 92, 92, 0.18)" },
   };
+  const appliedMaskVisible = showAppliedMask && Boolean(annotation.appliedMaskDataUrl);
+  const AppliedMaskVisibilityIcon = appliedMaskVisible ? IconEye : IconEyeOff;
+  const editorStatus = draft.length
+    ? t("{count} 点待闭合", { count: draft.length })
+    : hasUnsavedChanges
+      ? t("有未保存修改")
+      : t("{count} 个标注", { count: polygons.length });
 
   return (
-    <div className="annotation-editor">
-      <div className="annotation-toolbar">
+    <div className={`annotation-editor${editorBusy ? " is-busy" : ""}`} aria-busy={editorBusy}>
+      <div className="annotation-toolbar" role="toolbar" aria-label={t("遮罩编辑工具")}>
+        <div className="annotation-tool-summary">
+          <strong>{t("遮罩工具")}</strong>
+          <span className={hasUnsavedChanges ? "is-dirty" : ""} aria-live="polite">{editorStatus}</span>
+        </div>
         <div className="seg-type-switch" aria-label={t("多边形类型")}>
           <button
             className={polygonType === "include" ? "is-active" : ""}
             type="button"
+            aria-pressed={polygonType === "include"}
+            title={t("保留区（Q）")}
+            disabled={editorBusy}
             onClick={() => setPolygonType("include")}
           >
             <span className="seg-swatch include" />{t("保留区")}
@@ -288,34 +338,41 @@ function AnnotationCanvas({
           <button
             className={polygonType === "exclude" ? "is-active" : ""}
             type="button"
+            aria-pressed={polygonType === "exclude"}
+            title={t("排除区（W）")}
+            disabled={editorBusy}
             onClick={() => setPolygonType("exclude")}
           >
             <span className="seg-swatch exclude" />{t("排除区")}
           </button>
         </div>
-        <div className="annotation-actions">
-          <button className="button secondary" type="button" onClick={() => void inheritPrevious()} disabled={loadingPrevious || saving}>
-            <IconCopy size={15} />{t("继承上一张")}
-          </button>
-          <button className="button secondary" type="button" onClick={copyPolygons} disabled={!polygons.length} title="Ctrl+C">{t("复制")}</button>
-          <button className="button secondary" type="button" onClick={pastePolygons} disabled={!clipboard?.length} title="Ctrl+V">{t("粘贴")}</button>
-          <button className={`button secondary ${showAppliedMask ? "is-active" : ""}`} type="button" onClick={() => setShowAppliedMask((value) => !value)} disabled={!annotation.appliedMaskDataUrl}>{t("遮罩叠加")}</button>
-          <button className="button secondary" type="button" onClick={importSuggested} disabled={!annotation.suggestedPolygons?.length} title="G">
-            <IconSparkles size={15} />{t("导入遮罩轮廓")}
-          </button>
-          <button className="button secondary" type="button" onClick={() => setDraft((value) => value.slice(0, -1))} disabled={!draft.length}>
-            <IconRotateClockwise size={15} />{t("撤销点")}
-          </button>
-          <button className="button secondary" type="button" onClick={finishPolygon} disabled={draft.length < 3}>
-            <IconCheck size={15} />{t("闭合")}
-          </button>
-          <button className="button secondary" type="button" onClick={() => setPolygons((value) => value.slice(0, -1))} disabled={!polygons.length}>
-            <IconTrash size={15} />{t("移除末项")}
-          </button>
-          <button className="button primary" type="button" onClick={() => void save()} disabled={saving || loadingPrevious || draft.length > 0}>
-            <IconDeviceFloppy size={15} />{saving ? t("保存中") : t("写入 JPG")}
-          </button>
-        </div>
+        <details className="annotation-help-popover">
+          <summary>
+            <IconHelpCircle size={15} aria-hidden="true" />
+            <span>{t("操作说明")}</span>
+          </summary>
+          <div>
+            <strong>{t("绘制与导航")}</strong>
+            <p>{t("点击图片添加点；闭合后拖动顶点微调。排除区会从保留区中扣除。")}</p>
+            <span className="annotation-shortcuts">
+              <kbd>Q</kbd>{t("保留")}
+              <kbd>W</kbd>{t("排除")}
+              <kbd>G</kbd>{t("导入")}
+              <kbd>Ctrl S</kbd>{t("保存")}
+              <kbd>← →</kbd>{t("切换图片")}
+            </span>
+          </div>
+        </details>
+        <button
+          className="button primary annotation-save-button"
+          type="button"
+          onClick={() => void save()}
+          disabled={editorBusy || draft.length > 0}
+          title="Ctrl+S"
+        >
+          <IconDeviceFloppy size={16} />
+          <span>{saving ? t("保存中") : t("写入 JPG")}</span>
+        </button>
       </div>
       {saving || loadingPrevious ? (
         <LoadingProgress
@@ -333,6 +390,7 @@ function AnnotationCanvas({
           viewBox={`0 0 ${annotation.width} ${annotation.height}`}
           role="img"
           aria-label={t("{name} XSeg 多边形编辑器", { name: item.name })}
+          aria-disabled={editorBusy}
           onPointerDown={addPoint}
           onPointerMove={movePoint}
           onPointerUp={() => setDragging(null)}
@@ -410,9 +468,304 @@ function AnnotationCanvas({
           )}
         </svg>
       </div>
-      <p className="annotation-help">
-        {t("点击图片添加点，闭合后可拖动顶点微调。红色“排除区”会从绿色“保留区”中扣除；保存会直接更新 DFL JPG 元数据。")}
-      </p>
+      <div className="annotation-actions" role="toolbar" aria-label={t("遮罩编辑操作")}>
+        <button className="button secondary" type="button" onClick={() => void inheritPrevious()} disabled={editorBusy} title={t("继承上一张")}>
+          <IconRestore size={15} />{t("继承")}
+        </button>
+        <button className="button secondary" type="button" onClick={copyPolygons} disabled={!polygons.length} title="Ctrl+C">
+          <IconCopy size={15} />{t("复制")}
+        </button>
+        <button className="button secondary" type="button" onClick={pastePolygons} disabled={editorBusy || !clipboard?.length} title="Ctrl+V">
+          <IconClipboard size={15} />{t("粘贴")}
+        </button>
+        <button
+          className={`button secondary annotation-mask-toggle ${appliedMaskVisible ? "is-active" : ""}`}
+          type="button"
+          aria-pressed={appliedMaskVisible}
+          aria-label={t(appliedMaskVisible ? "隐藏应用遮罩" : "显示应用遮罩")}
+          title={t(appliedMaskVisible ? "隐藏应用遮罩" : "显示应用遮罩")}
+          onClick={() => setShowAppliedMask((value) => !value)}
+          disabled={!annotation.appliedMaskDataUrl}
+        >
+          <AppliedMaskVisibilityIcon className="annotation-action-state" size={15} aria-hidden="true" />
+          <span>{t("遮罩")}</span>
+        </button>
+        <button className="button secondary" type="button" onClick={importSuggested} disabled={editorBusy || !annotation.suggestedPolygons?.length} title={t("导入遮罩轮廓（G）")}>
+          <IconSparkles size={15} />{t("导入")}
+        </button>
+        <button className="button secondary" type="button" onClick={() => setDraft((value) => value.slice(0, -1))} disabled={editorBusy || !draft.length} title={t("撤销最后一个点")}>
+          <IconRotateClockwise size={15} />{t("撤销")}
+        </button>
+        <button className="button secondary" type="button" onClick={finishPolygon} disabled={editorBusy || draft.length < 3} title={t("闭合当前多边形")}>
+          <IconCheck size={15} />{t("闭合")}
+        </button>
+        <button className="button secondary" type="button" onClick={() => setPolygons((value) => value.slice(0, -1))} disabled={editorBusy || !polygons.length} title={t("移除最后一个多边形")}>
+          <IconTrash size={15} />{t("移除")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function InspectorLayerButton({
+  active,
+  available,
+  detail,
+  label,
+  loading,
+  onToggle,
+  tone,
+}) {
+  const { t } = useI18n();
+  const layerVisible = active && available;
+  const VisibilityIcon = layerVisible ? IconEye : IconEyeOff;
+  const actionLabel = t(layerVisible ? "隐藏图层：{label}" : "显示图层：{label}", { label });
+  return (
+    <button
+      className={`asset-layer-button is-${tone}${layerVisible ? " is-active" : ""}`}
+      type="button"
+      aria-pressed={layerVisible}
+      aria-label={`${actionLabel} · ${detail}`}
+      title={`${actionLabel} · ${detail}`}
+      disabled={loading || !available}
+      onClick={onToggle}
+    >
+      <strong>{label}</strong>
+      <VisibilityIcon className="asset-layer-visibility" size={14} stroke={1.8} aria-hidden="true" />
+    </button>
+  );
+}
+
+function AssetInspector({
+  annotation,
+  annotationError,
+  annotationLoading,
+  item,
+  onOpenTool,
+  onOpenXSeg,
+  side,
+}) {
+  const { t } = useI18n();
+  const maskId = `asset-mask-${useId().replaceAll(":", "")}`;
+  const [visibleLayers, setVisibleLayers] = useState({
+    dfl: false,
+    mask: false,
+    points: false,
+    polygons: false,
+  });
+  const toggleLayer = useCallback((layer) => {
+    setVisibleLayers((current) => ({ ...current, [layer]: !current[layer] }));
+  }, []);
+
+  const landmarks = annotation?.landmarks ?? [];
+  const polygons = annotation?.polygons ?? [];
+  const sourceRect = annotation?.sourceRectAligned ?? [];
+  const polygonPointCount = polygons.reduce((total, polygon) => total + polygon.points.length, 0);
+  const dflAvailable = landmarks.length > 0 || sourceRect.length === 4;
+  const polygonsAvailable = polygons.length > 0;
+  const pointsAvailable = polygonPointCount > 0;
+  const maskAvailable = Boolean(annotation?.appliedMaskDataUrl);
+  const width = annotation?.width || 1;
+  const height = annotation?.height || 1;
+  const pointRadius = Math.max(width, height) * 0.006;
+  const dflDetail = annotation
+    ? t("{type} · {count} 点", { type: annotation.faceType ?? "DFL", count: landmarks.length })
+    : item.hasDflMetadata ? t("读取中…") : t("元数据无效");
+  const polygonDetail = t("{count} 个 · {points} 点", {
+    count: annotation ? polygons.length : item.polygonCount,
+    points: annotation ? polygonPointCount : item.pointCount,
+  });
+  const pointDetail = t("{count} 点", {
+    count: annotation ? polygonPointCount : item.pointCount,
+  });
+  const maskDetail = item.hasAppliedMask
+    ? maskAvailable ? t("已写入 · 可预览") : annotation ? t("已写入 · 无法预览") : t("读取中…")
+    : t("未写入");
+  const isQuarantined = Boolean(item.token);
+  const xsegTitle = isQuarantined ? t("请先恢复图片，再编辑 XSeg") : t("XSeg 编辑");
+
+  return (
+    <div className="asset-inspector">
+      <div className="asset-layer-toolbar">
+        <div className="asset-layer-buttons" role="group" aria-label={t("图层预览")}>
+          <InspectorLayerButton
+            active={visibleLayers.dfl}
+            available={dflAvailable}
+            detail={dflDetail}
+            label={t("DFL 定位")}
+            loading={annotationLoading}
+            onToggle={() => toggleLayer("dfl")}
+            tone="dfl"
+          />
+          <InspectorLayerButton
+            active={visibleLayers.polygons}
+            available={polygonsAvailable}
+            detail={polygonDetail}
+            label={t("手绘多边形")}
+            loading={annotationLoading}
+            onToggle={() => toggleLayer("polygons")}
+            tone="polygon"
+          />
+          <InspectorLayerButton
+            active={visibleLayers.points}
+            available={pointsAvailable}
+            detail={pointDetail}
+            label={t("标注点")}
+            loading={annotationLoading}
+            onToggle={() => toggleLayer("points")}
+            tone="points"
+          />
+          <InspectorLayerButton
+            active={visibleLayers.mask}
+            available={maskAvailable}
+            detail={maskDetail}
+            label={t("应用遮罩")}
+            loading={annotationLoading}
+            onToggle={() => toggleLayer("mask")}
+            tone="mask"
+          />
+        </div>
+      </div>
+      {annotationLoading ? (
+        <LoadingProgress
+          compact
+          className="asset-inspector-progress"
+          label={t("正在读取图层…")}
+          detail={t("正在解析当前 JPG 内的真实 DFL 元数据")}
+          operationKey={`aligned-annotation:${item.name}`}
+        />
+      ) : null}
+      {annotationError ? (
+        <div className="asset-layer-error" role="alert">
+          <IconAlertTriangle size={15} />
+          <span>{t("无法读取图层：{message}", { message: annotationError.message })}</span>
+        </div>
+      ) : null}
+      <div className="asset-preview-stage">
+        <svg
+          className="asset-preview-canvas"
+          viewBox={`0 0 ${width} ${height}`}
+          preserveAspectRatio="xMidYMin meet"
+          role="img"
+          aria-label={t("{name} 图层预览", { name: item.name })}
+        >
+          <title>{t("{name} 图层预览", { name: item.name })}</title>
+          <image
+            href={item.imageUrl}
+            x="0"
+            y="0"
+            width={width}
+            height={height}
+            preserveAspectRatio={annotation ? "none" : "xMidYMin meet"}
+          />
+          {maskAvailable ? (
+            <defs>
+              <mask
+                id={maskId}
+                x="0"
+                y="0"
+                width={width}
+                height={height}
+                maskUnits="userSpaceOnUse"
+                style={{ maskType: "luminance" }}
+              >
+                <image
+                  href={annotation.appliedMaskDataUrl}
+                  x="0"
+                  y="0"
+                  width={width}
+                  height={height}
+                  preserveAspectRatio="none"
+                />
+              </mask>
+            </defs>
+          ) : null}
+          {visibleLayers.mask && maskAvailable ? (
+            <rect className="asset-mask-layer" x="0" y="0" width={width} height={height} mask={`url(#${maskId})`} />
+          ) : null}
+          {visibleLayers.polygons ? polygons.map((polygon, polygonIndex) => (
+            <polygon
+              className={`asset-polygon-layer is-${polygon.type}`}
+              key={`${polygon.type}-${polygonIndex}`}
+              points={polygon.points.map((point) => point.join(",")).join(" ")}
+              vectorEffect="non-scaling-stroke"
+            />
+          )) : null}
+          {visibleLayers.points ? polygons.flatMap((polygon, polygonIndex) => (
+            polygon.points.map(([x, y], pointIndex) => (
+              <circle
+                className={`asset-polygon-point is-${polygon.type}`}
+                key={`${polygonIndex}-${pointIndex}`}
+                cx={x}
+                cy={y}
+                r={pointRadius}
+                vectorEffect="non-scaling-stroke"
+              />
+            ))
+          )) : null}
+          {visibleLayers.dfl && sourceRect.length === 4 ? (
+            <polygon
+              className="asset-source-rect-layer"
+              points={sourceRect.map((point) => point.join(",")).join(" ")}
+              vectorEffect="non-scaling-stroke"
+            />
+          ) : null}
+          {visibleLayers.dfl ? landmarkSegments.map((segment, segmentIndex) => (
+            <polyline
+              className="asset-landmark-line"
+              key={segmentIndex}
+              points={segment.map((pointIndex) => landmarks[pointIndex]).filter(Boolean).map((point) => point.join(",")).join(" ")}
+              vectorEffect="non-scaling-stroke"
+            />
+          )) : null}
+          {visibleLayers.dfl ? landmarks.map(([x, y], pointIndex) => (
+            <circle
+              className="asset-landmark-point"
+              key={pointIndex}
+              cx={x}
+              cy={y}
+              r={pointRadius}
+              vectorEffect="non-scaling-stroke"
+            />
+          )) : null}
+        </svg>
+      </div>
+      <div className="asset-preview-actions" role="toolbar" aria-label={t("素材操作")}>
+        <button
+          className="button secondary is-xseg"
+          type="button"
+          disabled={isQuarantined || !onOpenXSeg}
+          title={xsegTitle}
+          aria-label={xsegTitle}
+          onClick={() => onOpenXSeg?.(side, item)}
+        >
+          <IconPhoto size={15} />{t("XSeg 编辑")}
+        </button>
+        <button
+          className="button secondary"
+          type="button"
+          disabled={!onOpenTool}
+          onClick={() => onOpenTool?.("clarity", side, item)}
+        >
+          <IconSparkles size={15} />{t("清晰增强")}
+        </button>
+        <button
+          className="button secondary"
+          type="button"
+          disabled={!onOpenTool}
+          onClick={() => onOpenTool?.("single-frame", side, item)}
+        >
+          <IconPlayerPlay size={15} />{t("单图合成")}
+        </button>
+        <button
+          className="button secondary"
+          type="button"
+          disabled={!onOpenTool}
+          onClick={() => onOpenTool?.("ai-edit", side, item)}
+        >
+          <IconSparkles size={15} />{t("AI 图像编辑")}
+        </button>
+      </div>
     </div>
   );
 }
@@ -424,49 +777,122 @@ export function DatasetView({
   focusNonce,
   onFocusConsumed,
   onOpenCommand,
+  onOpenTool,
+  onOpenXSeg,
   onError,
   onNotice,
   editMasks = false,
   onSideChange,
+  onMaskDirtyChange,
 }) {
   const { t } = useI18n();
   const [assets, setAssets] = useState(null);
-  const [quarantine, setQuarantine] = useState([]);
-  const [selectedName, setSelectedName] = useState(null);
+  const [quarantine, setQuarantine] = useState(null);
+  const [datasetMode, setDatasetMode] = useState("workspace");
+  const [workspaceSelectedName, setWorkspaceSelectedName] = useState(null);
+  const [recoverySelectedKey, setRecoverySelectedKey] = useState(null);
+  const [workspaceOffset, setWorkspaceOffset] = useState(0);
+  const [recoveryOffset, setRecoveryOffset] = useState(0);
+  const [collectionRevision, setCollectionRevision] = useState(0);
   const [annotation, setAnnotation] = useState(null);
+  const [annotationError, setAnnotationError] = useState(null);
+  const [annotationLoading, setAnnotationLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [datasetAction, setDatasetAction] = useState(null);
   const [maskClipboard, setMaskClipboard] = useState([]);
   const [maskDirty, setMaskDirty] = useState(false);
+  const [thumbnailSizeIndex, setThumbnailSizeIndex] = useState(1);
+  const sideRef = useRef(side);
+  const collectionOffsetsRef = useRef({ workspace: 0, recovery: 0 });
+  const refreshRequestRef = useRef(0);
+  const annotationRequestRef = useRef(0);
+  sideRef.current = side;
   const handleMaskDirty = useCallback((value) => setMaskDirty(value), []);
 
-  const refresh = useCallback(async () => {
+  useEffect(() => {
+    if (editMasks) onMaskDirtyChange?.(maskDirty);
+  }, [editMasks, maskDirty, onMaskDirtyChange]);
+
+  useEffect(() => () => {
+    if (editMasks) onMaskDirtyChange?.(false);
+  }, [editMasks, onMaskDirtyChange]);
+
+  const resetAnnotation = useCallback(() => {
+    annotationRequestRef.current += 1;
+    setAnnotation(null);
+    setAnnotationError(null);
+    setAnnotationLoading(false);
+  }, []);
+
+  const refresh = useCallback(async ({
+    workspaceOffset: requestedWorkspaceOffset = collectionOffsetsRef.current.workspace,
+    recoveryOffset: requestedRecoveryOffset = collectionOffsetsRef.current.recovery,
+  } = {}) => {
+    const requestId = refreshRequestRef.current + 1;
+    refreshRequestRef.current = requestId;
     setLoading(true);
     try {
-      const [nextAssets, nextQuarantine] = await Promise.all([
-        runtimeApi.alignedAssets(side, { limit: 200 }),
-        runtimeApi.alignedQuarantine(side),
+      let [nextAssets, nextQuarantine] = await Promise.all([
+        runtimeApi.alignedAssets(side, { offset: requestedWorkspaceOffset, limit: datasetPageSize }),
+        editMasks
+          ? Promise.resolve(emptyDatasetCollection(side))
+          : runtimeApi.alignedQuarantine(side, { offset: requestedRecoveryOffset, limit: datasetPageSize }),
       ]);
+      if (nextAssets.total > 0 && nextAssets.items.length === 0 && nextAssets.offset > 0) {
+        const fallbackOffset = Math.floor((nextAssets.total - 1) / datasetPageSize) * datasetPageSize;
+        nextAssets = await runtimeApi.alignedAssets(side, { offset: fallbackOffset, limit: datasetPageSize });
+      }
+      if (nextQuarantine.total > 0 && nextQuarantine.items.length === 0 && nextQuarantine.offset > 0) {
+        const fallbackOffset = Math.floor((nextQuarantine.total - 1) / datasetPageSize) * datasetPageSize;
+        nextQuarantine = await runtimeApi.alignedQuarantine(side, { offset: fallbackOffset, limit: datasetPageSize });
+      }
+      if (requestId !== refreshRequestRef.current || sideRef.current !== side) return false;
+      resetAnnotation();
       setAssets(nextAssets);
       setQuarantine(nextQuarantine);
-      setSelectedName((current) => (
+      collectionOffsetsRef.current = {
+        workspace: nextAssets.offset,
+        recovery: nextQuarantine.offset,
+      };
+      setWorkspaceOffset(nextAssets.offset);
+      setRecoveryOffset(nextQuarantine.offset);
+      setCollectionRevision((current) => current + 1);
+      setWorkspaceSelectedName((current) => (
         current && nextAssets.items.some((item) => item.name === current)
           ? current
           : nextAssets.items[0]?.name ?? null
       ));
+      setRecoverySelectedKey((current) => (
+        current && nextQuarantine.items.some((item) => datasetAssetKey(item) === current)
+          ? current
+          : datasetAssetKey(nextQuarantine.items[0]) || null
+      ));
+      return { assets: nextAssets, quarantine: nextQuarantine };
     } catch (error) {
-      onError(error);
+      if (requestId === refreshRequestRef.current && sideRef.current === side) onError(error);
+      return false;
     } finally {
-      setLoading(false);
+      if (requestId === refreshRequestRef.current && sideRef.current === side) setLoading(false);
     }
-  }, [onError, side]);
+  }, [editMasks, onError, resetAnnotation, side]);
 
   useEffect(() => {
+    refreshRequestRef.current += 1;
+    collectionOffsetsRef.current = { workspace: 0, recovery: 0 };
     setAssets(null);
-    setSelectedName(null);
-    setAnnotation(null);
-    void refresh();
-  }, [refresh]);
+    setQuarantine(null);
+    setDatasetMode("workspace");
+    setWorkspaceSelectedName(null);
+    setRecoverySelectedKey(null);
+    setWorkspaceOffset(0);
+    setRecoveryOffset(0);
+    resetAnnotation();
+    void refresh({ workspaceOffset: 0, recoveryOffset: 0 });
+    return () => {
+      refreshRequestRef.current += 1;
+      annotationRequestRef.current += 1;
+    };
+  }, [refresh, resetAnnotation]);
 
   useEffect(() => {
     if (!focusItem || !focusNonce || !assets || assets.side !== side) return;
@@ -474,62 +900,166 @@ export function DatasetView({
       if (!current || current.items.some((item) => item.name === focusItem.name)) return current;
       return { ...current, items: [focusItem, ...current.items] };
     });
-    setSelectedName(focusItem.name);
+    setDatasetMode("workspace");
+    setWorkspaceSelectedName(focusItem.name);
+    resetAnnotation();
     onFocusConsumed?.();
-  }, [assets, focusItem, focusNonce, onFocusConsumed, side]);
+  }, [assets, focusItem, focusNonce, onFocusConsumed, resetAnnotation, side]);
+
+  const activeCollection = datasetMode === "recovery" ? quarantine : assets;
+  const activeItems = activeCollection?.items ?? [];
+  const activeOffset = datasetMode === "recovery" ? recoveryOffset : workspaceOffset;
+  const selectedKey = datasetMode === "recovery" ? recoverySelectedKey : workspaceSelectedName;
+  const selected = activeItems.find((item) => datasetAssetKey(item) === selectedKey) ?? null;
+  const selectedIndex = selected ? activeItems.findIndex((item) => datasetAssetKey(item) === selectedKey) : -1;
 
   useEffect(() => {
     if (
-      !selectedName
-      || !editMasks
-      || assets?.side !== side
-      || !assets.items.some((item) => item.name === selectedName)
+      !selected
+      || activeCollection?.side !== side
+      || !selected.hasDflMetadata
     ) {
       setAnnotation(null);
+      setAnnotationError(null);
+      setAnnotationLoading(false);
       return;
     }
     let cancelled = false;
+    const requestId = annotationRequestRef.current + 1;
+    annotationRequestRef.current = requestId;
     setAnnotation(null);
-    void runtimeApi.alignedAnnotation(side, selectedName)
+    setAnnotationError(null);
+    setAnnotationLoading(true);
+    const request = selected.token
+      ? runtimeApi.quarantinedAnnotation(side, selected.token, selected.name)
+      : runtimeApi.alignedAnnotation(side, selected.name);
+    void request
       .then((value) => {
-        if (!cancelled) setAnnotation(value);
+        if (!cancelled && requestId === annotationRequestRef.current) setAnnotation(value);
       })
-      .catch(onError);
+      .catch((error) => {
+        if (cancelled || requestId !== annotationRequestRef.current) return;
+        setAnnotationError(error);
+        onError(error);
+      })
+      .finally(() => {
+        if (!cancelled && requestId === annotationRequestRef.current) setAnnotationLoading(false);
+      });
     return () => {
       cancelled = true;
+      if (annotationRequestRef.current === requestId) annotationRequestRef.current += 1;
     };
-  }, [assets, editMasks, onError, selectedName, side]);
+  }, [activeCollection?.side, collectionRevision, datasetMode, onError, selected?.hasDflMetadata, selected?.name, selected?.token, side]);
 
-  const selected = assets?.items.find((item) => item.name === selectedName) ?? null;
-  const selectedIndex = selected ? assets.items.findIndex((item) => item.name === selected.name) : -1;
-  const confirmDiscardMask = () => !maskDirty || window.confirm(t("当前 XSeg 标注尚未保存，确定放弃修改并切换吗？"));
-  const selectAsset = (name) => {
+  const confirmDiscardMask = () => !maskDirty || window.confirm(t("当前 XSeg 标注尚未保存，确定放弃修改并继续吗？"));
+  const refreshDataset = async () => {
     if (!confirmDiscardMask()) return;
-    setSelectedName(name);
+    const result = await refresh();
+    if (result) setMaskDirty(false);
+  };
+  const selectAsset = (item) => {
+    if (!confirmDiscardMask()) return;
+    resetAnnotation();
+    if (datasetMode === "recovery") {
+      setRecoverySelectedKey(datasetAssetKey(item));
+    } else {
+      setWorkspaceSelectedName(item.name);
+    }
     setMaskDirty(false);
   };
-  const navigateAsset = (direction) => {
-    if (!assets?.items.length || !confirmDiscardMask()) return;
-    const nextIndex = Math.min(Math.max(selectedIndex + direction, 0), assets.items.length - 1);
-    setSelectedName(assets.items[nextIndex].name);
+  const navigateAsset = async (direction) => {
+    if (loading || !activeItems.length || selectedIndex < 0 || !confirmDiscardMask()) return;
+    const nextIndex = selectedIndex + direction;
+    if (nextIndex < 0 || nextIndex >= activeItems.length) {
+      if (datasetMode !== "workspace") return;
+      const hasAdjacentPage = direction < 0
+        ? workspaceOffset > 0
+        : workspaceOffset + activeItems.length < (assets?.total ?? 0);
+      if (!hasAdjacentPage) return;
+      const nextOffset = direction < 0
+        ? Math.max(0, workspaceOffset - datasetPageSize)
+        : workspaceOffset + datasetPageSize;
+      resetAnnotation();
+      setMaskDirty(false);
+      const result = await refresh({ workspaceOffset: nextOffset });
+      const nextItem = direction < 0 ? result?.assets?.items.at(-1) : result?.assets?.items[0];
+      if (nextItem && sideRef.current === side) setWorkspaceSelectedName(nextItem.name);
+      return;
+    }
+    resetAnnotation();
+    if (datasetMode === "recovery") {
+      setRecoverySelectedKey(datasetAssetKey(activeItems[nextIndex]));
+    } else {
+      setWorkspaceSelectedName(activeItems[nextIndex].name);
+    }
     setMaskDirty(false);
   };
   const loadPreviousAnnotation = async () => {
-    if (!assets?.items.length || selectedIndex <= 0) return null;
-    return runtimeApi.alignedAnnotation(side, assets.items[selectedIndex - 1].name);
+    if (!assets?.items.length || selectedIndex < 0) return null;
+    if (selectedIndex > 0) {
+      return runtimeApi.alignedAnnotation(side, assets.items[selectedIndex - 1].name);
+    }
+    if (workspaceOffset <= 0) return null;
+    const previousPage = await runtimeApi.alignedAssets(side, {
+      offset: workspaceOffset - 1,
+      limit: 1,
+    });
+    const previousItem = previousPage.items[0];
+    if (!previousItem?.hasDflMetadata) return null;
+    return runtimeApi.alignedAnnotation(side, previousItem.name);
   };
   const sideCommands = commands.filter((command) => (
     command.side === side
     && (command.category === "dataset" || command.category === "extract" || command.category === "sort")
   ));
 
+  const switchDatasetMode = (nextMode) => {
+    if (nextMode === datasetMode || !confirmDiscardMask()) return;
+    resetAnnotation();
+    setDatasetMode(nextMode);
+    if (nextMode === "recovery" && !recoverySelectedKey) {
+      setRecoverySelectedKey(datasetAssetKey(quarantine?.items[0]) || null);
+    }
+    if (nextMode === "workspace" && !workspaceSelectedName) {
+      setWorkspaceSelectedName(assets?.items[0]?.name ?? null);
+    }
+    setMaskDirty(false);
+  };
+
+  const changePage = (direction) => {
+    if (loading || !confirmDiscardMask()) return;
+    const nextOffset = Math.max(0, activeOffset + (direction * datasetPageSize));
+    if (nextOffset === activeOffset) return;
+    resetAnnotation();
+    setMaskDirty(false);
+    if (datasetMode === "recovery") {
+      setRecoverySelectedKey(null);
+      void refresh({ recoveryOffset: nextOffset });
+    } else {
+      setWorkspaceSelectedName(null);
+      void refresh({ workspaceOffset: nextOffset });
+    }
+  };
+
   const quarantineSelected = async () => {
-    if (!selected || !window.confirm(t("把 {name} 移入可恢复隔离区吗？", { name: selected.name }))) return;
+    if (
+      datasetMode !== "workspace"
+      || activeCollection?.side !== side
+      || !selected
+      || !window.confirm(t("把 {name} 移入可恢复隔离区吗？", { name: selected.name }))
+    ) return;
+    const actionSide = side;
+    const item = selected;
+    const nextWorkspaceOffset = activeItems.length === 1 && workspaceOffset > 0
+      ? Math.max(0, workspaceOffset - datasetPageSize)
+      : workspaceOffset;
     setDatasetAction("quarantine");
     try {
-      await runtimeApi.quarantineAligned(side, selected.name);
-      onNotice(t("{name} 已移入隔离区，可随时恢复", { name: selected.name }));
-      await refresh();
+      await runtimeApi.quarantineAligned(actionSide, item.name);
+      onNotice(t("{name} 已移入隔离区，可随时恢复", { name: item.name }));
+      if (sideRef.current === actionSide) {
+        await refresh({ workspaceOffset: nextWorkspaceOffset, recoveryOffset: 0 });
+      }
     } catch (error) {
       onError(error);
     } finally {
@@ -537,12 +1067,20 @@ export function DatasetView({
     }
   };
 
-  const restore = async (item) => {
+  const restoreSelected = async () => {
+    if (datasetMode !== "recovery" || activeCollection?.side !== side || !selected?.token) return;
+    const actionSide = side;
+    const item = selected;
+    const nextRecoveryOffset = activeItems.length === 1 && recoveryOffset > 0
+      ? Math.max(0, recoveryOffset - datasetPageSize)
+      : recoveryOffset;
     setDatasetAction(`restore:${item.token}`);
     try {
-      await runtimeApi.restoreAligned(side, item.token, item.name);
-      onNotice(t("{name} 已恢复到 {side} aligned", { name: item.name, side: side.toUpperCase() }));
-      await refresh();
+      await runtimeApi.restoreAligned(actionSide, item.token, item.name);
+      onNotice(t("{name} 已恢复到 {side} aligned", { name: item.name, side: actionSide.toUpperCase() }));
+      if (sideRef.current === actionSide) {
+        await refresh({ workspaceOffset, recoveryOffset: nextRecoveryOffset });
+      }
     } catch (error) {
       onError(error);
     } finally {
@@ -551,7 +1089,7 @@ export function DatasetView({
   };
 
   return (
-    <section className="dataset-view">
+    <section className={`dataset-view ${editMasks ? "is-mask-editor-view" : "is-browser-view"}`}>
       <header className="operation-header dataset-header">
         <div>
           <h2>{editMasks ? t("XSeg Web 遮罩编辑器") : t("{side} 数据集", { side: side.toUpperCase() })}</h2>
@@ -569,14 +1107,18 @@ export function DatasetView({
                   className={side === value ? "is-active" : ""}
                   key={value}
                   type="button"
-                  onClick={() => { if (confirmDiscardMask()) { setMaskDirty(false); onSideChange(value); } }}
+                  onClick={() => {
+                    if (value === side || !confirmDiscardMask()) return;
+                    setMaskDirty(false);
+                    onSideChange(value);
+                  }}
                 >
                   {value.toUpperCase()}
                 </button>
               ))}
             </div>
           )}
-          <button className="button secondary" type="button" onClick={() => void refresh()} disabled={loading}>
+          <button className="button secondary" type="button" onClick={() => void refreshDataset()} disabled={loading}>
             <IconRefresh size={15} />{loading ? t("扫描中") : t("刷新")}
           </button>
         </div>
@@ -587,6 +1129,7 @@ export function DatasetView({
           tone={editMasks ? "violet" : "green"}
           label={datasetAction === "quarantine" ? t("正在隔离样本…") : t("正在恢复样本…")}
           detail={t("完成后会重新扫描当前数据集")}
+          operationKey={`dataset:${side}:${datasetMode}:${datasetAction}`}
         />
       ) : loading ? (
         <LoadingProgress
@@ -594,36 +1137,101 @@ export function DatasetView({
           tone={editMasks ? "violet" : "green"}
           label={assets ? t("正在刷新 aligned 数据集…") : t("正在扫描 aligned 数据集…")}
           detail={t("正在读取样本与可恢复隔离区")}
+          operationKey={`dataset:${side}:${datasetMode}:scan`}
         />
       ) : null}
 
-      {!editMasks && sideCommands.length > 0 && (
-        <div className="dataset-command-strip">
-          {sideCommands.slice(0, 6).map((command) => (
-            <button type="button" key={command.id} onClick={() => onOpenCommand(command.id)}>
-              <IconPlayerPlay size={14} />{command.shortLabel}
+      {!editMasks && (
+        <div className="dataset-command-strip" role="toolbar" aria-label={t("数据集操作")}>
+          <div className="dataset-command-primary">
+            {datasetMode === "workspace" ? (
+              <>
+                {sideCommands.slice(0, 6).map((command) => (
+                  <button type="button" key={command.id} onClick={() => onOpenCommand(command.id)}>
+                    <IconPlayerPlay size={14} />{command.shortLabel}
+                  </button>
+                ))}
+                <span>{t("{count} 个数据集命令已接入", { count: sideCommands.length })}</span>
+              </>
+            ) : (
+              <div className="dataset-recovery-summary">
+                <IconShieldCheck size={17} />
+                <span>
+                  <strong>{t("恢复区")}</strong>
+                  <small>{t("隔离样本不会参与训练、合成或导出")}</small>
+                </span>
+              </div>
+            )}
+          </div>
+          <div className="dataset-command-context">
+            <button
+              className={`dataset-mode-toggle${datasetMode === "recovery" ? " is-recovery-active" : ""}`}
+              type="button"
+              aria-controls="dataset-browser-panel"
+              aria-label={datasetMode === "workspace" ? t("切换到恢复区") : t("切换到工作区")}
+              onClick={() => switchDatasetMode(datasetMode === "workspace" ? "recovery" : "workspace")}
+            >
+              {datasetMode === "workspace" ? <IconShieldCheck size={15} /> : <IconPhoto size={15} />}
+              {datasetMode === "workspace" ? t("恢复区") : t("工作区")}
+              {datasetMode === "workspace" && <span className="dataset-mode-count">{quarantine?.total ?? 0}</span>}
             </button>
-          ))}
-          <span>{t("{count} 个数据集命令已接入", { count: sideCommands.length })}</span>
+            <button
+              className={datasetMode === "workspace" ? "dataset-context-action is-danger" : "dataset-context-action is-restore"}
+              type="button"
+              onClick={() => void (datasetMode === "workspace" ? quarantineSelected() : restoreSelected())}
+              disabled={!selected || activeCollection?.side !== side || Boolean(datasetAction)}
+            >
+              {datasetMode === "workspace" ? <IconArchive size={15} /> : <IconRestore size={15} />}
+              {datasetMode === "workspace" ? t("隔离") : t("恢复")}
+            </button>
+          </div>
         </div>
       )}
 
-      <div className="dataset-layout">
+      <div id="dataset-browser-panel" className={`dataset-layout ${editMasks ? "is-mask-editor" : "is-browser"}`}>
         <aside className="asset-browser">
           <div className="asset-browser-heading">
             <div>
-              <IconPhoto size={18} />
-              <strong>{t("aligned 人脸")}</strong>
+              {datasetMode === "recovery" ? <IconShieldCheck size={18} /> : <IconPhoto size={18} />}
+              <strong>
+                {datasetMode === "recovery"
+                  ? t("恢复区人脸（数量：{count}）", { count: activeCollection?.total ?? 0 })
+                  : t("aligned 人脸（数量：{count}）", { count: activeCollection?.total ?? 0 })}
+              </strong>
             </div>
-            <span>{assets?.total ?? 0}</span>
+            <div className="asset-browser-heading-tools">
+              <div className="asset-thumbnail-density" role="group" aria-label={t("缩略图密度")}>
+                <button
+                  type="button"
+                  aria-label={t("减少每行数量，放大缩略图")}
+                  title={t("减少每行数量，放大缩略图")}
+                  disabled={thumbnailSizeIndex >= thumbnailMinWidths.length - 1}
+                  onClick={() => setThumbnailSizeIndex((current) => Math.min(current + 1, thumbnailMinWidths.length - 1))}
+                >
+                  <IconMinus size={14} stroke={2} />
+                </button>
+                <button
+                  type="button"
+                  aria-label={t("增加每行数量，缩小缩略图")}
+                  title={t("增加每行数量，缩小缩略图")}
+                  disabled={thumbnailSizeIndex <= 0}
+                  onClick={() => setThumbnailSizeIndex((current) => Math.max(current - 1, 0))}
+                >
+                  <IconPlus size={14} stroke={2} />
+                </button>
+              </div>
+            </div>
           </div>
-          <div className="asset-thumbnails">
-            {assets?.items.map((item) => (
+          <div
+            className="asset-thumbnails"
+            style={{ "--asset-thumbnail-min": `${thumbnailMinWidths[thumbnailSizeIndex]}px` }}
+          >
+            {activeItems.map((item) => (
               <button
-                className={`asset-thumbnail ${selectedName === item.name ? "is-active" : ""}`}
-                key={item.name}
+                className={`asset-thumbnail ${selectedKey === datasetAssetKey(item) ? "is-active" : ""}`}
+                key={datasetAssetKey(item)}
                 type="button"
-                onClick={() => selectAsset(item.name)}
+                onClick={() => selectAsset(item)}
                 title={item.sourceFilename ?? item.name}
               >
                 <img src={item.imageUrl} alt="" loading="lazy" decoding="async" />
@@ -635,87 +1243,86 @@ export function DatasetView({
                 </small>
               </button>
             ))}
-            {!loading && !assets?.items.length && (
-              <div className="asset-browser-empty">{t("尚未生成 aligned JPG。")}</div>
+            {!loading && !activeItems.length && (
+              <div className="asset-browser-empty">
+                {datasetMode === "recovery" ? t("恢复区暂无图片。") : t("尚未生成 aligned JPG。")}
+              </div>
             )}
           </div>
           <div className="asset-browser-pager">
-            <button type="button" disabled><IconArrowLeft size={15} />{t("上一页")}</button>
-            <span>{assets?.total ? `1–${assets.items.length} / ${assets.total}` : "0 / 0"}</span>
-            <button type="button" disabled={assets?.items.length >= assets?.total}>{t("下一页")}<IconArrowRight size={15} /></button>
+            <button
+              type="button"
+              disabled={loading || activeOffset <= 0}
+              onClick={() => changePage(-1)}
+            >
+              <IconArrowLeft size={15} />{t("上一页")}
+            </button>
+            <span>
+              {activeCollection?.total
+                ? `${activeOffset + 1}–${activeOffset + activeItems.length} / ${activeCollection.total}`
+                : "0 / 0"}
+            </span>
+            <button
+              type="button"
+              disabled={loading || activeOffset + activeItems.length >= (activeCollection?.total ?? 0)}
+              onClick={() => changePage(1)}
+            >
+              {t("下一页")}<IconArrowRight size={15} />
+            </button>
           </div>
         </aside>
 
-        <section className="asset-detail">
+        <section
+          className="asset-detail"
+          aria-label={selected ? t("{name} 图层预览", { name: selected.name }) : t("人脸图层预览")}
+        >
           {selected ? (
             <>
-              <header className="asset-detail-heading">
-                <div>
-                  <strong>{selected.name}</strong>
-                  <small>{selected.sourceFilename ?? t("没有源文件名元数据")}</small>
-                </div>
-                {!editMasks && (
-                  <button className="button danger" type="button" onClick={() => void quarantineSelected()} disabled={Boolean(datasetAction)}>
-                    <IconArchive size={15} />{t("隔离")}
-                  </button>
-                )}
-              </header>
               {editMasks ? (
-                <AnnotationCanvas
-                  side={side}
+                !selected.hasDflMetadata || annotationError ? (
+                  <div className="asset-detail-loading is-error" role="alert">
+                    <IconAlertTriangle size={24} />
+                    <strong>{t("无法读取 DFL 图层数据")}</strong>
+                    <span>{annotationError?.message ?? t("元数据无效")}</span>
+                  </div>
+                ) : (
+                  <AnnotationCanvas
+                    side={side}
                   item={selected}
                   annotation={annotation}
                   clipboard={maskClipboard}
+                  locked={loading}
                   onClipboardChange={setMaskClipboard}
-                  onNavigate={navigateAsset}
-                  onLoadPrevious={loadPreviousAnnotation}
-                  onDirtyChange={handleMaskDirty}
-                  onError={onError}
-                  onSaved={(result) => {
-                    onNotice(t("已写入 {count} 个多边形标注", { count: result.polygonCount }));
-                    void refresh();
-                  }}
-                />
+                    onNavigate={navigateAsset}
+                    onLoadPrevious={loadPreviousAnnotation}
+                    onDirtyChange={handleMaskDirty}
+                    onError={onError}
+                    onSaved={(result) => {
+                      onNotice(t("已写入 {count} 个多边形标注", { count: result.polygonCount }));
+                      void refresh();
+                    }}
+                  />
+                )
               ) : (
-                <div className="asset-inspector">
-                  <img src={selected.imageUrl} alt={t("{name} aligned 人脸", { name: selected.name })} decoding="async" />
-                  <dl>
-                    <div><dt>{t("DFL 元数据")}</dt><dd>{selected.hasDflMetadata ? t("有效") : t("无效")}</dd></div>
-                    <div><dt>{t("手绘多边形")}</dt><dd>{selected.polygonCount}</dd></div>
-                    <div><dt>{t("标注点")}</dt><dd>{selected.pointCount}</dd></div>
-                    <div><dt>{t("应用遮罩")}</dt><dd>{selected.hasAppliedMask ? t("已写入") : t("未写入")}</dd></div>
-                  </dl>
-                </div>
+                <AssetInspector
+                  annotation={annotation}
+                  annotationError={annotationError}
+                  annotationLoading={annotationLoading}
+                  item={selected}
+                  onOpenTool={onOpenTool}
+                  onOpenXSeg={onOpenXSeg}
+                  side={side}
+                />
               )}
             </>
           ) : (
-            <div className="asset-detail-empty"><IconPhoto size={28} />{t("选择一张 aligned 人脸查看。")}</div>
+            <div className="asset-detail-empty">
+              {datasetMode === "recovery" ? <IconShieldCheck size={28} /> : <IconPhoto size={28} />}
+              {datasetMode === "recovery" ? t("选择恢复区中的图片查看。") : t("选择一张 aligned 人脸查看。")}
+            </div>
           )}
         </section>
       </div>
-
-      {quarantine.length > 0 && (
-        <section className="quarantine-section">
-          <header>
-            <div>
-              <IconShieldCheck size={18} />
-              <h3>{t("可恢复隔离区")}</h3>
-            </div>
-            <span>{t("{count} 项", { count: quarantine.length })}</span>
-          </header>
-          <div className="quarantine-rows">
-            {quarantine.map((item) => (
-              <div key={`${item.token}-${item.name}`}>
-                <span>{item.name}</span>
-                <small>{item.token.slice(0, 8)} {item.token.slice(8, 14)}</small>
-                <button className="button secondary" type="button" onClick={() => void restore(item)} disabled={Boolean(datasetAction)}>
-                  <IconRestore size={15} />{t("恢复")}
-                </button>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
     </section>
   );
 }
@@ -801,16 +1408,17 @@ export function SettingsView({ health, jobs, onRetry, onError, onNotice }) {
         <span className="operation-count">{health?.loopbackOnly ? t("仅本机访问") : t("状态未知")}</span>
       </header>
       {!projects ? (
-        <LoadingProgress compact label={t("正在读取受管项目…")} detail={t("正在确认当前工作区与切换安全性")} />
+        <LoadingProgress compact label={t("正在读取受管项目…")} detail={t("正在确认当前工作区与切换安全性")} operationKey="settings-projects-load" />
       ) : projectBusy ? (
         <LoadingProgress
           compact
           tone={projectBusy === "activate" ? "amber" : "green"}
           label={projectBusy === "activate" ? t("正在切换项目并重启本地服务…") : t("正在创建受管项目…")}
           detail={projectBusy === "activate" ? t("当前页面会在服务恢复后自动刷新") : t("新项目只会写入受管工作区目录")}
+          operationKey={`settings-project:${projectBusy}`}
         />
       ) : retryBusy ? (
-        <LoadingProgress compact label={t("正在从历史记录创建安全副本…")} detail={retryBusy} />
+        <LoadingProgress compact label={t("正在从历史记录创建安全副本…")} detail={retryBusy} operationKey="settings-job-retry" />
       ) : null}
       <div className="settings-runtime">
         {["current", "legacy"].map((profile) => (

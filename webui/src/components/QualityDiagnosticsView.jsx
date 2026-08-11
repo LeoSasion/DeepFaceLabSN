@@ -386,7 +386,7 @@ export function QualityDiagnosticsView({
             <div><span>{t("新增流程 · 7")}</span><h2>{t("质量诊断")}</h2></div>
             <button className="button primary" type="button" onClick={handleEvaluate} disabled={!canEvaluate || evaluating}><IconCamera size={15}/>{t(evaluating ? "正在生成…" : "生成评估快照")}</button>
           </header>
-          {evaluating ? <LoadingProgress compact label={t("正在生成只读评估快照…")} detail={t("Trainer 完成后会自动加入时间线")} /> : null}
+          {evaluating ? <LoadingProgress compact label={t("正在生成只读评估快照…")} detail={t("Trainer 完成后会自动加入时间线")} operationKey="diagnostics-evaluate" /> : null}
           <DiagnosticsState
             title={t("至少需要两个可比较快照")}
             detail={t("当前已有 {count} 个。训练中生成基线与当前快照后，才会计算姿势回归。", { count: snapshots.length })}
@@ -429,9 +429,9 @@ export function QualityDiagnosticsView({
         </button>
       </header>
       {evaluating ? (
-        <LoadingProgress compact label={t("正在生成只读评估快照…")} detail={t("当前诊断结果保持可见")}/>
+        <LoadingProgress compact label={t("正在生成只读评估快照…")} detail={t("当前诊断结果保持可见")} operationKey="diagnostics-evaluate"/>
       ) : loading ? (
-        <LoadingProgress compact label={t("正在刷新评估快照…")} detail={t("当前诊断结果保持可见")}/>
+        <LoadingProgress compact label={t("正在刷新评估快照…")} detail={t("当前诊断结果保持可见")} operationKey="diagnostics-refresh"/>
       ) : null}
 
       <div className="diagnostics-timeline" aria-label={t("评估快照时间线") }>

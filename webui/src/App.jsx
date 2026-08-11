@@ -12,7 +12,7 @@ import { WorkbenchGrid } from "./components/TrainingView.jsx";
 import { QualityDiagnosticsView } from "./components/QualityDiagnosticsView.jsx";
 import { ToolLabView } from "./components/ToolLabView.jsx";
 import { WorkspaceView } from "./components/WorkspaceView.jsx";
-import { LoadingProgress } from "./components/ProgressFeedback.jsx";
+import { LoadingProgress, ProgressHud } from "./components/ProgressFeedback.jsx";
 import {
   navigationWorkflowStages,
   pipelineTasks,
@@ -50,12 +50,25 @@ export function App() {
   const [stopTargetJobId, setStopTargetJobId] = useState(null);
   const [taskType, setTaskType] = useState("train.saehd");
   const [xsegSide, setXsegSide] = useState("dst");
+  const [xsegDirty, setXsegDirty] = useState(false);
   const [workspaceSnapshot, setWorkspaceSnapshot] = useState(null);
   const [datasetFocus, setDatasetFocus] = useState(null);
+  const [xsegFocus, setXsegFocus] = useState(null);
+  const [toolFocus, setToolFocus] = useState(null);
   const [poseAtlasFocus, setPoseAtlasFocus] = useState(null);
   const [diagnosticSnapshotCount, setDiagnosticSnapshotCount] = useState(0);
   const [toast, setToast] = useState({ message: "", tone: "success" });
   const [pendingAction, setPendingAction] = useState(null);
+
+  useEffect(() => {
+    if (!xsegDirty) return undefined;
+    const handleBeforeUnload = (event) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [xsegDirty]);
 
   const commands = useMemo(
     () => runtime.commands.map((command) => localizeCommand(command)),
@@ -165,27 +178,36 @@ export function App() {
     }
     const commandIds = pipelineCommandMap[task.id] ?? [];
     const matchingJobs = jobs.filter((candidate) => commandIds.includes(candidate.commandId));
-    const job = matchingJobs.find((candidate) => activeStates.has(candidate.state)) ?? matchingJobs[0];
+    const latestJobs = commandIds
+      .map((commandId) => matchingJobs.find((candidate) => candidate.commandId === commandId))
+      .filter(Boolean);
+    const latestStates = latestJobs.map((candidate) => candidate.state);
+    const job = latestJobs.find((candidate) => activeStates.has(candidate.state)) ?? latestJobs[0];
     if (!job) return task;
     const requiredStates = commandIds.map((commandId) => (
-      matchingJobs.find((candidate) => candidate.commandId === commandId)?.state
+      latestJobs.find((candidate) => candidate.commandId === commandId)?.state
     ));
-    const isActive = matchingJobs.some((candidate) => activeStates.has(candidate.state));
+    const isActive = latestStates.some((state) => activeStates.has(state));
     const isAlternativeGroup = task.id === "export";
     const isComplete = isAlternativeGroup
-      ? matchingJobs.some((candidate) => candidate.state === "succeeded")
+      ? latestStates.some((state) => state === "succeeded")
       : requiredStates.every((state) => state === "succeeded");
-    const hasPartialSuccess = matchingJobs.some((candidate) => candidate.state === "succeeded");
+    const hasPartialSuccess = latestStates.some((state) => state === "succeeded");
+    const failedJob = latestJobs.find((candidate) => ["failed", "cancelled", "orphaned"].includes(candidate.state));
     return {
       ...task,
-      state: isActive ? "active" : isComplete ? "done" : "waiting",
+      state: isActive ? "active" : isComplete ? "done" : failedJob ? "failed" : "waiting",
       time: isActive
         ? job.state === "waiting_input" ? t("等待输入") : t("运行中")
         : isComplete
           ? t("已完成")
+          : failedJob?.state === "orphaned"
+            ? t("连接已丢失")
+            : failedJob
+              ? t("上次失败")
           : hasPartialSuccess
             ? t("部分完成")
-            : job.state === "orphaned" ? t("连接已丢失") : t("上次失败"),
+            : t("未运行"),
     };
   }), [diagnosticSnapshotCount, jobs, t]);
 
@@ -194,12 +216,15 @@ export function App() {
       const job = jobs.find((candidate) => candidate.commandId === commandId);
       if (!job) return "waiting";
       if (activeStates.has(job.state)) return "active";
-      return job.state === "succeeded" ? "done" : "waiting";
+      if (job.state === "succeeded") return "done";
+      if (["failed", "cancelled", "orphaned"].includes(job.state)) return "failed";
+      return "waiting";
     };
     const combinedStateFor = (commandIds) => {
       const states = commandIds.map(stateFor);
       if (states.includes("active")) return "active";
       if (states.every((state) => state === "done")) return "done";
+      if (states.includes("failed")) return "failed";
       return "waiting";
     };
     return {
@@ -214,11 +239,21 @@ export function App() {
         ? "done"
         : ["encode.mp4", "encode.mp4_lossless"].some((commandId) => stateFor(commandId) === "active")
           ? "active"
-          : "waiting",
+          : ["encode.mp4", "encode.mp4_lossless"].some((commandId) => stateFor(commandId) === "failed")
+            ? "failed"
+            : "waiting",
     };
   }, [diagnosticSnapshotCount, jobs]);
 
+  const confirmDiscardXSeg = useCallback(() => {
+    if (!xsegDirty) return true;
+    const confirmed = window.confirm(t("当前 XSeg 标注尚未保存，确定放弃修改并继续吗？"));
+    if (confirmed) setXsegDirty(false);
+    return confirmed;
+  }, [t, xsegDirty]);
+
   const handleNavigate = useCallback((id, label) => {
+    if (id !== activeNav && !confirmDiscardXSeg()) return;
     setActiveNav(id);
     const nextStage = navigationWorkflowStages[id];
     if (nextStage) setSelectedStage(nextStage);
@@ -227,16 +262,17 @@ export function App() {
     }
     setConsoleCollapsed(id !== "overview");
     showToast(t("已切换到「{label}」工作区", { label }));
-  }, [showToast, t]);
+  }, [activeNav, confirmDiscardXSeg, showToast, t]);
 
   const handleStageSelect = useCallback((stage) => {
     const destination = workflowStageDestinations[stage.id];
+    if (destination?.nav && destination.nav !== activeNav && !confirmDiscardXSeg()) return;
     setSelectedStage(stage.id);
     if (destination?.nav) setActiveNav(destination.nav);
     if (destination?.task) setActiveTask(destination.task);
     setConsoleCollapsed(destination?.nav !== "overview");
     showToast(t("已定位到「{label}」阶段", { label: stage.label }));
-  }, [showToast, t]);
+  }, [activeNav, confirmDiscardXSeg, showToast, t]);
 
   const handleTaskSelect = useCallback((task) => {
     setActiveTask(task.id);
@@ -292,6 +328,37 @@ export function App() {
       : t("已打开 {side} 数据集", { side: side.toUpperCase() }));
   }, [showToast, t]);
   const consumeDatasetFocus = useCallback(() => setDatasetFocus(null), []);
+
+  const openXSegSample = useCallback((side, sample) => {
+    if (!sample) return;
+    setXsegSide(side);
+    setXsegFocus({ side, sample, nonce: Date.now() });
+    setActiveNav("xseg");
+    setSelectedStage("mask");
+    setActiveTask("xseg");
+    setConsoleCollapsed(true);
+    showToast(t("已打开 {side} 的 XSeg 编辑：{name}", {
+      side: side.toUpperCase(),
+      name: sample.name,
+    }));
+  }, [showToast, t]);
+  const consumeXSegFocus = useCallback(() => setXsegFocus(null), []);
+
+  const openDatasetImageTool = useCallback((toolId, side, sample) => {
+    if (!sample) return;
+    const toolLabel = {
+      clarity: t("清晰增强"),
+      "single-frame": t("单图合成"),
+      "ai-edit": t("AI 图像编辑"),
+    }[toolId] ?? t("图像工具");
+    setToolFocus({ toolId, side, sample, nonce: Date.now() });
+    setActiveNav("tools");
+    setConsoleCollapsed(true);
+    showToast(t("已将 {name} 带入图像工具：{tool}", {
+      name: sample.name,
+      tool: toolLabel,
+    }));
+  }, [showToast, t]);
 
   const handleArchivedJobs = useCallback((result) => {
     void runtime.refresh();
@@ -368,11 +435,11 @@ export function App() {
     ).catch(() => {});
   }, [runAction, runtime, stopTargetJobId, t]);
 
-  const handleCopyPath = useCallback(async (value) => {
+  const handleCopyText = useCallback(async (value, successMessage = t("内容已复制")) => {
     if (!value) return;
     try {
       await navigator.clipboard.writeText(value);
-      showToast(t("任务目录已复制"));
+      showToast(successMessage);
     } catch {
       showToast(value, "warning");
     }
@@ -433,6 +500,8 @@ export function App() {
         focusItem={datasetFocus?.side === activeNav ? datasetFocus.sample : null}
         focusNonce={datasetFocus?.side === activeNav ? datasetFocus.nonce : null}
         onFocusConsumed={consumeDatasetFocus}
+        onOpenXSeg={openXSegSample}
+        onOpenTool={openDatasetImageTool}
         onOpenCommand={openCommand}
         onError={showError}
         onNotice={showToast}
@@ -444,7 +513,11 @@ export function App() {
         side={xsegSide}
         commands={commands}
         editMasks
+        focusItem={xsegFocus?.side === xsegSide ? xsegFocus.sample : null}
+        focusNonce={xsegFocus?.side === xsegSide ? xsegFocus.nonce : null}
+        onFocusConsumed={consumeXSegFocus}
         onSideChange={setXsegSide}
+        onMaskDirtyChange={setXsegDirty}
         onOpenCommand={openCommand}
         onError={showError}
         onNotice={showToast}
@@ -505,6 +578,7 @@ export function App() {
         onNotice={showToast}
         onNavigateDataset={openDatasetSample}
         poseFocus={poseAtlasFocus}
+        toolFocus={toolFocus}
       />
     );
   } else if (activeNav === "settings") {
@@ -533,6 +607,7 @@ export function App() {
           etaSeconds: trainingMetric?.etaSeconds,
           targetIterations: trainingMetric?.targetIterations,
           startedAt: trainingJob?.startedAt,
+          operationKey: trainingJob?.id ? `job:${trainingJob.id}` : "job:training-saehd",
           onSave: () => void controlTraining("save", t("保存请求已送入 Trainer")),
           onBackup: () => void controlTraining("backup", t("备份请求已送入 Trainer")),
           onRefresh: () => void controlTraining("preview", t("预览刷新请求已送入 Trainer")),
@@ -551,7 +626,7 @@ export function App() {
           trainingJob,
           telemetry: runtime.telemetry,
           lossHistory: trainingHistory,
-          onOpenModels: () => handleCopyPath(`${workspacePath}\\model`),
+          onOpenModels: () => handleCopyText(`${workspacePath}\\model`, t("模型目录已复制")),
         }}
       />
     );
@@ -593,33 +668,40 @@ export function App() {
           />
         )}
         {mainContent}
-        <ConsoleDock
-          collapsed={consoleCollapsed}
-          onToggle={() => setConsoleCollapsed((current) => !current)}
-          serviceState={runtime.serviceState}
-          socketState={runtime.socketState}
-          commands={commands}
-          jobs={jobs}
-          selectedJob={selectedJob}
-          events={runtime.selectedEvents}
-          onSelectJob={runtime.selectJob}
-          onStart={handleStartJob}
-          onOpenNewTask={() => setNewTaskOpen(true)}
-          onRetry={() => void runtime.refresh()}
-          onInput={runtime.sendInput}
-          onResize={runtime.resize}
-          onControl={runtime.control}
-          onSafeStop={() => selectedJob?.id && setStopTargetJobId(selectedJob.id)}
-          onCopyPath={handleCopyPath}
-          onError={showError}
-          onNotice={showToast}
-        />
+        <div className="console-dock-slot">
+          <div className="global-feedback-anchor">
+            <div className="global-feedback-stack">
+              <Toast
+                message={toast.message}
+                tone={toast.tone}
+                onDismiss={() => setToast({ message: "", tone: "success" })}
+              />
+              <ProgressHud />
+            </div>
+          </div>
+          <ConsoleDock
+            collapsed={consoleCollapsed}
+            onToggle={() => setConsoleCollapsed((current) => !current)}
+            serviceState={runtime.serviceState}
+            socketState={runtime.socketState}
+            commands={commands}
+            jobs={jobs}
+            selectedJob={selectedJob}
+            events={runtime.selectedEvents}
+            onSelectJob={runtime.selectJob}
+            onStart={handleStartJob}
+            onOpenNewTask={() => setNewTaskOpen(true)}
+            onRetry={() => void runtime.refresh()}
+            onInput={runtime.sendInput}
+            onResize={runtime.resize}
+            onControl={runtime.control}
+            onSafeStop={() => selectedJob?.id && setStopTargetJobId(selectedJob.id)}
+            onCopyText={handleCopyText}
+            onError={showError}
+            onNotice={showToast}
+          />
+        </div>
       </main>
-      <Toast
-        message={toast.message}
-        tone={toast.tone}
-        onDismiss={() => setToast({ message: "", tone: "success" })}
-      />
       <NewTaskDialog
         open={newTaskOpen}
         taskType={taskType}

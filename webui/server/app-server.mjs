@@ -11,6 +11,7 @@ import {
   buildAlignedSimilarityGroups,
   inspectAlignedPack,
   inspectAlignedAnnotation,
+  inspectQuarantinedAnnotation,
   inspectExtractionCoverage,
   listAlignedAssets,
   listAlignedRepairBackups,
@@ -22,6 +23,8 @@ import {
   restoreAlignedImage,
   saveAlignedAnnotation,
   streamAlignedImage,
+  streamAlignedPoster,
+  streamQuarantinedImage,
 } from "./asset-manager.mjs";
 import { listCommands, prepareCommand } from "./command-registry.mjs";
 import { describeEnvironment } from "./environment.mjs";
@@ -622,6 +625,10 @@ export class RuntimeServer {
         }),
       });
     }
+    const alignedPosterMatch = url.pathname.match(/^\/api\/assets\/(src|dst)\/poster$/);
+    if (request.method === "GET" && alignedPosterMatch) {
+      return streamAlignedPoster(response, alignedPosterMatch[1]);
+    }
     const poseAtlasMatch = url.pathname.match(/^\/api\/assets\/(src|dst)\/pose-atlas$/);
     if (request.method === "GET" && poseAtlasMatch) {
       return sendJson(response, 200, {
@@ -715,8 +722,35 @@ export class RuntimeServer {
     if (request.method === "GET" && quarantineListMatch) {
       return sendJson(response, 200, {
         ok: true,
-        data: await listAlignedQuarantine(quarantineListMatch[1]),
+        data: await listAlignedQuarantine(quarantineListMatch[1], {
+          offset: url.searchParams.get("offset"),
+          limit: url.searchParams.get("limit"),
+        }),
       });
+    }
+    const quarantinedAnnotationMatch = url.pathname.match(
+      /^\/api\/assets\/(src|dst)\/quarantine\/([0-9]{14}-[a-f0-9]{10})\/([^/]+)\/annotation$/,
+    );
+    if (request.method === "GET" && quarantinedAnnotationMatch) {
+      return sendJson(response, 200, {
+        ok: true,
+        data: await inspectQuarantinedAnnotation(
+          quarantinedAnnotationMatch[1],
+          quarantinedAnnotationMatch[2],
+          quarantinedAnnotationMatch[3],
+        ),
+      });
+    }
+    const quarantinedImageMatch = url.pathname.match(
+      /^\/api\/assets\/(src|dst)\/quarantine\/([0-9]{14}-[a-f0-9]{10})\/([^/]+)$/,
+    );
+    if (request.method === "GET" && quarantinedImageMatch) {
+      return streamQuarantinedImage(
+        response,
+        quarantinedImageMatch[1],
+        quarantinedImageMatch[2],
+        quarantinedImageMatch[3],
+      );
     }
     const quarantineImageMatch = url.pathname.match(
       /^\/api\/assets\/(src|dst)\/aligned\/([^/]+)\/quarantine$/,

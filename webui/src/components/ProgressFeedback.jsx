@@ -1,11 +1,31 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { IconActivityHeartbeat, IconChevronRight } from "@tabler/icons-react";
 import { useI18n } from "../i18n.jsx";
+import {
+  createProgressStore,
+  deriveProgressValue,
+  selectVisibleProgressTasks,
+} from "../progress-store.js";
 
 const HISTORY_STORAGE_KEY = "dfl-webui-progress-history-v1";
 const MAX_HISTORY_KEYS = 48;
 const MAX_SAMPLES_PER_KEY = 7;
 const MIN_RECORDED_DURATION_MS = 1000;
 const MAX_RECORDED_DURATION_MS = 6 * 60 * 60 * 1000;
+const EMPTY_PROGRESS_SNAPSHOT = [];
+const ProgressFeedbackContext = createContext(null);
+
+const subscribeToNothing = () => () => {};
+const getEmptyProgressSnapshot = () => EMPTY_PROGRESS_SNAPSHOT;
 
 function clampProgress(value) {
   return Math.max(0, Math.min(100, Number(value) || 0));
@@ -103,6 +123,129 @@ function useProgressClock(historyKey, startedAt) {
   };
 }
 
+function normalizeDomId(value) {
+  return String(value).replace(/[^a-zA-Z0-9_-]/g, "");
+}
+
+export function ProgressFeedbackProvider({ children }) {
+  const storeRef = useRef(null);
+  if (!storeRef.current) storeRef.current = createProgressStore();
+
+  return (
+    <ProgressFeedbackContext.Provider value={storeRef.current}>
+      {children}
+    </ProgressFeedbackContext.Provider>
+  );
+}
+
+function ProgressHudCard({ entry, compact = false }) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
+  const labelId = `progress-hud-label-${normalizeDomId(entry.id)}`;
+  const determinate = Number.isFinite(entry.progress);
+  const expandable = Boolean(entry.detail || entry.countText);
+  const metaText = [entry.countText, entry.timingText].filter(Boolean).join(" · ");
+  const accessibleValueText = [
+    determinate ? `${Math.round(entry.progress)}%` : t("进行中"),
+    entry.countText,
+    entry.timingText,
+  ].filter(Boolean).join(" · ");
+
+  return (
+    <article
+      className={`progress-hud-card is-${entry.tone}${compact ? " is-compact" : ""}${expanded ? " is-expanded" : ""}${entry.phase === "leaving" ? " is-leaving" : ""}`}
+      aria-busy={entry.phase !== "leaving"}
+      aria-labelledby={labelId}
+    >
+      <span className="visually-hidden" role="status" aria-live="polite">
+        {[entry.label, entry.detail].filter(Boolean).join("。")}
+      </span>
+      <div className="progress-hud-heading">
+        <span className="progress-hud-icon" aria-hidden="true">
+          <IconActivityHeartbeat size={19} stroke={1.9} />
+        </span>
+        <div className="progress-hud-copy">
+          <strong id={labelId} title={entry.label}>{entry.label}</strong>
+          {entry.detail ? <span title={entry.detail}>{entry.detail}</span> : null}
+        </div>
+        <b className={determinate ? "is-value" : "is-state"}>
+          {determinate ? `${Math.round(entry.progress)}%` : t("进行中")}
+        </b>
+        {expandable ? (
+          <button
+            className="progress-hud-toggle"
+            type="button"
+            aria-expanded={expanded}
+            aria-label={t(expanded ? "收起进度详情" : "展开进度详情")}
+            onClick={() => setExpanded((current) => !current)}
+          >
+            <IconChevronRight size={18} stroke={1.8} />
+          </button>
+        ) : <span className="progress-hud-toggle-placeholder" aria-hidden="true" />}
+      </div>
+      <div
+        className={`progress-hud-track${determinate ? " is-determinate" : " is-indeterminate"}`}
+        role="progressbar"
+        aria-label={entry.label}
+        aria-valuemin="0"
+        aria-valuemax="100"
+        {...(determinate
+          ? {
+              "aria-valuenow": Math.round(entry.progress),
+              "aria-valuetext": accessibleValueText,
+            }
+          : { "aria-valuetext": accessibleValueText })}
+      >
+        <span style={determinate ? { width: `${entry.progress}%` } : undefined} />
+      </div>
+      {metaText ? (
+        <div className="progress-hud-footer" aria-hidden="true">
+          <span>{entry.countText}</span>
+          <small>{entry.timingText}</small>
+        </div>
+      ) : null}
+      {expanded && entry.detail ? (
+        <p className="progress-hud-detail">{entry.detail}</p>
+      ) : null}
+    </article>
+  );
+}
+
+export function ProgressHud({ maximum = 3 }) {
+  const { t } = useI18n();
+  const store = useContext(ProgressFeedbackContext);
+  const snapshot = useSyncExternalStore(
+    store?.subscribe ?? subscribeToNothing,
+    store?.getSnapshot ?? getEmptyProgressSnapshot,
+    store?.getServerSnapshot ?? getEmptyProgressSnapshot,
+  );
+  const { tasks, overflow } = useMemo(
+    () => selectVisibleProgressTasks(snapshot, maximum),
+    [maximum, snapshot],
+  );
+
+  if (!store || (!tasks.length && !overflow)) return null;
+
+  return (
+    <section className="progress-hud" aria-label={t("后台任务进度")}>
+      <div className="progress-hud-list">
+        {tasks.map((entry, index) => (
+          <ProgressHudCard
+            key={entry.id}
+            entry={entry}
+            compact={tasks.length > 1 && index < tasks.length - 1}
+          />
+        ))}
+      </div>
+      {overflow ? (
+        <div className="progress-hud-overflow" role="status">
+          {t("另有 {count} 项后台任务", { count: overflow })}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 export function LoadingProgress({
   label,
   detail,
@@ -115,12 +258,18 @@ export function LoadingProgress({
   rememberDuration = true,
   tone = "green",
   compact = false,
+  inline = false,
   className = "",
+  showDelayMs,
 }) {
   const { language, t } = useI18n();
+  const store = useContext(ProgressFeedbackContext);
+  const registrationStore = inline ? null : store;
   const labelId = useId();
-  const determinate = Number.isFinite(value);
-  const progress = determinate ? clampProgress(value) : null;
+  const registrationId = useMemo(() => `progress-${normalizeDomId(labelId)}`, [labelId]);
+  const derivedProgress = deriveProgressValue(value, current, total);
+  const determinate = derivedProgress != null;
+  const progress = determinate ? clampProgress(derivedProgress) : null;
   const percent = determinate ? `${Math.round(progress)}%` : null;
   const historyKey = useMemo(
     () => rememberDuration ? normalizeHistoryKey(operationKey ?? label) : null,
@@ -146,7 +295,31 @@ export function LoadingProgress({
     ? `${Number(current).toLocaleString(language === "zh" ? "zh-CN" : "en-US")} / ${Number(total).toLocaleString(language === "zh" ? "zh-CN" : "en-US")}`
     : null;
   const supportText = [detail, countText].filter(Boolean).join(" · ");
-  const ariaValueText = [percent, measuredEta != null ? timingText : null].filter(Boolean).join(" · ");
+  const ariaValueText = [percent ?? t("进行中"), timingText].filter(Boolean).join(" · ");
+  const entry = useMemo(() => ({
+    label,
+    detail,
+    progress,
+    countText,
+    timingText,
+    tone,
+    operationKey,
+    showDelayMs,
+  }), [countText, detail, label, operationKey, progress, showDelayMs, timingText, tone]);
+  const entryRef = useRef(entry);
+  entryRef.current = entry;
+
+  useEffect(() => {
+    if (!registrationStore) return undefined;
+    registrationStore.register(registrationId, entryRef.current);
+    return () => registrationStore.unregister(registrationId);
+  }, [registrationId, registrationStore]);
+
+  useEffect(() => {
+    if (registrationStore) registrationStore.update(registrationId, entry);
+  }, [entry, registrationId, registrationStore]);
+
+  if (registrationStore) return null;
 
   return (
     <div
@@ -169,7 +342,9 @@ export function LoadingProgress({
         role="progressbar"
         aria-valuemin="0"
         aria-valuemax="100"
-        {...(determinate ? { "aria-valuenow": Math.round(progress), "aria-valuetext": ariaValueText } : {})}
+        {...(determinate
+          ? { "aria-valuenow": Math.round(progress), "aria-valuetext": ariaValueText }
+          : { "aria-valuetext": ariaValueText })}
       >
         <span style={determinate ? { width: `${progress}%` } : undefined} />
       </div>

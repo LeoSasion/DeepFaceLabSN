@@ -66,6 +66,7 @@ function MaterialSlot({ side, material, busy, progress, onImport }) {
             muted
             playsInline
             preload="metadata"
+            poster={`/api/assets/${side}/poster`}
             src={`/api/workspace/materials/${side}`}
             aria-label={t("{side} 素材预览", { side: side.toUpperCase() })}
           />
@@ -98,8 +99,11 @@ function MaterialSlot({ side, material, busy, progress, onImport }) {
           compact
           className="material-upload-progress"
           label={t("正在上传 {side} 视频", { side: side.toUpperCase() })}
-          detail={progress >= 100 ? t("上传完成，正在校验并登记素材") : t("按文件真实传输量计算")}
-          value={progress < 100 ? progress : undefined}
+          detail={progress?.percent >= 100 ? t("上传完成，正在校验并登记素材") : t("按文件真实传输量计算")}
+          value={progress?.percent < 100 ? progress?.percent : undefined}
+          current={progress?.loaded}
+          total={progress?.total}
+          operationKey={`material-upload:${side}`}
         />
       ) : null}
     </section>
@@ -146,11 +150,11 @@ export function WorkspaceView({ serviceOnline, onError, onArchived }) {
       t("确定更换 {side} 视频吗？旧视频会移入可恢复归档。", { side: side.toUpperCase() }),
     )) return;
     setImporting(side);
-    setImportProgress(0);
+    setImportProgress({ loaded: 0, total: file.size, percent: 0 });
     try {
       await runtimeApi.importVideo(side, file, {
         replace: replacing,
-        onProgress: ({ percent }) => setImportProgress(Number.isFinite(percent) ? percent : null),
+        onProgress: ({ loaded, total, percent }) => setImportProgress({ loaded, total, percent }),
       });
       await refresh();
     } catch (error) {
@@ -250,6 +254,7 @@ export function WorkspaceView({ serviceOnline, onError, onArchived }) {
           className="workspace-refresh-progress"
           label={t("正在刷新工作区清单…")}
           detail={t("现有内容保持可见")}
+          operationKey="workspace-refresh"
         />
       ) : null}
 
@@ -336,7 +341,7 @@ export function WorkspaceView({ serviceOnline, onError, onArchived }) {
           </button>
         </div>
         {archiving ? (
-          <LoadingProgress compact label={t("正在归档已结束任务…")} detail={t("素材、模型与输出不会被删除")} />
+          <LoadingProgress compact label={t("正在归档已结束任务…")} detail={t("素材、模型与输出不会被删除")} operationKey="workspace-archive-jobs" />
         ) : null}
       </section>
     </section>

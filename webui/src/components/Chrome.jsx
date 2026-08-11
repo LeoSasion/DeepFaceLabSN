@@ -25,7 +25,7 @@ import { useI18n } from "../i18n.jsx";
 const DESKTOP_BREAKPOINT = 1020;
 const DESKTOP_DESIGN_WIDTH = 1440;
 const DESKTOP_DESIGN_HEIGHT = 900;
-const MINIMUM_DESKTOP_SCALE = 0.78;
+const MINIMUM_DESKTOP_SCALE = 1;
 const MAXIMUM_DESKTOP_SCALE = 1.15;
 
 function readDesktopUiScale() {
@@ -189,28 +189,30 @@ export function WorkflowBar({ selectedStage, stageStates = {}, onSelectStage }) 
     <nav className="workflow-bar" aria-label={t("项目流程")}>
       {workflowStages.map((stage, index) => {
         const actualState = stageStates[stage.id] ?? stage.state;
-        const state = selectedStage === stage.id ? "active" : actualState;
+        const selected = selectedStage === stage.id;
+        const stateLabel = actualState === "done"
+          ? t("完成")
+          : actualState === "active"
+            ? t("进行中")
+            : actualState === "failed"
+              ? t("失败")
+              : t("未运行");
         return (
           <div className="workflow-segment" key={stage.id}>
             <button
-              className={`workflow-step is-${state}`}
+              className={`workflow-step is-${actualState} ${selected ? "is-current" : ""}`}
               type="button"
               onClick={() => onSelectStage({ ...stage, label: t(stage.label) })}
-              aria-current={state === "active" ? "step" : undefined}
+              aria-current={selected ? "step" : undefined}
+              title={`${index + 1}. ${t(stage.label)} · ${stateLabel}`}
             >
               <span className="stage-number">
-                {actualState === "done" && selectedStage !== stage.id ? <IconCheck size={14} stroke={2.6} /> : index + 1}
+                {actualState === "done" ? <IconCheck size={14} stroke={2.6} /> : index + 1}
               </span>
               <span className="stage-copy">
                 <strong>{t(stage.label)}</strong>
                 <small>
-                  {selectedStage === stage.id
-                    ? t("当前视图")
-                    : actualState === "done"
-                    ? t("完成")
-                    : actualState === "active"
-                      ? t("进行中")
-                      : t("未运行")}
+                  {selected ? `${t("当前视图")} · ${stateLabel}` : stateLabel}
                 </small>
               </span>
             </button>

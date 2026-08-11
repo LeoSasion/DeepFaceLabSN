@@ -490,7 +490,7 @@ export function SegmentTimelinePanel({ side, refreshVersion, onError, onNotice, 
         />
       ) : null}
       <section className="segment-video-column">
-        <video ref={videoRef} controls preload="metadata" src={timeline.material.url} onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} />
+        <video ref={videoRef} controls preload="metadata" poster={`/api/assets/${side}/poster`} src={timeline.material.url} onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} />
         <div className="scene-timeline" aria-label={t("场景时间线") }>
           <div className="scene-track">
             {timeline.scenes.map((scene) => <button key={scene.id} type="button" title={`${scene.id} ${formatTime(scene.start)}–${formatTime(scene.end)}`} style={{ left: `${scene.start / Math.max(duration, 1) * 100}%`, width: `${(scene.end - scene.start) / Math.max(duration, 1) * 100}%` }} onClick={() => seek(scene.start)} />)}

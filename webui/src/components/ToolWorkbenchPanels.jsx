@@ -471,7 +471,7 @@ export function VideoTimelinePanel({ side, refreshVersion, onError, onOpenComman
   return (
     <div className="video-tool-layout">
       <section className="video-stage">
-        <video key={side} controls preload="metadata" src={`/api/workspace/materials/${side}`} />
+        <video key={side} controls preload="metadata" poster={`/api/assets/${side}/poster`} src={`/api/workspace/materials/${side}`} />
         <div className="video-time-ruler" aria-hidden="true">{[0, 25, 50, 75, 100].map((value) => <span key={value} style={{ left: `${value}%` }}>{value}%</span>)}</div>
       </section>
       <aside className="tool-inspector">
