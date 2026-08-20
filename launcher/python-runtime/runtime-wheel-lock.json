@@ -1,0 +1,1491 @@
+{
+    "schemaVersion":  1,
+    "runtimeVersion":  "3.7.1-tf-gpu-2.10.1-wheelhouse-v1",
+    "platform":  "win-amd64",
+    "python":  {
+                   "version":  "3.7.1",
+                   "fileName":  "python-3.7.1-embed-amd64.zip",
+                   "sha256":  "c9e6ff79b0b9baa948e3819334d70fdc9ce2b195dc4948c9d668334ab4ff244e",
+                   "urls":  {
+                                "china":  [
+                                                 "https://mirrors.huaweicloud.com/python/3.7.1/python-3.7.1-embed-amd64.zip"
+                                          ],
+                                "official":  [
+                                                 "https://www.python.org/ftp/python/3.7.1/python-3.7.1-embed-amd64.zip"
+                                             ]
+                            }
+               },
+    "requirements":  "requirements-win-cp37.in",
+    "artifacts":  [
+                      {
+                          "name":  "absl-py",
+                          "version":  "1.4.0",
+                          "fileName":  "absl_py-1.4.0-py3-none-any.whl",
+                          "sha256":  "0d3fe606adfa4f7db64792dd4c7aee4ee0c38ab75dfd353b7a83ed3e957fcb47",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/dd/87/de5c32fa1b1c6c3305d576e299801d8655c175ca9557019906247b994331/absl_py-1.4.0-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/dd/87/de5c32fa1b1c6c3305d576e299801d8655c175ca9557019906247b994331/absl_py-1.4.0-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "astunparse",
+                          "version":  "1.6.3",
+                          "fileName":  "astunparse-1.6.3-py2.py3-none-any.whl",
+                          "sha256":  "c2652417f2c8b5bb325c885ae329bdf3f86424075c4fd1a128674bc6fba4b8e8",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/2b/03/13dde6512ad7b4557eb792fbcf0c653af6076b81e5941d36ec61f7ce6028/astunparse-1.6.3-py2.py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/2b/03/13dde6512ad7b4557eb792fbcf0c653af6076b81e5941d36ec61f7ce6028/astunparse-1.6.3-py2.py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "attr",
+                          "version":  "0.3.2",
+                          "fileName":  "attr-0.3.2-py2.py3-none-any.whl",
+                          "sha256":  "4f4bffeea8c27387bde446675a7ac24f3b8fea1075f12d849b5f5c5181fc8336",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/68/eb/e96c25f5accb24b151c5a559961f29af2ef089725b547efb185985c73e10/attr-0.3.2-py2.py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/68/eb/e96c25f5accb24b151c5a559961f29af2ef089725b547efb185985c73e10/attr-0.3.2-py2.py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "attrs",
+                          "version":  "23.2.0",
+                          "fileName":  "attrs-23.2.0-py3-none-any.whl",
+                          "sha256":  "99b87a485a5820b23b879f04c2305b44b951b502fd64be915879d77a7e8fc6f1",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/e0/44/827b2a91a5816512fcaf3cc4ebc465ccd5d598c45cefa6703fcf4a79018f/attrs-23.2.0-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/e0/44/827b2a91a5816512fcaf3cc4ebc465ccd5d598c45cefa6703fcf4a79018f/attrs-23.2.0-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "bidict",
+                          "version":  "0.22.1",
+                          "fileName":  "bidict-0.22.1-py3-none-any.whl",
+                          "sha256":  "6ef212238eb884b664f28da76f33f1d28b260f665fc737b413b287d5487d1e7b",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/b5/82/ce0b6380f35f49d3fe687979a324c342cfa3588380232f3801db9dd62f9e/bidict-0.22.1-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/b5/82/ce0b6380f35f49d3fe687979a324c342cfa3588380232f3801db9dd62f9e/bidict-0.22.1-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "cachetools",
+                          "version":  "5.3.0",
+                          "fileName":  "cachetools-5.3.0-py3-none-any.whl",
+                          "sha256":  "429e1a1e845c008ea6c85aa35d4b98b65d6a9763eeef3e37e92728a12d1de9d4",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/db/14/2b48a834d349eee94677e8702ea2ef98b7c674b090153ea8d3f6a788584e/cachetools-5.3.0-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/db/14/2b48a834d349eee94677e8702ea2ef98b7c674b090153ea8d3f6a788584e/cachetools-5.3.0-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "certifi",
+                          "version":  "2022.12.7",
+                          "fileName":  "certifi-2022.12.7-py3-none-any.whl",
+                          "sha256":  "4ad3232f5e926d6718ec31cfc1fcadfde020920e278684144551c91769c7bc18",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/71/4c/3db2b8021bd6f2f0ceb0e088d6b2d49147671f25832fb17970e9b583d742/certifi-2022.12.7-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/71/4c/3db2b8021bd6f2f0ceb0e088d6b2d49147671f25832fb17970e9b583d742/certifi-2022.12.7-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "charset-normalizer",
+                          "version":  "3.0.1",
+                          "fileName":  "charset_normalizer-3.0.1-cp37-cp37m-win_amd64.whl",
+                          "sha256":  "2c03cc56021a4bd59be889c2b9257dae13bf55041a3372d3295416f86b295fb5",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/fc/64/443267b7824283b3e0e33cee4240c079939a970c2c9a5a3164fc988d690b/charset_normalizer-3.0.1-cp37-cp37m-win_amd64.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/fc/64/443267b7824283b3e0e33cee4240c079939a970c2c9a5a3164fc988d690b/charset_normalizer-3.0.1-cp37-cp37m-win_amd64.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "click",
+                          "version":  "8.1.7",
+                          "fileName":  "click-8.1.7-py3-none-any.whl",
+                          "sha256":  "ae74fb96c20a0277a1d615f1e4d73c8414f5a98db8b799a7931d1582f3390c28",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/00/2e/d53fa4befbf2cfa713304affc7ca780ce4fc1fd8710527771b58311a3229/click-8.1.7-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/00/2e/d53fa4befbf2cfa713304affc7ca780ce4fc1fd8710527771b58311a3229/click-8.1.7-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "cloudpickle",
+                          "version":  "2.2.1",
+                          "fileName":  "cloudpickle-2.2.1-py3-none-any.whl",
+                          "sha256":  "61f594d1f4c295fa5cd9014ceb3a1fc4a70b0de1164b94fbc2d854ccba056f9f",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/15/80/44286939ca215e88fa827b2aeb6fa3fd2b4a7af322485c7170d6f9fd96e0/cloudpickle-2.2.1-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/15/80/44286939ca215e88fa827b2aeb6fa3fd2b4a7af322485c7170d6f9fd96e0/cloudpickle-2.2.1-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "colorama",
+                          "version":  "0.4.6",
+                          "fileName":  "colorama-0.4.6-py2.py3-none-any.whl",
+                          "sha256":  "4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "dask",
+                          "version":  "2022.2.0",
+                          "fileName":  "dask-2022.2.0-py3-none-any.whl",
+                          "sha256":  "feaf838faa23150faadaeb2483e8612cfb8fed51f62e635a1a6dd55d1d793ba4",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/bd/d6/dc58c32e72cc69f4fe59ed51060b4a3e6fbbfa62dced0c4e132403fb61e8/dask-2022.2.0-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/bd/d6/dc58c32e72cc69f4fe59ed51060b4a3e6fbbfa62dced0c4e132403fb61e8/dask-2022.2.0-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "ffmpeg-python",
+                          "version":  "0.1.17",
+                          "fileName":  "ffmpeg_python-0.1.17-py3-none-any.whl",
+                          "sha256":  "e160d0fb481e74614f257812da9c53d1188a57e3ee18e6f2852916b5cb1b4901",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/3d/10/330cbc8e63d072d40413f4d470444a6a1e8c8c6a80b2a4ac302d1252ca1b/ffmpeg_python-0.1.17-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/3d/10/330cbc8e63d072d40413f4d470444a6a1e8c8c6a80b2a4ac302d1252ca1b/ffmpeg_python-0.1.17-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "Flask",
+                          "version":  "2.2.5",
+                          "fileName":  "Flask-2.2.5-py3-none-any.whl",
+                          "sha256":  "58107ed83443e86067e41eff4631b058178191a355886f8e479e347fa1285fdf",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/9f/1a/8b6d48162861009d1e017a9740431c78d860809773b66cac220a11aa3310/Flask-2.2.5-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/9f/1a/8b6d48162861009d1e017a9740431c78d860809773b66cac220a11aa3310/Flask-2.2.5-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "Flask-SocketIO",
+                          "version":  "5.3.6",
+                          "fileName":  "Flask_SocketIO-5.3.6-py3-none-any.whl",
+                          "sha256":  "9e62d2131842878ae6bfdd7067dfc3be397c1f2b117ab1dc74e6fe74aad7a579",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/56/c8/dc0be9e26272dc89342868ecc2d9ddb9e31002b4b8e49fdb754aa0f9ecbf/Flask_SocketIO-5.3.6-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/56/c8/dc0be9e26272dc89342868ecc2d9ddb9e31002b4b8e49fdb754aa0f9ecbf/Flask_SocketIO-5.3.6-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "flatbuffers",
+                          "version":  "2.0.7",
+                          "fileName":  "flatbuffers-2.0.7-py2.py3-none-any.whl",
+                          "sha256":  "71e135d533be527192819aaab757c5e3d109cb10fbb01e687f6bdb7a61ad39d1",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/d7/0d/b5bfb553a6ac66d6ec2b6d7f1e814a908fba7188356ac94bb36ae3d905c3/flatbuffers-2.0.7-py2.py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/d7/0d/b5bfb553a6ac66d6ec2b6d7f1e814a908fba7188356ac94bb36ae3d905c3/flatbuffers-2.0.7-py2.py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "fsspec",
+                          "version":  "2023.1.0",
+                          "fileName":  "fsspec-2023.1.0-py3-none-any.whl",
+                          "sha256":  "b833e2e541e9e8cde0ab549414187871243177feb3d344f9d27b25a93f5d8139",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/bd/64/f0d369ede0ca54fdd520bdee5086dbaf0af81dac53a2ce847bd1ec6e0bf1/fsspec-2023.1.0-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/bd/64/f0d369ede0ca54fdd520bdee5086dbaf0af81dac53a2ce847bd1ec6e0bf1/fsspec-2023.1.0-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "future",
+                          "version":  "0.18.3",
+                          "fileName":  "future-0.18.3.tar.gz",
+                          "sha256":  "34a17436ed1e96697a86f9de3d15a3b0be01d8bc8de9c1dffd59fb8234ed5307",
+                          "kind":  "sdist",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/8f/2e/cf6accf7415237d6faeeebdc7832023c90e0282aa16fd3263db0eb4715ec/future-0.18.3.tar.gz"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/8f/2e/cf6accf7415237d6faeeebdc7832023c90e0282aa16fd3263db0eb4715ec/future-0.18.3.tar.gz"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "gast",
+                          "version":  "0.4.0",
+                          "fileName":  "gast-0.4.0-py3-none-any.whl",
+                          "sha256":  "b7adcdd5adbebf1adf17378da5ba3f543684dbec47b1cda1f3997e573cd542c4",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/b6/48/583c032b79ae5b3daa02225a675aeb673e58d2cb698e78510feceb11958c/gast-0.4.0-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/b6/48/583c032b79ae5b3daa02225a675aeb673e58d2cb698e78510feceb11958c/gast-0.4.0-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "google-auth",
+                          "version":  "2.16.0",
+                          "fileName":  "google_auth-2.16.0-py2.py3-none-any.whl",
+                          "sha256":  "5045648c821fb72384cdc0e82cc326df195f113a33049d9b62b74589243d2acc",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/fb/55/c6e13b79a16688069b214cf726ebe49725c0b936367f045464b1122de083/google_auth-2.16.0-py2.py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/fb/55/c6e13b79a16688069b214cf726ebe49725c0b936367f045464b1122de083/google_auth-2.16.0-py2.py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "google-auth-oauthlib",
+                          "version":  "0.4.6",
+                          "fileName":  "google_auth_oauthlib-0.4.6-py2.py3-none-any.whl",
+                          "sha256":  "3f2a6e802eebbb6fb736a370fbf3b055edcb6b52878bf2f26330b5e041316c73",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/b1/0e/0636cc1448a7abc444fb1b3a63655e294e0d2d49092dc3de05241be6d43c/google_auth_oauthlib-0.4.6-py2.py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/b1/0e/0636cc1448a7abc444fb1b3a63655e294e0d2d49092dc3de05241be6d43c/google_auth_oauthlib-0.4.6-py2.py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "google-pasta",
+                          "version":  "0.2.0",
+                          "fileName":  "google_pasta-0.2.0-py3-none-any.whl",
+                          "sha256":  "b32482794a366b5366a32c92a9a9201b107821889935a02b3e51f6b432ea84ed",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/a3/de/c648ef6835192e6e2cc03f40b19eeda4382c49b5bafb43d88b931c4c74ac/google_pasta-0.2.0-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/a3/de/c648ef6835192e6e2cc03f40b19eeda4382c49b5bafb43d88b931c4c74ac/google_pasta-0.2.0-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "grpcio",
+                          "version":  "1.51.1",
+                          "fileName":  "grpcio-1.51.1-cp37-cp37m-win_amd64.whl",
+                          "sha256":  "f1fec3abaf274cdb85bf3878167cfde5ad4a4d97c68421afda95174de85ba813",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/f0/59/84b9868896468cccbb644f9a4e3a25226f70e4e6b7e2dab503c81dfb8c59/grpcio-1.51.1-cp37-cp37m-win_amd64.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/f0/59/84b9868896468cccbb644f9a4e3a25226f70e4e6b7e2dab503c81dfb8c59/grpcio-1.51.1-cp37-cp37m-win_amd64.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "h11",
+                          "version":  "0.14.0",
+                          "fileName":  "h11-0.14.0-py3-none-any.whl",
+                          "sha256":  "e3fe4ac4b851c468cc8363d500db52c2ead036020723024a109d37346efaa761",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/95/04/ff642e65ad6b90db43e668d70ffb6736436c7ce41fcc549f4e9472234127/h11-0.14.0-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/95/04/ff642e65ad6b90db43e668d70ffb6736436c7ce41fcc549f4e9472234127/h11-0.14.0-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "h5py",
+                          "version":  "2.10.0",
+                          "fileName":  "h5py-2.10.0-cp37-cp37m-win_amd64.whl",
+                          "sha256":  "8bb1d2de101f39743f91512a9750fb6c351c032e5cd3204b4487383e34da7f75",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/a1/6b/7f62017e3f0b32438dd90bdc1ff0b7b1448b6cb04a1ed84f37b6de95cd7b/h5py-2.10.0-cp37-cp37m-win_amd64.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/a1/6b/7f62017e3f0b32438dd90bdc1ff0b7b1448b6cb04a1ed84f37b6de95cd7b/h5py-2.10.0-cp37-cp37m-win_amd64.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "idna",
+                          "version":  "3.4",
+                          "fileName":  "idna-3.4-py3-none-any.whl",
+                          "sha256":  "90b77e79eaa3eba6de819a0c442c0b4ceefc341a7a2ab77d7562bf49f425c5c2",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/fc/34/3030de6f1370931b9dbb4dad48f6ab1015ab1d32447850b9fc94e60097be/idna-3.4-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/fc/34/3030de6f1370931b9dbb4dad48f6ab1015ab1d32447850b9fc94e60097be/idna-3.4-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "imageio",
+                          "version":  "2.31.2",
+                          "fileName":  "imageio-2.31.2-py3-none-any.whl",
+                          "sha256":  "a78fbcb33432042a4d6993c87f3ea1f136d908318ce7dda857846ccff73294de",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/7b/88/59411e1a652ac3338d348901ffa5a73daf1f67fcb3f97d750237d4fa0821/imageio-2.31.2-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/7b/88/59411e1a652ac3338d348901ffa5a73daf1f67fcb3f97d750237d4fa0821/imageio-2.31.2-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "importlib-metadata",
+                          "version":  "6.7.0",
+                          "fileName":  "importlib_metadata-6.7.0-py3-none-any.whl",
+                          "sha256":  "cb52082e659e97afc5dac71e79de97d8681de3aa07ff18578330904a9d18e5b5",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/ff/94/64287b38c7de4c90683630338cf28f129decbba0a44f0c6db35a873c73c4/importlib_metadata-6.7.0-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/ff/94/64287b38c7de4c90683630338cf28f129decbba0a44f0c6db35a873c73c4/importlib_metadata-6.7.0-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "importlib-resources",
+                          "version":  "5.12.0",
+                          "fileName":  "importlib_resources-5.12.0-py3-none-any.whl",
+                          "sha256":  "7b1deeebbf351c7578e09bf2f63fa2ce8b5ffec296e0d349139d43cca061a81a",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/38/71/c13ea695a4393639830bf96baea956538ba7a9d06fcce7cef10bfff20f72/importlib_resources-5.12.0-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/38/71/c13ea695a4393639830bf96baea956538ba7a9d06fcce7cef10bfff20f72/importlib_resources-5.12.0-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "itsdangerous",
+                          "version":  "2.1.2",
+                          "fileName":  "itsdangerous-2.1.2-py3-none-any.whl",
+                          "sha256":  "2c2349112351b88699d8d4b6b075022c0808887cb7ad10069318a8b0bc88db44",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/68/5f/447e04e828f47465eeab35b5d408b7ebaaaee207f48b7136c5a7267a30ae/itsdangerous-2.1.2-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/68/5f/447e04e828f47465eeab35b5d408b7ebaaaee207f48b7136c5a7267a30ae/itsdangerous-2.1.2-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "Jinja2",
+                          "version":  "3.1.4",
+                          "fileName":  "jinja2-3.1.4-py3-none-any.whl",
+                          "sha256":  "bc5dd2abb727a5319567b7a813e6a2e7318c39f4f487cfe6c89c6f9c7d25197d",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/31/80/3a54838c3fb461f6fec263ebf3a3a41771bd05190238de3486aae8540c36/jinja2-3.1.4-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/31/80/3a54838c3fb461f6fec263ebf3a3a41771bd05190238de3486aae8540c36/jinja2-3.1.4-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "joblib",
+                          "version":  "1.3.2",
+                          "fileName":  "joblib-1.3.2-py3-none-any.whl",
+                          "sha256":  "ef4331c65f239985f3f2220ecc87db222f08fd22097a3dd5698f693875f8cbb9",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/10/40/d551139c85db202f1f384ba8bcf96aca2f329440a844f924c8a0040b6d02/joblib-1.3.2-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/10/40/d551139c85db202f1f384ba8bcf96aca2f329440a844f924c8a0040b6d02/joblib-1.3.2-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "jsonschema",
+                          "version":  "4.17.3",
+                          "fileName":  "jsonschema-4.17.3-py3-none-any.whl",
+                          "sha256":  "a870ad254da1a8ca84b6a2905cac29d265f805acc57af304784962a2aa6508f6",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/c1/97/c698bd9350f307daad79dd740806e1a59becd693bd11443a0f531e3229b3/jsonschema-4.17.3-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/c1/97/c698bd9350f307daad79dd740806e1a59becd693bd11443a0f531e3229b3/jsonschema-4.17.3-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "keras",
+                          "version":  "2.10.0",
+                          "fileName":  "keras-2.10.0-py2.py3-none-any.whl",
+                          "sha256":  "26a6e2c2522e7468ddea22710a99b3290493768fc08a39e75d1173a0e3452fdf",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/f9/4d/dc255a437c9616b155e5bd55e325e092b7cdcb4652361d733ae051d40853/keras-2.10.0-py2.py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/f9/4d/dc255a437c9616b155e5bd55e325e092b7cdcb4652361d733ae051d40853/keras-2.10.0-py2.py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "Keras-Preprocessing",
+                          "version":  "1.1.2",
+                          "fileName":  "Keras_Preprocessing-1.1.2-py2.py3-none-any.whl",
+                          "sha256":  "7b82029b130ff61cc99b55f3bd27427df4838576838c5b2f65940e4fcec99a7b",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/79/4c/7c3275a01e12ef9368a892926ab932b33bb13d55794881e3573482b378a7/Keras_Preprocessing-1.1.2-py2.py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/79/4c/7c3275a01e12ef9368a892926ab932b33bb13d55794881e3573482b378a7/Keras_Preprocessing-1.1.2-py2.py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "libclang",
+                          "version":  "18.1.1",
+                          "fileName":  "libclang-18.1.1-py2.py3-none-win_amd64.whl",
+                          "sha256":  "4dd2d3b82fab35e2bf9ca717d7b63ac990a3519c7e312f19fa8e86dcc712f7fb",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/0b/2d/3f480b1e1d31eb3d6de5e3ef641954e5c67430d5ac93b7fa7e07589576c7/libclang-18.1.1-py2.py3-none-win_amd64.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/0b/2d/3f480b1e1d31eb3d6de5e3ef641954e5c67430d5ac93b7fa7e07589576c7/libclang-18.1.1-py2.py3-none-win_amd64.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "locket",
+                          "version":  "1.0.0",
+                          "fileName":  "locket-1.0.0-py2.py3-none-any.whl",
+                          "sha256":  "b6c819a722f7b6bd955b80781788e4a66a55628b858d347536b7e81325a3a5e3",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/db/bc/83e112abc66cd466c6b83f99118035867cecd41802f8d044638aa78a106e/locket-1.0.0-py2.py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/db/bc/83e112abc66cd466c6b83f99118035867cecd41802f8d044638aa78a106e/locket-1.0.0-py2.py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "Markdown",
+                          "version":  "3.4.4",
+                          "fileName":  "Markdown-3.4.4-py3-none-any.whl",
+                          "sha256":  "a4c1b65c0957b4bd9e7d86ddc7b3c9868fb9670660f6f99f6d1bca8954d5a941",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/1a/b5/228c1cdcfe138f1a8e01ab1b54284c8b83735476cb22b6ba251656ed13ad/Markdown-3.4.4-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/1a/b5/228c1cdcfe138f1a8e01ab1b54284c8b83735476cb22b6ba251656ed13ad/Markdown-3.4.4-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "MarkupSafe",
+                          "version":  "2.1.5",
+                          "fileName":  "MarkupSafe-2.1.5-cp37-cp37m-win_amd64.whl",
+                          "sha256":  "4275d846e41ecefa46e2015117a9f491e57a71ddd59bbead77e904dc02b1bed2",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/6c/4c/3577a52eea1880538c435176bc85e5b3379b7ab442327ccd82118550758f/MarkupSafe-2.1.5-cp37-cp37m-win_amd64.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/6c/4c/3577a52eea1880538c435176bc85e5b3379b7ab442327ccd82118550758f/MarkupSafe-2.1.5-cp37-cp37m-win_amd64.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "networkx",
+                          "version":  "2.6.3",
+                          "fileName":  "networkx-2.6.3-py3-none-any.whl",
+                          "sha256":  "80b6b89c77d1dfb64a4c7854981b60aeea6360ac02c6d4e4913319e0a313abef",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/e9/93/aa6613aa70d6eb4868e667068b5a11feca9645498fd31b954b6c4bb82fa5/networkx-2.6.3-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/e9/93/aa6613aa70d6eb4868e667068b5a11feca9645498fd31b954b6c4bb82fa5/networkx-2.6.3-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "numexpr",
+                          "version":  "2.8.6",
+                          "fileName":  "numexpr-2.8.6-cp37-cp37m-win_amd64.whl",
+                          "sha256":  "31cf610c952eec57081171f0b4427f9bed2395ec70ec432bbf45d260c5c0cdeb",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/3a/c1/e3a0cf89473588cba0135eb440cded23d19340f636d0e1017263e8c3d7dd/numexpr-2.8.6-cp37-cp37m-win_amd64.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/3a/c1/e3a0cf89473588cba0135eb440cded23d19340f636d0e1017263e8c3d7dd/numexpr-2.8.6-cp37-cp37m-win_amd64.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "numpy",
+                          "version":  "1.20.1",
+                          "fileName":  "numpy-1.20.1-cp37-cp37m-win_amd64.whl",
+                          "sha256":  "89f937b13b8dd17b0099c7c2e22066883c86ca1575a975f754babc8fbf8d69a9",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/3b/8f/68b72c57e59591925432f4615309732d5fc5ec0bb0890540e2aa1557172f/numpy-1.20.1-cp37-cp37m-win_amd64.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/3b/8f/68b72c57e59591925432f4615309732d5fc5ec0bb0890540e2aa1557172f/numpy-1.20.1-cp37-cp37m-win_amd64.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "oauthlib",
+                          "version":  "3.2.2",
+                          "fileName":  "oauthlib-3.2.2-py3-none-any.whl",
+                          "sha256":  "8139f29aac13e25d502680e9e19963e83f16838d48a0d71c287fe40e7067fbca",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/7e/80/cab10959dc1faead58dc8384a781dfbf93cb4d33d50988f7a69f1b7c9bbe/oauthlib-3.2.2-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/7e/80/cab10959dc1faead58dc8384a781dfbf93cb4d33d50988f7a69f1b7c9bbe/oauthlib-3.2.2-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "onnx",
+                          "version":  "1.12.0",
+                          "fileName":  "onnx-1.12.0-cp37-cp37m-win_amd64.whl",
+                          "sha256":  "8a7aa61aea339bd28f310f4af4f52ce6c4b876386228760b16308efd58f95059",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/e1/5c/e59a175f6b771a59b1e9fc02e76390ceea809a86f492bbf7374af33e0881/onnx-1.12.0-cp37-cp37m-win_amd64.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/e1/5c/e59a175f6b771a59b1e9fc02e76390ceea809a86f492bbf7374af33e0881/onnx-1.12.0-cp37-cp37m-win_amd64.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "opencv-python",
+                          "version":  "4.1.0.25",
+                          "fileName":  "opencv_python-4.1.0.25-cp37-cp37m-win_amd64.whl",
+                          "sha256":  "db3106b7ca86999a7bd1f2fcc93e49314e5e6e451356774e421a69428df5020b",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/a3/50/04d0669afe884f137c2f490642756e8c4a658254300a9eaf253d1e643085/opencv_python-4.1.0.25-cp37-cp37m-win_amd64.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/a3/50/04d0669afe884f137c2f490642756e8c4a658254300a9eaf253d1e643085/opencv_python-4.1.0.25-cp37-cp37m-win_amd64.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "opt-einsum",
+                          "version":  "3.3.0",
+                          "fileName":  "opt_einsum-3.3.0-py3-none-any.whl",
+                          "sha256":  "2455e59e3947d3c275477df7f5205b30635e266fe6dc300e3d9f9646bfcea147",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/bc/19/404708a7e54ad2798907210462fd950c3442ea51acc8790f3da48d2bee8b/opt_einsum-3.3.0-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/bc/19/404708a7e54ad2798907210462fd950c3442ea51acc8790f3da48d2bee8b/opt_einsum-3.3.0-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "pip",
+                          "version":  "24.0",
+                          "fileName":  "pip-24.0-py3-none-any.whl",
+                          "sha256":  "ba0d021a166865d2265246961bec0152ff124de910c5cc39f1156ce3fa7c69dc",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/8a/6a/19e9fe04fca059ccf770861c7d5721ab4c2aebc539889e97c7977528a53b/pip-24.0-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/8a/6a/19e9fe04fca059ccf770861c7d5721ab4c2aebc539889e97c7977528a53b/pip-24.0-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "packaging",
+                          "version":  "23.0",
+                          "fileName":  "packaging-23.0-py3-none-any.whl",
+                          "sha256":  "714ac14496c3e68c99c29b00845f7a2b85f3bb6f1078fd9f72fd20f0570002b2",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/ed/35/a31aed2993e398f6b09a790a181a7927eb14610ee8bbf02dc14d31677f1c/packaging-23.0-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/ed/35/a31aed2993e398f6b09a790a181a7927eb14610ee8bbf02dc14d31677f1c/packaging-23.0-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "partd",
+                          "version":  "1.4.1",
+                          "fileName":  "partd-1.4.1-py3-none-any.whl",
+                          "sha256":  "27e766663d36c161e2827aa3e28541c992f0b9527d3cca047e13fb3acdb989e6",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/11/8a/b7a58e208b144a7315208a0dd627e23f5f50b47fa89c2924bb2e9238ecfb/partd-1.4.1-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/11/8a/b7a58e208b144a7315208a0dd627e23f5f50b47fa89c2924bb2e9238ecfb/partd-1.4.1-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "Pillow",
+                          "version":  "9.5.0",
+                          "fileName":  "Pillow-9.5.0-cp37-cp37m-win_amd64.whl",
+                          "sha256":  "322724c0032af6692456cd6ed554bb85f8149214d97398bb80613b04e33769f6",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/cb/3c/4f3ef1a14e903d7b2bc43672c20f732b874e1e50a9a58ac9a1726ef3773d/Pillow-9.5.0-cp37-cp37m-win_amd64.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/cb/3c/4f3ef1a14e903d7b2bc43672c20f732b874e1e50a9a58ac9a1726ef3773d/Pillow-9.5.0-cp37-cp37m-win_amd64.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "pkgutil-resolve-name",
+                          "version":  "1.3.10",
+                          "fileName":  "pkgutil_resolve_name-1.3.10-py3-none-any.whl",
+                          "sha256":  "ca27cc078d25c5ad71a9de0a7a330146c4e014c2462d9af19c6b828280649c5e",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/c9/5c/3d4882ba113fd55bdba9326c1e4c62a15e674a2501de4869e6bd6301f87e/pkgutil_resolve_name-1.3.10-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/c9/5c/3d4882ba113fd55bdba9326c1e4c62a15e674a2501de4869e6bd6301f87e/pkgutil_resolve_name-1.3.10-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "ply",
+                          "version":  "3.11",
+                          "fileName":  "ply-3.11-py2.py3-none-any.whl",
+                          "sha256":  "096f9b8350b65ebd2fd1346b12452efe5b9607f7482813ffca50c22722a807ce",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/a3/58/35da89ee790598a0700ea49b2a66594140f44dec458c07e8e3d4979137fc/ply-3.11-py2.py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/a3/58/35da89ee790598a0700ea49b2a66594140f44dec458c07e8e3d4979137fc/ply-3.11-py2.py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "prettytable",
+                          "version":  "3.7.0",
+                          "fileName":  "prettytable-3.7.0-py3-none-any.whl",
+                          "sha256":  "f4aaf2ed6e6062a82fd2e6e5289bbbe705ec2788fe401a3a1f62a1cea55526d2",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/7a/cd/bec5850e23eb005c6fe30fe4c26bafd9a07b3d2524771f22a0fa01270078/prettytable-3.7.0-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/7a/cd/bec5850e23eb005c6fe30fe4c26bafd9a07b3d2524771f22a0fa01270078/prettytable-3.7.0-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "protobuf",
+                          "version":  "3.19.6",
+                          "fileName":  "protobuf-3.19.6-cp37-cp37m-win_amd64.whl",
+                          "sha256":  "aa3b82ca1f24ab5326dcf4ea00fcbda703e986b22f3d27541654f749564d778b",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/70/ee/e3562fd4e692afc6ed396b60ce3a177bc4ce6506ac8ac2413886198880e3/protobuf-3.19.6-cp37-cp37m-win_amd64.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/70/ee/e3562fd4e692afc6ed396b60ce3a177bc4ce6506ac8ac2413886198880e3/protobuf-3.19.6-cp37-cp37m-win_amd64.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "pyasn1",
+                          "version":  "0.4.8",
+                          "fileName":  "pyasn1-0.4.8-py2.py3-none-any.whl",
+                          "sha256":  "39c7e2ec30515947ff4e87fb6f456dfc6e84857d34be479c9d4a4ba4bf46aa5d",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/62/1e/a94a8d635fa3ce4cfc7f506003548d0a2447ae76fd5ca53932970fe3053f/pyasn1-0.4.8-py2.py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/62/1e/a94a8d635fa3ce4cfc7f506003548d0a2447ae76fd5ca53932970fe3053f/pyasn1-0.4.8-py2.py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "pyasn1-modules",
+                          "version":  "0.2.8",
+                          "fileName":  "pyasn1_modules-0.2.8-py2.py3-none-any.whl",
+                          "sha256":  "a50b808ffeb97cb3601dd25981f6b016cbb3d31fbf57a8b8a87428e6158d0c74",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/95/de/214830a981892a3e286c3794f41ae67a4495df1108c3da8a9f62159b9a9d/pyasn1_modules-0.2.8-py2.py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/95/de/214830a981892a3e286c3794f41ae67a4495df1108c3da8a9f62159b9a9d/pyasn1_modules-0.2.8-py2.py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "PyQt5",
+                          "version":  "5.15.9",
+                          "fileName":  "PyQt5-5.15.9-cp37-abi3-win_amd64.whl",
+                          "sha256":  "e030d795df4cbbfcf4f38b18e2e119bcc9e177ef658a5094b87bb16cac0ce4c5",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/55/5d/8df8a2aa0de6588965d048fca9306cf15a5801be3078f195e8f8f41fa863/PyQt5-5.15.9-cp37-abi3-win_amd64.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/55/5d/8df8a2aa0de6588965d048fca9306cf15a5801be3078f195e8f8f41fa863/PyQt5-5.15.9-cp37-abi3-win_amd64.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "PyQt5-Qt5",
+                          "version":  "5.15.2",
+                          "fileName":  "PyQt5_Qt5-5.15.2-py3-none-win_amd64.whl",
+                          "sha256":  "750b78e4dba6bdf1607febedc08738e318ea09e9b10aea9ff0d73073f11f6962",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/37/97/5d3b222b924fa2ed4c2488925155cd0b03fd5d09ee1cfcf7c553c11c9f66/PyQt5_Qt5-5.15.2-py3-none-win_amd64.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/37/97/5d3b222b924fa2ed4c2488925155cd0b03fd5d09ee1cfcf7c553c11c9f66/PyQt5_Qt5-5.15.2-py3-none-win_amd64.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "PyQt5-sip",
+                          "version":  "12.11.1",
+                          "fileName":  "PyQt5_sip-12.11.1-cp37-cp37m-win_amd64.whl",
+                          "sha256":  "d09b2586235deab7a5f2e28e4bde9a70c0b3730fa84f2590804a9932414136a3",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/50/da/9a62941675078e88f5f7717f7cdee48948d9181742a5d1545fb7fb5728a4/PyQt5_sip-12.11.1-cp37-cp37m-win_amd64.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/50/da/9a62941675078e88f5f7717f7cdee48948d9181742a5d1545fb7fb5728a4/PyQt5_sip-12.11.1-cp37-cp37m-win_amd64.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "pyrsistent",
+                          "version":  "0.19.3",
+                          "fileName":  "pyrsistent-0.19.3-cp37-cp37m-win_amd64.whl",
+                          "sha256":  "c9bb60a40a0ab9aba40a59f68214eed5a29c6274c83b2cc206a359c4a89fa41b",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/d8/95/374840c28274b2d660a49c81aee980543953c9c13bcfc9c8c22fb7737919/pyrsistent-0.19.3-cp37-cp37m-win_amd64.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/d8/95/374840c28274b2d660a49c81aee980543953c9c13bcfc9c8c22fb7737919/pyrsistent-0.19.3-cp37-cp37m-win_amd64.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "python-engineio",
+                          "version":  "4.9.1",
+                          "fileName":  "python_engineio-4.9.1-py3-none-any.whl",
+                          "sha256":  "f995e702b21f6b9ebde4e2000cd2ad0112ba0e5116ec8d22fe3515e76ba9dddd",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/ad/38/4642c75241686c9cf05d23c50b9ffbd760507292f12fdfb04adc2ab5d34a/python_engineio-4.9.1-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/ad/38/4642c75241686c9cf05d23c50b9ffbd760507292f12fdfb04adc2ab5d34a/python_engineio-4.9.1-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "python-socketio",
+                          "version":  "5.11.0",
+                          "fileName":  "python_socketio-5.11.0-py3-none-any.whl",
+                          "sha256":  "cfcb0163d77c8d23b98285754e79016786740dd901268654a52823da0bc73382",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/5c/6d/dd2447d27979c4ca84738bb4d5a9245aa8e1f736b4054d894f7fd2030c84/python_socketio-5.11.0-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/5c/6d/dd2447d27979c4ca84738bb4d5a9245aa8e1f736b4054d894f7fd2030c84/python_socketio-5.11.0-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "pywin32",
+                          "version":  "306",
+                          "fileName":  "pywin32-306-cp37-cp37m-win_amd64.whl",
+                          "sha256":  "72c5f621542d7bdd4fdb716227be0dd3f8565c11b280be6315b06ace35487d36",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/80/e6/08192cb5728a6ffdb70ea990d9a1351b320d31a751bb463e652d9e05e7aa/pywin32-306-cp37-cp37m-win_amd64.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/80/e6/08192cb5728a6ffdb70ea990d9a1351b320d31a751bb463e652d9e05e7aa/pywin32-306-cp37-cp37m-win_amd64.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "PyWavelets",
+                          "version":  "1.3.0",
+                          "fileName":  "PyWavelets-1.3.0-cp37-cp37m-win_amd64.whl",
+                          "sha256":  "91e1b220f0ddd4c127bab718363c2c4a07dbcd95b9c4bfed09a3cdae47dbba43",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/7c/0c/89dea7fed4a6cd3e6f5ade93c7d645a2991a0483916f161a9d72a0d817f8/PyWavelets-1.3.0-cp37-cp37m-win_amd64.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/7c/0c/89dea7fed4a6cd3e6f5ade93c7d645a2991a0483916f161a9d72a0d817f8/PyWavelets-1.3.0-cp37-cp37m-win_amd64.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "PyYAML",
+                          "version":  "6.0.1",
+                          "fileName":  "PyYAML-6.0.1-cp37-cp37m-win_amd64.whl",
+                          "sha256":  "4fb147e7a67ef577a588a0e2c17b6db51dda102c71de36f8549b6816a96e1867",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/1e/ae/964ccb88a938f20ece5754878f182cfbd846924930d02d29d06af8d4c69e/PyYAML-6.0.1-cp37-cp37m-win_amd64.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/1e/ae/964ccb88a938f20ece5754878f182cfbd846924930d02d29d06af8d4c69e/PyYAML-6.0.1-cp37-cp37m-win_amd64.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "requests",
+                          "version":  "2.31.0",
+                          "fileName":  "requests-2.31.0-py3-none-any.whl",
+                          "sha256":  "58cd2187c01e70e6e26505bca751777aa9f2ee0b7f4300988b709f44e013003f",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/70/8e/0e2d847013cb52cd35b38c009bb167a1a26b2ce6cd6965bf26b47bc0bf44/requests-2.31.0-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/70/8e/0e2d847013cb52cd35b38c009bb167a1a26b2ce6cd6965bf26b47bc0bf44/requests-2.31.0-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "requests-oauthlib",
+                          "version":  "2.0.0",
+                          "fileName":  "requests_oauthlib-2.0.0-py2.py3-none-any.whl",
+                          "sha256":  "7dd8a5c40426b779b0868c404bdef9768deccf22749cde15852df527e6269b36",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/3b/5d/63d4ae3b9daea098d5d6f5da83984853c1bbacd5dc826764b249fe119d24/requests_oauthlib-2.0.0-py2.py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/3b/5d/63d4ae3b9daea098d5d6f5da83984853c1bbacd5dc826764b249fe119d24/requests_oauthlib-2.0.0-py2.py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "rsa",
+                          "version":  "4.9",
+                          "fileName":  "rsa-4.9-py3-none-any.whl",
+                          "sha256":  "90260d9058e514786967344d0ef75fa8727eed8a7d2e43ce9f4bcf1b536174f7",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/49/97/fa78e3d2f65c02c8e1268b9aba606569fe97f6c8f7c2d74394553347c145/rsa-4.9-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/49/97/fa78e3d2f65c02c8e1268b9aba606569fe97f6c8f7c2d74394553347c145/rsa-4.9-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "setuptools",
+                          "version":  "65.6.3",
+                          "fileName":  "setuptools-65.6.3-py3-none-any.whl",
+                          "sha256":  "57f6f22bde4e042978bcd50176fdb381d7c21a9efa4041202288d3737a0c6a54",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/ef/e3/29d6e1a07e8d90ace4a522d9689d03e833b67b50d1588e693eec15f26251/setuptools-65.6.3-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/ef/e3/29d6e1a07e8d90ace4a522d9689d03e833b67b50d1588e693eec15f26251/setuptools-65.6.3-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "scikit-image",
+                          "version":  "0.19.3",
+                          "fileName":  "scikit_image-0.19.3-cp37-cp37m-win_amd64.whl",
+                          "sha256":  "ce3d2207f253b8eb2c824e30d145a9f07a34a14212d57f3beca9f7e03c383cbe",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/10/1c/a35217c9e918bbf9ac8cbb3d2a604f552b14851a97d3fb2282e34b7a8d7d/scikit_image-0.19.3-cp37-cp37m-win_amd64.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/10/1c/a35217c9e918bbf9ac8cbb3d2a604f552b14851a97d3fb2282e34b7a8d7d/scikit_image-0.19.3-cp37-cp37m-win_amd64.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "scikit-learn",
+                          "version":  "1.0.2",
+                          "fileName":  "scikit_learn-1.0.2-cp37-cp37m-win_amd64.whl",
+                          "sha256":  "46f431ec59dead665e1370314dbebc99ead05e1c0a9df42f22d6a0e00044820f",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/9d/20/0ffe8665a44bce7616bd33d4368a198fecad3b226bcafa38c63ef0f6286f/scikit_learn-1.0.2-cp37-cp37m-win_amd64.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/9d/20/0ffe8665a44bce7616bd33d4368a198fecad3b226bcafa38c63ef0f6286f/scikit_learn-1.0.2-cp37-cp37m-win_amd64.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "scipy",
+                          "version":  "1.7.3",
+                          "fileName":  "scipy-1.7.3-cp37-cp37m-win_amd64.whl",
+                          "sha256":  "866ada14a95b083dd727a845a764cf95dd13ba3dc69a16b99038001b05439709",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/40/69/4af412d078cef2298f7d90546fa0e03e65a032558bd85319239c72ae0c3c/scipy-1.7.3-cp37-cp37m-win_amd64.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/40/69/4af412d078cef2298f7d90546fa0e03e65a032558bd85319239c72ae0c3c/scipy-1.7.3-cp37-cp37m-win_amd64.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "simple-websocket",
+                          "version":  "1.0.0",
+                          "fileName":  "simple_websocket-1.0.0-py3-none-any.whl",
+                          "sha256":  "1d5bf585e415eaa2083e2bcf02a3ecf91f9712e7b3e6b9fa0b461ad04e0837bc",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/6d/ea/288a8ac1d9551354488ff60c0ac6a76acc3b6b60f0460ac1944c75e240da/simple_websocket-1.0.0-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/6d/ea/288a8ac1d9551354488ff60c0ac6a76acc3b6b60f0460ac1944c75e240da/simple_websocket-1.0.0-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "sip",
+                          "version":  "6.6.2",
+                          "fileName":  "sip-6.6.2-cp37-abi3-win_amd64.whl",
+                          "sha256":  "a72fd49e49af4b21368b154abe44bd7d84115c528048c4f85b29b9be26a63b30",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/f2/5c/da3191e91d4499991d5e5ceb203b1ca6e622b81e0cf5291c16169360d7b9/sip-6.6.2-cp37-abi3-win_amd64.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/f2/5c/da3191e91d4499991d5e5ceb203b1ca6e622b81e0cf5291c16169360d7b9/sip-6.6.2-cp37-abi3-win_amd64.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "six",
+                          "version":  "1.16.0",
+                          "fileName":  "six-1.16.0-py2.py3-none-any.whl",
+                          "sha256":  "8abb2f1d86890a2dfb989f9a77cfcfd3e47c2a354b01111771326f8aa26e0254",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/d9/5a/e7c31adbe875f2abbb91bd84cf2dc52d792b5a01506781dbcf25c91daf11/six-1.16.0-py2.py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/d9/5a/e7c31adbe875f2abbb91bd84cf2dc52d792b5a01506781dbcf25c91daf11/six-1.16.0-py2.py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "tensorboard",
+                          "version":  "2.10.1",
+                          "fileName":  "tensorboard-2.10.1-py3-none-any.whl",
+                          "sha256":  "fb9222c1750e2fa35ef170d998a1e229f626eeced3004494a8849c88c15d8c1c",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/80/49/a5ec29886ef823718c8ae54ed0b3ad7e19066b5bf21cec5038427e6a04c4/tensorboard-2.10.1-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/80/49/a5ec29886ef823718c8ae54ed0b3ad7e19066b5bf21cec5038427e6a04c4/tensorboard-2.10.1-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "tensorboard-data-server",
+                          "version":  "0.6.1",
+                          "fileName":  "tensorboard_data_server-0.6.1-py3-none-any.whl",
+                          "sha256":  "809fe9887682d35c1f7d1f54f0f40f98bb1f771b14265b453ca051e2ce58fca7",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/74/69/5747a957f95e2e1d252ca41476ae40ce79d70d38151d2e494feb7722860c/tensorboard_data_server-0.6.1-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/74/69/5747a957f95e2e1d252ca41476ae40ce79d70d38151d2e494feb7722860c/tensorboard_data_server-0.6.1-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "tensorboard-plugin-wit",
+                          "version":  "1.8.1",
+                          "fileName":  "tensorboard_plugin_wit-1.8.1-py3-none-any.whl",
+                          "sha256":  "ff26bdd583d155aa951ee3b152b3d0cffae8005dc697f72b44a8e8c2a77a8cbe",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/e0/68/e8ecfac5dd594b676c23a7f07ea34c197d7d69b3313afdf8ac1b0a9905a2/tensorboard_plugin_wit-1.8.1-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/e0/68/e8ecfac5dd594b676c23a7f07ea34c197d7d69b3313afdf8ac1b0a9905a2/tensorboard_plugin_wit-1.8.1-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "tensorboardX",
+                          "version":  "2.5.1",
+                          "fileName":  "tensorboardX-2.5.1-py2.py3-none-any.whl",
+                          "sha256":  "8808133ccca673cd04076f6f2a85cf2d39bb2d0393a0f20d0f9cbb06d472b57e",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/96/47/9004f6b182920e921b6937a345019c9317fda4cbfcbeeb2af618b3b7a53e/tensorboardX-2.5.1-py2.py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/96/47/9004f6b182920e921b6937a345019c9317fda4cbfcbeeb2af618b3b7a53e/tensorboardX-2.5.1-py2.py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "tensorflow-estimator",
+                          "version":  "2.10.0",
+                          "fileName":  "tensorflow_estimator-2.10.0-py2.py3-none-any.whl",
+                          "sha256":  "f324ea17cd57f16e33bf188711d5077e6b2e5f5a12c328d6e01a07b23888edcd",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/b6/05/9d7f3a6c783669cba36a6eb4555d0c73a516eee935dde6176dfb8512f94e/tensorflow_estimator-2.10.0-py2.py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/b6/05/9d7f3a6c783669cba36a6eb4555d0c73a516eee935dde6176dfb8512f94e/tensorflow_estimator-2.10.0-py2.py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "tensorflow-gpu",
+                          "version":  "2.10.1",
+                          "fileName":  "tensorflow_gpu-2.10.1-cp37-cp37m-win_amd64.whl",
+                          "sha256":  "15a18dead62702ef80806a3c9d01a554433aa1e609f8d556fb5b03c99d316043",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/31/25/2426f5ca0d056c5f291228b795df32660180a65437513605b1b3c887ff4e/tensorflow_gpu-2.10.1-cp37-cp37m-win_amd64.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/31/25/2426f5ca0d056c5f291228b795df32660180a65437513605b1b3c887ff4e/tensorflow_gpu-2.10.1-cp37-cp37m-win_amd64.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "tensorflow-io-gcs-filesystem",
+                          "version":  "0.30.0",
+                          "fileName":  "tensorflow_io_gcs_filesystem-0.30.0-cp37-cp37m-win_amd64.whl",
+                          "sha256":  "c16dcee548a0aaff31793ac410a880a45a61401f1a1a8faee24f5ef506900796",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/e0/33/e7514c18184a89f3bb54c07ccad0558d565baea9b86a7efea57f0bc0bf16/tensorflow_io_gcs_filesystem-0.30.0-cp37-cp37m-win_amd64.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/e0/33/e7514c18184a89f3bb54c07ccad0558d565baea9b86a7efea57f0bc0bf16/tensorflow_io_gcs_filesystem-0.30.0-cp37-cp37m-win_amd64.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "termcolor",
+                          "version":  "2.2.0",
+                          "fileName":  "termcolor-2.2.0-py3-none-any.whl",
+                          "sha256":  "91ddd848e7251200eac969846cbae2dacd7d71c2871e92733289e7e3666f48e7",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/aa/f4/8ddd8a684b4c005345f45740a449d93d0af7ccecd91319d0f4426cf08b36/termcolor-2.2.0-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/aa/f4/8ddd8a684b4c005345f45740a449d93d0af7ccecd91319d0f4426cf08b36/termcolor-2.2.0-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "tf2onnx",
+                          "version":  "1.13.0",
+                          "fileName":  "tf2onnx-1.13.0-py3-none-any.whl",
+                          "sha256":  "bdb72125bc957778fe78d4d223635286fbbb64c64f4d782ac19b1af5c4b56038",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/87/9c/092b8808c145b274226cd20cd4cb482781a905f49b8f33713151f12cbecb/tf2onnx-1.13.0-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/87/9c/092b8808c145b274226cd20cd4cb482781a905f49b8f33713151f12cbecb/tf2onnx-1.13.0-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "threadpoolctl",
+                          "version":  "3.1.0",
+                          "fileName":  "threadpoolctl-3.1.0-py3-none-any.whl",
+                          "sha256":  "8b99adda265feb6773280df41eece7b2e6561b772d21ffd52e372f999024907b",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/61/cf/6e354304bcb9c6413c4e02a747b600061c21d38ba51e7e544ac7bc66aecc/threadpoolctl-3.1.0-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/61/cf/6e354304bcb9c6413c4e02a747b600061c21d38ba51e7e544ac7bc66aecc/threadpoolctl-3.1.0-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "tifffile",
+                          "version":  "2021.11.2",
+                          "fileName":  "tifffile-2021.11.2-py3-none-any.whl",
+                          "sha256":  "2e0066f90e2dbeb3e6a287cfd78bafbd2f142fabbca4a76a8ff809573baf5ad5",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/d8/38/85ae5ed77598ca90558c17a2f79ddaba33173b31cf8d8f545d34d9134f0d/tifffile-2021.11.2-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/d8/38/85ae5ed77598ca90558c17a2f79ddaba33173b31cf8d8f545d34d9134f0d/tifffile-2021.11.2-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "toml",
+                          "version":  "0.10.2",
+                          "fileName":  "toml-0.10.2-py2.py3-none-any.whl",
+                          "sha256":  "806143ae5bfb6a3c6e736a764057db0e6a0e05e338b5630894a5f779cabb4f9b",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/44/6f/7120676b6d73228c96e17f1f794d8ab046fc910d781c8d151120c3f1569e/toml-0.10.2-py2.py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/44/6f/7120676b6d73228c96e17f1f794d8ab046fc910d781c8d151120c3f1569e/toml-0.10.2-py2.py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "toolz",
+                          "version":  "0.12.1",
+                          "fileName":  "toolz-0.12.1-py3-none-any.whl",
+                          "sha256":  "d22731364c07d72eea0a0ad45bafb2c2937ab6fd38a3507bf55eae8744aa7d85",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/b7/8a/d82202c9f89eab30f9fc05380daae87d617e2ad11571ab23d7c13a29bb54/toolz-0.12.1-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/b7/8a/d82202c9f89eab30f9fc05380daae87d617e2ad11571ab23d7c13a29bb54/toolz-0.12.1-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "tqdm",
+                          "version":  "4.66.2",
+                          "fileName":  "tqdm-4.66.2-py3-none-any.whl",
+                          "sha256":  "1ee4f8a893eb9bef51c6e35730cebf234d5d0b6bd112b0271e10ed7c24a02bd9",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/2a/14/e75e52d521442e2fcc9f1df3c5e456aead034203d4797867980de558ab34/tqdm-4.66.2-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/2a/14/e75e52d521442e2fcc9f1df3c5e456aead034203d4797867980de558ab34/tqdm-4.66.2-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "typing-extensions",
+                          "version":  "4.7.1",
+                          "fileName":  "typing_extensions-4.7.1-py3-none-any.whl",
+                          "sha256":  "440d5dd3af93b060174bf433bccd69b0babc3b15b1a8dca43789fd7f61514b36",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/ec/6b/63cc3df74987c36fe26157ee12e09e8f9db4de771e0f3404263117e75b95/typing_extensions-4.7.1-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/ec/6b/63cc3df74987c36fe26157ee12e09e8f9db4de771e0f3404263117e75b95/typing_extensions-4.7.1-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "urllib3",
+                          "version":  "1.25.11",
+                          "fileName":  "urllib3-1.25.11-py2.py3-none-any.whl",
+                          "sha256":  "f5321fbe4bf3fefa0efd0bfe7fb14e90909eb62a48ccda331726b4319897dd5e",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/56/aa/4ef5aa67a9a62505db124a5cb5262332d1d4153462eb8fd89c9fa41e5d92/urllib3-1.25.11-py2.py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/56/aa/4ef5aa67a9a62505db124a5cb5262332d1d4153462eb8fd89c9fa41e5d92/urllib3-1.25.11-py2.py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "wcwidth",
+                          "version":  "0.2.13",
+                          "fileName":  "wcwidth-0.2.13-py2.py3-none-any.whl",
+                          "sha256":  "3da69048e4540d84af32131829ff948f1e022c1c6bdb8d6102117aac784f6859",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/fd/84/fd2ba7aafacbad3c4201d395674fc6348826569da3c0937e75505ead3528/wcwidth-0.2.13-py2.py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/fd/84/fd2ba7aafacbad3c4201d395674fc6348826569da3c0937e75505ead3528/wcwidth-0.2.13-py2.py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "wheel",
+                          "version":  "0.38.4",
+                          "fileName":  "wheel-0.38.4-py3-none-any.whl",
+                          "sha256":  "b60533f3f5d530e971d6737ca6d58681ee434818fab630c83a734bb10c083ce8",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/bd/7c/d38a0b30ce22fc26ed7dbc087c6d00851fb3395e9d0dac40bec1f905030c/wheel-0.38.4-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/bd/7c/d38a0b30ce22fc26ed7dbc087c6d00851fb3395e9d0dac40bec1f905030c/wheel-0.38.4-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "wincertstore",
+                          "version":  "0.2",
+                          "fileName":  "wincertstore-0.2-py2.py3-none-any.whl",
+                          "sha256":  "22d5eebb52df88a8d4014d5cf6d1b6c3a5d469e6c3b2e2854f3a003e48872356",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/d1/67/12f477fa1cc8cbcdc78027c9fb0933ad41daf2e95a29d1cc8f34fe80c692/wincertstore-0.2-py2.py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/d1/67/12f477fa1cc8cbcdc78027c9fb0933ad41daf2e95a29d1cc8f34fe80c692/wincertstore-0.2-py2.py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "wrapt",
+                          "version":  "1.16.0",
+                          "fileName":  "wrapt-1.16.0-cp37-cp37m-win_amd64.whl",
+                          "sha256":  "66dfbaa7cfa3eb707bbfcd46dab2bc6207b005cbc9caa2199bcbc81d95071a00",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/66/a5/50e6a2bd4cbf6671012771ec35085807a375da5e61540bc5f62de62ba955/wrapt-1.16.0-cp37-cp37m-win_amd64.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/66/a5/50e6a2bd4cbf6671012771ec35085807a375da5e61540bc5f62de62ba955/wrapt-1.16.0-cp37-cp37m-win_amd64.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "wsproto",
+                          "version":  "1.2.0",
+                          "fileName":  "wsproto-1.2.0-py3-none-any.whl",
+                          "sha256":  "b9acddd652b585d75b20477888c56642fdade28bdfd3579aa24a4d2c037dd736",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/78/58/e860788190eba3bcce367f74d29c4675466ce8dddfba85f7827588416f01/wsproto-1.2.0-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/78/58/e860788190eba3bcce367f74d29c4675466ce8dddfba85f7827588416f01/wsproto-1.2.0-py3-none-any.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "xgboost",
+                          "version":  "1.6.2",
+                          "fileName":  "xgboost-1.6.2-py3-none-win_amd64.whl",
+                          "sha256":  "1ce15d3292d6ee75be4491ff6463c76ca548b7d77ca70f707cb23ea051e2faf7",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/24/14/d9ecb9fa86727f51bfb35f1c2b0428ebc6cd5ffde24c5e2dc583d3575a6f/xgboost-1.6.2-py3-none-win_amd64.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/24/14/d9ecb9fa86727f51bfb35f1c2b0428ebc6cd5ffde24c5e2dc583d3575a6f/xgboost-1.6.2-py3-none-win_amd64.whl"
+                                                    ]
+                                   }
+                      },
+                      {
+                          "name":  "zipp",
+                          "version":  "3.15.0",
+                          "fileName":  "zipp-3.15.0-py3-none-any.whl",
+                          "sha256":  "48904fc76a60e542af151aded95726c1a5c34ed43ab4134b597665c86d7ad556",
+                          "kind":  "wheel",
+                          "urls":  {
+                                       "china":  [
+                                                     "https://pypi.tuna.tsinghua.edu.cn/packages/5b/fa/c9e82bbe1af6266adf08afb563905eb87cab83fde00a0a08963510621047/zipp-3.15.0-py3-none-any.whl"
+                                                 ],
+                                       "official":  [
+                                                        "https://files.pythonhosted.org/packages/5b/fa/c9e82bbe1af6266adf08afb563905eb87cab83fde00a0a08963510621047/zipp-3.15.0-py3-none-any.whl"
+                                                    ]
+                                   }
+                      }
+                  ]
+}

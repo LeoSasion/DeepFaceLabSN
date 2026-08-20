@@ -3,15 +3,11 @@ setlocal EnableExtensions
 chcp 65001 >nul
 cd /d "%~dp0"
 
-set "NODE_EXE="
-if exist "%~dp0_internal\node\bin\node.exe" set "NODE_EXE=%~dp0_internal\node\bin\node.exe"
-if not defined NODE_EXE for /f "delims=" %%N in ('where node.exe 2^>nul') do if not defined NODE_EXE set "NODE_EXE=%%N"
-if not defined NODE_EXE if exist "%ProgramFiles%\nodejs\node.exe" set "NODE_EXE=%ProgramFiles%\nodejs\node.exe"
-if not defined NODE_EXE if exist "%USERPROFILE%\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe" set "NODE_EXE=%USERPROFILE%\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe"
-
 set "UI_LANG="
 set "MANAGER_ACTION="
 set "MENU_RENDERER=%~dp0webui\scripts\launcher-menu.ps1"
+set "NODE_INSTALLER=%~dp0webui\scripts\install-node.ps1"
+set "NODE_REQUIRED_VERSION=24.19.0"
 if /i "%DFL_UI_LANG%"=="zh" set "UI_LANG=zh"
 if /i "%DFL_UI_LANG%"=="en" set "UI_LANG=en"
 
@@ -48,11 +44,14 @@ if not defined UI_LANG set "UI_LANG=en"
 :initialize
 set "DFL_UI_LANG=%UI_LANG%"
 
+call :find_node
 if not defined NODE_EXE (
-    call :render_notice node-missing
-    echo.
-    pause
-    exit /b 1
+    if not exist "%NODE_INSTALLER%" goto node_installer_missing
+    call :render_notice node-installing
+    powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%NODE_INSTALLER%"
+    if errorlevel 1 goto node_install_failed
+    call :find_node
+    if not defined NODE_EXE goto node_install_failed
 )
 
 if not exist "%~dp0webui\scripts\local-manager.mjs" (
@@ -136,6 +135,18 @@ echo [WebUI] Invalid arguments.
 echo Usage: "%~nx0" [--lang zh^|en] [start^|status^|restart^|stop]
 exit /b 2
 
+:node_installer_missing
+call :render_notice node-installer-missing
+echo.
+pause
+exit /b 1
+
+:node_install_failed
+call :render_notice node-install-failed
+echo.
+pause
+exit /b 1
+
 :render_menu
 if exist "%MENU_RENDERER%" (
     powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%MENU_RENDERER%" -View menu
@@ -161,4 +172,22 @@ if exist "%MENU_RENDERER%" (
 )
 echo.
 echo [WebUI] %~1
+exit /b 0
+
+:find_node
+set "NODE_EXE="
+call :try_node "%~dp0_internal\node\bin\node.exe"
+if defined NODE_EXE exit /b 0
+for /f "delims=" %%N in ('where node.exe 2^>nul') do call :try_node "%%N"
+if defined NODE_EXE exit /b 0
+call :try_node "%ProgramFiles%\nodejs\node.exe"
+if defined NODE_EXE exit /b 0
+call :try_node "%USERPROFILE%\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe"
+exit /b 0
+
+:try_node
+if defined NODE_EXE exit /b 0
+if not exist "%~1" exit /b 0
+"%~1" -e "process.exit(process.versions.node === '%NODE_REQUIRED_VERSION%' && process.platform === 'win32' && process.arch === 'x64' ? 0 : 1)" >nul 2>&1
+if not errorlevel 1 set "NODE_EXE=%~1"
 exit /b 0

@@ -2,7 +2,9 @@
     [ValidateSet(
         "menu",
         "stopping",
-        "node-missing",
+        "node-installing",
+        "node-installer-missing",
+        "node-install-failed",
         "manager-missing",
         "stop-failed",
         "action-failed",
@@ -69,10 +71,24 @@ switch ($View) {
         Write-Notice "Stopping WebUI..." "正在停止 WebUI…" Red
         exit 0
     }
-    "node-missing" {
-        Write-Notice "Node.js was not found." "未找到 Node.js。" Red
-        Write-Host "  Install Node.js 20 or newer and try again." -ForegroundColor DarkGray
-        Write-Host "  请安装 Node.js 20 或更高版本后重试。" -ForegroundColor DarkGray
+    "node-installing" {
+        Write-Notice "Preparing portable Node.js..." "正在准备便携 Node.js…" Yellow
+        Write-Host "  The runtime stays inside this folder and does not modify the system PATH." -ForegroundColor DarkGray
+        Write-Host "  运行时只安装在整合包内，不会修改系统 PATH。" -ForegroundColor DarkGray
+        exit 0
+    }
+    "node-installer-missing" {
+        Write-Notice "The Node.js bootstrap script is missing." "Node.js 引导安装脚本缺失。" Red
+        Write-Host "  Please re-extract a complete DeepFaceLabSN package." -ForegroundColor DarkGray
+        Write-Host "  请重新解压完整的 DeepFaceLabSN 整合包。" -ForegroundColor DarkGray
+        exit 0
+    }
+    "node-install-failed" {
+        Write-Notice "Portable Node.js could not be prepared." "便携 Node.js 准备失败。" Red
+        Write-Host "  Check the error above and confirm that nodejs.org is reachable." -ForegroundColor DarkGray
+        Write-Host "  请查看上方错误，并确认可以访问 nodejs.org。" -ForegroundColor DarkGray
+        Write-Host "  Offline archives can be placed under _internal\installers." -ForegroundColor DarkGray
+        Write-Host "  离线安装包可放入 _internal\installers。" -ForegroundColor DarkGray
         exit 0
     }
     "manager-missing" {

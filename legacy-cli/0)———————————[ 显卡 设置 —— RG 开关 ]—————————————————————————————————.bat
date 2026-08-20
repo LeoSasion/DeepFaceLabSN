@@ -1,27 +1,32 @@
 @echo off
 setlocal
 chcp 65001 > nul
-rem 检查配置文件是否存在
 cd /d "%~dp0.."
-if exist _internal\config.txt (
-    rem 如果存在配置文件，则读取配置文件中的选择
-    < _internal\config.txt (
-        set /p var1=
-        set /p var2=
+set "CONFIG_FILE=_internal\config.txt"
+set "DEFAULT_CONFIG_FILE=_internal\config.default.txt"
+
+if not exist "%CONFIG_FILE%" (
+    if not exist "%DEFAULT_CONFIG_FILE%" (
+        echo 错误：找不到默认配置 "%DEFAULT_CONFIG_FILE%"
+        goto end
     )
-
-    call :tell
-    call :choose
-    call :tell
-    call :do
-
-) else (
-    echo 首次写入配置
-
-    call :choose
-    call :tell
-    call :do
+    copy /y "%DEFAULT_CONFIG_FILE%" "%CONFIG_FILE%" > nul
+    if errorlevel 1 (
+        echo 错误：无法创建本地配置 "%CONFIG_FILE%"
+        goto end
+    )
+    echo 已从默认模板创建本地配置。
 )
+
+< "%CONFIG_FILE%" (
+    set /p var1=
+    set /p var2=
+)
+
+call :tell
+call :choose
+call :tell
+call :do
 goto end
 
 :choose
@@ -58,11 +63,11 @@ goto :eof
 :tell
 
 
-if %var1% == 1 (
+if "%var1%" == "1" (
     cd "_internal\python_common\Lib\site-packages\"
     call dml.bat
     echo ------------------------------------------------您已选择 DML
-) else if %var1% == 2 (
+) else if "%var1%" == "2" (
     cd "_internal\python_common\Lib\site-packages\"
     call cuda.bat
     echo ------------------------------------------------您已选择 CUDA
@@ -73,11 +78,9 @@ if %var1% == 1 (
 
 cd /d "%~dp0.."
 
-if %var2% == 1 (
-    set source2=_internal\DeepFaceLab\core\leras\archis\DeepFakeArchi_rg.py
+if "%var2%" == "1" (
     echo ------------------------------------------------已开启RG优化
-) else if %var2% == 2 (
-    set source2=_internal\DeepFaceLab\core\leras\archis\DeepFakeArchi_old.py
+) else if "%var2%" == "2" (
     echo ------------------------------------------------已关闭RG优化
 ) else (
     echo ------------------------------------------------RG:无效的选择
@@ -89,23 +92,9 @@ goto :eof
 :do
 
 cd /d "%~dp0.."
-
-set destination2=_internal\DeepFaceLab\core\leras\archis\DeepFakeArchi.py
-
-if exist %destination2% (
-    del %destination2%
-)
-
-copy %source2% %destination2% > nul
-echo RG文件替换完成！
-
-echo.
-
-rem 将用户选择保存到配置文件
-cd /d "%~dp0.."
-echo %var1: =% >_internal\config.txt
-
-echo %var2: =% >>_internal\config.txt
+>"%CONFIG_FILE%" echo %var1: =%
+>>"%CONFIG_FILE%" echo %var2: =%
+echo 配置已保存；RG 架构将在下次启动时自动选择。
 goto :eof
 
 :end

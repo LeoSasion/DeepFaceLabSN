@@ -1,0 +1,413 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/LeoSasion/DeepFaceLabSN/launcher/runtime-manifest.schema.json",
+  "title": "DeepFaceLabSN launcher runtime manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "manifestVersion",
+    "components"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schemaVersion": {
+      "const": 2
+    },
+    "manifestVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string"
+    },
+    "components": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/definitions/component"
+      }
+    }
+  },
+  "definitions": {
+    "urlList": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uri",
+        "pattern": "^https://"
+      }
+    },
+    "urls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "china",
+        "official"
+      ],
+      "properties": {
+        "china": {
+          "$ref": "#/definitions/urlList"
+        },
+        "official": {
+          "$ref": "#/definitions/urlList"
+        }
+      }
+    },
+    "package": {
+      "type": "object",
+      "required": [
+        "name",
+        "format",
+        "sha256",
+        "urls"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[^\\\\/:*?\"<>|]+\\.zip$"
+        },
+        "format": {
+          "const": "zip"
+        },
+        "sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "urls": {
+          "$ref": "#/definitions/urls"
+        }
+      }
+    },
+    "archive": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/package"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "format",
+            "sha256",
+            "urls"
+          ],
+          "properties": {
+            "name": true,
+            "format": true,
+            "sha256": true,
+            "urls": true
+          }
+        }
+      ]
+    },
+    "mapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "target"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "artifact": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/package"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "name",
+            "format",
+            "sha256",
+            "urls",
+            "archiveRoot",
+            "files"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]*$"
+            },
+            "name": true,
+            "format": true,
+            "sha256": true,
+            "urls": true,
+            "archiveRoot": {
+              "type": "string",
+              "minLength": 1
+            },
+            "files": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/definitions/mapping"
+              }
+            },
+            "notices": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/mapping"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "license": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "reviewStatus",
+        "notice"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "reviewStatus": {
+          "enum": [
+            "official-upstream-download",
+            "approved-upstream-download",
+            "todo"
+          ]
+        },
+        "notice": {
+          "type": "string"
+        }
+      }
+    },
+    "fileRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "file",
+            "directory"
+          ]
+        },
+        "minBytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "commandRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "arguments",
+        "outputRegex"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "arguments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "outputRegex": {
+          "type": "string"
+        }
+      }
+    },
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "displayName",
+        "required",
+        "available",
+        "version",
+        "license",
+        "install",
+        "validation"
+      ],
+      "oneOf": [
+        {
+          "required": [
+            "archive"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "artifacts"
+                ]
+              },
+              {
+                "required": [
+                  "wheelLock"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "required": [
+            "artifacts"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "archive"
+                ]
+              },
+              {
+                "required": [
+                  "wheelLock"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "required": [
+            "wheelLock",
+            "wheelLockSha256"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "archive"
+                ]
+              },
+              {
+                "required": [
+                  "artifacts"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hostingTodo": {
+          "type": "string"
+        },
+        "wheelLock": {
+          "type": "string",
+          "minLength": 1
+        },
+        "wheelLockSha256": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "license": {
+          "$ref": "#/definitions/license"
+        },
+        "archive": {
+          "$ref": "#/definitions/archive"
+        },
+        "artifacts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/artifact"
+          }
+        },
+        "install": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "relativePath",
+            "layout",
+            "requiredFreeBytes"
+          ],
+          "properties": {
+            "relativePath": {
+              "type": "string",
+              "pattern": "^_internal[\\\\/][^:*?\"<>|]+$"
+            },
+            "archiveRoot": {
+              "type": "string"
+            },
+            "layout": {
+              "enum": [
+                "direct",
+                "bin",
+                "merge-files",
+                "python-wheelhouse"
+              ]
+            },
+            "requiredFreeBytes": {
+              "type": "integer",
+              "minimum": 1048576
+            }
+          }
+        },
+        "validation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "files"
+          ],
+          "properties": {
+            "files": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/definitions/fileRule"
+              }
+            },
+            "command": {
+              "$ref": "#/definitions/commandRule"
+            }
+          }
+        }
+      }
+    }
+  }
+}

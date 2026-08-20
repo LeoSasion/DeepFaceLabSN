@@ -1,0 +1,9 @@
+{
+  "name": "@deepfacelabsn/terminal-bridge",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "\"..\\..\\_internal\\node\\bin\\node.exe\" index.mjs",
+    "test": "\"..\\..\\_internal\\node\\bin\\node.exe\" --test tests/*.test.mjs"
+  }
+}

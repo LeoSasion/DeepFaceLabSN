@@ -3,6 +3,10 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=24 <25"
+  },
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:web": "vite --configLoader runner",

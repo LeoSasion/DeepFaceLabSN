@@ -6,11 +6,14 @@ _internal/EbSynth/
 _internal/ffmpeg/
 _internal/model_generic_xseg/
 _internal/node/
+_internal/installers/*
+!_internal/installers/README.md
 _internal/pretrain_Quick224/
 _internal/pretrain_Quick384/
 _internal/pretrain_Quick512/
 _internal/python_common/
 _internal/XnViewMP/
+_internal/config.txt
 *.npy
 
 # Local runtime and editor noise
@@ -19,16 +22,8 @@ _internal/XnViewMP/
 **/.vs/
 desktop.ini
 
-# Local DeepFaceLab workspace artifacts
-workspace/.webui/
-workspace/data_src.mp4
-workspace/data_dst.mp4
-workspace/data_src/
-workspace/data_dst/
-workspace/model/
-workspace/result*.mp4
-workspace/result*.avi
-workspace/result*.mov
+# Local DeepFaceLab workspace artifacts and user data
+/workspace/
 
 # Repository-managed project workspaces contain private user media and models
 /workspaces/
@@ -56,3 +51,12 @@ data.json
 
 # Runtime-generated shortcuts in the legacy “recent use” menu
 /legacy-cli/0-*.bat
+
+# Launcher build dependencies and generated output
+/.vite/
+/launcher/ui/node_modules/
+/launcher/ui/.npm-cache/
+/launcher/ui/dist/
+/launcher/vendor/
+/launcher/bin/
+/launcher/bin-host-verify/

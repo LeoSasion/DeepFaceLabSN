@@ -14,6 +14,46 @@ DeepFaceLabSN 是一套面向 Windows 与 NVIDIA GPU 的本地 DeepFaceLab 工�
 - 更新日志：[Monster 社区](https://bbs.monster/thread-692-1-1.html)
 - 推荐环境：Windows 10/11、NVIDIA GPU、足够的显存与磁盘空间
 
+
+### 单文件下载启动器
+
+仓库现已提供轻量原生启动器的构建源码。发布产物只有一个
+`DeepFaceLabSN.Launcher.exe`；它内嵌首次配置页、常态启动页、依赖引导脚本、
+WebView2 宿主和 ConPTY 终端桥，不需要把 DLL 或前端文件放在 EXE 旁边。
+
+如果系统缺少 Microsoft Edge WebView2 Runtime，EXE 会先显示不依赖 WebView2
+的原生安装窗，只从 Microsoft 官方地址下载安装器，校验 Authenticode 签名后静默
+安装并自动继续。
+
+首次运行时，启动器会在用户选择的空目录中完成以下工作：
+
+1. 准备经过 SHA-256 校验的便携 MinGit，并从固定 GitHub 地址克隆 `main`。
+2. 把 Node.js 安装到 `_internal/node`。
+3. 从 NVIDIA 官方可再发行归档中提取所需 DLL 到 `_internal/CUDA` 与 `_internal/CUDNN`。
+4. 从官方 CPython 与固定 PyPI wheel 构建并验证 `_internal/python_common`，随后安装 WebUI 依赖。
+5. 进入常态界面；可启动 WebUI，也可直接使用内嵌的传统 BAT 交互终端。
+
+所有运行时和镜像配置都保存在项目内，不修改系统 PATH，也不写用户全局 npm/pip
+配置。自动模式会优先探测国内 npm、pip 与 Node 镜像，失败后回退官方源；每个下载
+文件仍必须通过清单中的固定 SHA-256。
+
+> **Python 运行时：** 当前清单已启用可复现 wheelhouse：官方 CPython 3.7.1、
+> 97 个固定 wheel 与 1 个经 SHA-256 校验的源码包。下载阶段优先使用清华 PyPI 镜像，
+> 失败后回退官方文件源；安装阶段强制 `--no-index --no-deps`，不会临时解析新版依赖。
+> 已有且通过完整文件、版本和导入校验的 `_internal/python_common` 会直接复用。
+> 锁定清单、安全边界与维护流程见 `launcher/python-runtime/README.md`。
+
+“检查项目更新”只执行安全检查与 `fetch`。用户确认安装后才执行
+`merge --ff-only origin/main`；检测到源码改动、分支分叉、错误远端或远端包含受保护
+路径时会停止，不会自动运行 `stash`、`reset` 或 `clean`。`workspace`、`workspaces`、
+模型、`_internal/config.txt` 与项目本地运行时不会被更新覆盖。
+
+构建命令：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File launcher\build-host.ps1
+```
+
 首次使用只需五步：
 
 1. 解压整合包，尽量使用短路径和纯英文目录。
@@ -21,6 +61,8 @@ DeepFaceLabSN 是一套面向 Windows 与 NVIDIA GPU 的本地 DeepFaceLab 工�
 3. 浏览器打开后，确认顶部显示“本地服务在线”，并能识别 GPU。
 4. 打开“工作区”，分别导入 SRC 源视频与 DST 目标视频，并核对预览、时长和分辨率。
 5. 点击“新建任务”，按“选择任务 → 配置参数 → 确认执行”三步向导运行提帧、训练或导出任务。
+
+启动器会优先使用整合包内的便携 Node.js 24。若运行时缺失或版本不兼容，会自动从整合包内置的离线安装包补齐；离线安装包也不存在时，才从 Node.js 官方站下载并校验 SHA-256。整个过程不需要管理员权限，也不会修改系统 PATH。首次使用精简版整合包时需要联网下载约 37 MB。
 
 ![新建任务向导](docs/images/product-new-task.png)
 

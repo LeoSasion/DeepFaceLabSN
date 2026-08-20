@@ -21,6 +21,19 @@ pnpm stop:local
 
 页面地址为 `http://127.0.0.1:4173`，本地 Runtime 为 `http://127.0.0.1:4174`。
 
+### Node.js 自动补齐与整合包
+
+根目录启动器要求 Node.js 24，并按以下顺序处理：
+
+1. 使用 `_internal/node/bin/node.exe` 中随整合包发布的 Node.js 24.19.0 便携运行时。
+2. 使用电脑上已有的同版本 Node.js 24.19.0。
+3. 运行 `scripts/install-node.ps1`，优先读取 `_internal/installers/node-v24.19.0-win-x64.zip`。
+4. 没有离线安装包时，从 Node.js 官方站下载固定版本并校验 SHA-256，再原子替换到 `_internal/node/bin`。
+
+安装不会写入系统目录、注册表或 PATH，也不要求管理员权限。面向普通用户发布时推荐直接保留已经准备好的 `_internal/node`，这样首次启动完全离线；若要缩小包体，则可只放置 `_internal/installers` 下的官方 ZIP。ZIP 已被 Git 忽略，其固定文件名、下载地址与校验值记录在该目录的 `README.md` 中。
+
+Node.js 只是运行时。完整整合包还必须包含 `webui/node_modules` 和已经构建的 `webui/dist`；不要把仅有源码、需要用户执行 `pnpm install` 的目录当作普通用户整合包发布。
+
 ## 开发运行
 
 ```powershell

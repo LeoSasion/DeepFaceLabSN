@@ -1,0 +1,606 @@
+{
+  "$schema": "./runtime-manifest.schema.json",
+  "schemaVersion": 2,
+  "manifestVersion": "2026.08.20.4",
+  "description": "Pinned project-local runtimes. CUDA and cuDNN are assembled from official redistributable archives; Python is built offline from the official CPython base and a SHA-256-pinned wheelhouse.",
+  "components": [
+    {
+      "id": "mingit",
+      "displayName": "Portable MinGit",
+      "required": true,
+      "available": true,
+      "version": "2.55.0.3",
+      "license": {
+        "name": "Git for Windows / GPL-2.0 and bundled notices",
+        "reviewStatus": "official-upstream-download",
+        "notice": "Downloaded from the official immutable Git for Windows GitHub release. Preserve bundled notices when redistributing."
+      },
+      "archive": {
+        "name": "MinGit-2.55.0.3-64-bit.zip",
+        "format": "zip",
+        "sha256": "f48e2d2dc74a24454adc6d8fd0ac25bf9c2386f19cfb06202b9465aaad4f9f05",
+        "urls": {
+          "china": [
+            "https://mirrors.huaweicloud.com/git-for-windows/v2.55.0.windows.3/MinGit-2.55.0.3-64-bit.zip"
+          ],
+          "official": [
+            "https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.3/MinGit-2.55.0.3-64-bit.zip"
+          ]
+        }
+      },
+      "install": {
+        "relativePath": "_internal/git",
+        "archiveRoot": ".",
+        "layout": "direct",
+        "requiredFreeBytes": 536870912
+      },
+      "validation": {
+        "files": [
+          {
+            "path": "cmd/git.exe",
+            "minBytes": 1024
+          }
+        ],
+        "command": {
+          "path": "cmd/git.exe",
+          "arguments": [
+            "--version"
+          ],
+          "outputRegex": "^git version 2\\.55\\.0(?:\\.windows\\.3)?"
+        }
+      }
+    },
+    {
+      "id": "node",
+      "displayName": "Portable Node.js",
+      "required": true,
+      "available": true,
+      "version": "24.19.0",
+      "license": {
+        "name": "Node.js license and bundled third-party notices",
+        "reviewStatus": "official-upstream-download",
+        "notice": "Pinned to the same official archive and SHA-256 as webui/scripts/install-node.ps1."
+      },
+      "archive": {
+        "name": "node-v24.19.0-win-x64.zip",
+        "format": "zip",
+        "sha256": "57f71ab3652e797d84acddc79c81cc9ff1c6ddb2a1974cdb83f00fee9bff4c73",
+        "urls": {
+          "china": [
+            "https://mirrors.huaweicloud.com/nodejs/v24.19.0/node-v24.19.0-win-x64.zip"
+          ],
+          "official": [
+            "https://nodejs.org/dist/v24.19.0/node-v24.19.0-win-x64.zip"
+          ]
+        }
+      },
+      "install": {
+        "relativePath": "_internal/node",
+        "archiveRoot": "node-v24.19.0-win-x64",
+        "layout": "bin",
+        "requiredFreeBytes": 536870912
+      },
+      "validation": {
+        "files": [
+          {
+            "path": "bin/node.exe",
+            "minBytes": 1024
+          },
+          {
+            "path": "bin/npm.cmd",
+            "minBytes": 32
+          }
+        ],
+        "command": {
+          "path": "bin/node.exe",
+          "arguments": [
+            "-p",
+            "process.versions.node"
+          ],
+          "outputRegex": "^24\\.19\\.0$"
+        }
+      }
+    },
+    {
+      "id": "cuda",
+      "displayName": "CUDA 11.8 runtime DLLs",
+      "required": true,
+      "available": true,
+      "version": "11.8-dflsn-runtime-v2",
+      "license": {
+        "name": "NVIDIA CUDA Toolkit EULA plus zlib license/readme",
+        "reviewStatus": "official-upstream-download",
+        "notice": "Each NVIDIA component is fetched from the official CUDA redist service. zlibwapi.dll is fetched from the ZLIB DLL package linked by NVIDIA's cuDNN 8.x Windows installation guide. Per-archive notices are retained beside the payload."
+      },
+      "artifacts": [
+        {
+          "id": "cuda-cudart",
+          "name": "cuda_cudart-windows-x86_64-11.8.89-archive.zip",
+          "format": "zip",
+          "sha256": "988cc9e7d3785d4b1975521f312c57c6814cbf15e73a2b7941d961835f2a945e",
+          "urls": {
+            "china": [
+              "https://developer.download.nvidia.cn/compute/cuda/redist/cuda_cudart/windows-x86_64/cuda_cudart-windows-x86_64-11.8.89-archive.zip"
+            ],
+            "official": [
+              "https://developer.download.nvidia.com/compute/cuda/redist/cuda_cudart/windows-x86_64/cuda_cudart-windows-x86_64-11.8.89-archive.zip"
+            ]
+          },
+          "archiveRoot": "cuda_cudart-windows-x86_64-11.8.89-archive",
+          "files": [
+            {
+              "source": "bin/cudart64_110.dll",
+              "target": "cudart64_110.dll"
+            }
+          ],
+          "notices": [
+            {
+              "source": "LICENSE",
+              "target": "_licenses/cuda-cudart-LICENSE.txt"
+            }
+          ]
+        },
+        {
+          "id": "cuda-cupti",
+          "name": "cuda_cupti-windows-x86_64-11.8.87-archive.zip",
+          "format": "zip",
+          "sha256": "a243ffc6b5cfd9ba469bc3dd02208186c4f1956e91d54e9bca295757edd9dafa",
+          "urls": {
+            "china": [
+              "https://developer.download.nvidia.cn/compute/cuda/redist/cuda_cupti/windows-x86_64/cuda_cupti-windows-x86_64-11.8.87-archive.zip"
+            ],
+            "official": [
+              "https://developer.download.nvidia.com/compute/cuda/redist/cuda_cupti/windows-x86_64/cuda_cupti-windows-x86_64-11.8.87-archive.zip"
+            ]
+          },
+          "archiveRoot": "cuda_cupti-windows-x86_64-11.8.87-archive",
+          "files": [
+            {
+              "source": "lib/cupti64_2022.3.0.dll",
+              "target": "cupti64_2022.3.0.dll"
+            }
+          ],
+          "notices": [
+            {
+              "source": "LICENSE",
+              "target": "_licenses/cuda-cupti-LICENSE.txt"
+            }
+          ]
+        },
+        {
+          "id": "libcublas",
+          "name": "libcublas-windows-x86_64-11.11.3.6-archive.zip",
+          "format": "zip",
+          "sha256": "67b0934a6359e4ee26fff823c356021589d392c4fd49ca12624f570edc08e2b9",
+          "urls": {
+            "china": [
+              "https://developer.download.nvidia.cn/compute/cuda/redist/libcublas/windows-x86_64/libcublas-windows-x86_64-11.11.3.6-archive.zip"
+            ],
+            "official": [
+              "https://developer.download.nvidia.com/compute/cuda/redist/libcublas/windows-x86_64/libcublas-windows-x86_64-11.11.3.6-archive.zip"
+            ]
+          },
+          "archiveRoot": "libcublas-windows-x86_64-11.11.3.6-archive",
+          "files": [
+            {
+              "source": "bin/cublas64_11.dll",
+              "target": "cublas64_11.dll"
+            },
+            {
+              "source": "bin/cublasLt64_11.dll",
+              "target": "cublasLt64_11.dll"
+            }
+          ],
+          "notices": [
+            {
+              "source": "LICENSE",
+              "target": "_licenses/libcublas-LICENSE.txt"
+            }
+          ]
+        },
+        {
+          "id": "libcufft",
+          "name": "libcufft-windows-x86_64-10.9.0.58-archive.zip",
+          "format": "zip",
+          "sha256": "a4071a85e3983bf42ea7a2e9bebe3b0b3c9ac258668580adc32ee1c385f7556f",
+          "urls": {
+            "china": [
+              "https://developer.download.nvidia.cn/compute/cuda/redist/libcufft/windows-x86_64/libcufft-windows-x86_64-10.9.0.58-archive.zip"
+            ],
+            "official": [
+              "https://developer.download.nvidia.com/compute/cuda/redist/libcufft/windows-x86_64/libcufft-windows-x86_64-10.9.0.58-archive.zip"
+            ]
+          },
+          "archiveRoot": "libcufft-windows-x86_64-10.9.0.58-archive",
+          "files": [
+            {
+              "source": "bin/cufft64_10.dll",
+              "target": "cufft64_10.dll"
+            },
+            {
+              "source": "bin/cufftw64_10.dll",
+              "target": "cufftw64_10.dll"
+            }
+          ],
+          "notices": [
+            {
+              "source": "LICENSE",
+              "target": "_licenses/libcufft-LICENSE.txt"
+            }
+          ]
+        },
+        {
+          "id": "libcurand",
+          "name": "libcurand-windows-x86_64-10.3.0.86-archive.zip",
+          "format": "zip",
+          "sha256": "aaccf56d68a63378edc05109c233ed47e185237c8d334f9df136923440a9a6b7",
+          "urls": {
+            "china": [
+              "https://developer.download.nvidia.cn/compute/cuda/redist/libcurand/windows-x86_64/libcurand-windows-x86_64-10.3.0.86-archive.zip"
+            ],
+            "official": [
+              "https://developer.download.nvidia.com/compute/cuda/redist/libcurand/windows-x86_64/libcurand-windows-x86_64-10.3.0.86-archive.zip"
+            ]
+          },
+          "archiveRoot": "libcurand-windows-x86_64-10.3.0.86-archive",
+          "files": [
+            {
+              "source": "bin/curand64_10.dll",
+              "target": "curand64_10.dll"
+            }
+          ],
+          "notices": [
+            {
+              "source": "LICENSE",
+              "target": "_licenses/libcurand-LICENSE.txt"
+            }
+          ]
+        },
+        {
+          "id": "libcusolver",
+          "name": "libcusolver-windows-x86_64-11.4.1.48-archive.zip",
+          "format": "zip",
+          "sha256": "965298e47640b643827cd6fe4ca5cab3c5a97b4bedc5357e9b6551298d1f9c2c",
+          "urls": {
+            "china": [
+              "https://developer.download.nvidia.cn/compute/cuda/redist/libcusolver/windows-x86_64/libcusolver-windows-x86_64-11.4.1.48-archive.zip"
+            ],
+            "official": [
+              "https://developer.download.nvidia.com/compute/cuda/redist/libcusolver/windows-x86_64/libcusolver-windows-x86_64-11.4.1.48-archive.zip"
+            ]
+          },
+          "archiveRoot": "libcusolver-windows-x86_64-11.4.1.48-archive",
+          "files": [
+            {
+              "source": "bin/cusolver64_11.dll",
+              "target": "cusolver64_11.dll"
+            },
+            {
+              "source": "bin/cusolverMg64_11.dll",
+              "target": "cusolverMg64_11.dll"
+            }
+          ],
+          "notices": [
+            {
+              "source": "LICENSE",
+              "target": "_licenses/libcusolver-LICENSE.txt"
+            }
+          ]
+        },
+        {
+          "id": "libcusparse",
+          "name": "libcusparse-windows-x86_64-11.7.5.86-archive.zip",
+          "format": "zip",
+          "sha256": "b51a46f4f6bb9476ffe433a1dedad2c94a546c8a92e70dfed63207b64ff57e50",
+          "urls": {
+            "china": [
+              "https://developer.download.nvidia.cn/compute/cuda/redist/libcusparse/windows-x86_64/libcusparse-windows-x86_64-11.7.5.86-archive.zip"
+            ],
+            "official": [
+              "https://developer.download.nvidia.com/compute/cuda/redist/libcusparse/windows-x86_64/libcusparse-windows-x86_64-11.7.5.86-archive.zip"
+            ]
+          },
+          "archiveRoot": "libcusparse-windows-x86_64-11.7.5.86-archive",
+          "files": [
+            {
+              "source": "bin/cusparse64_11.dll",
+              "target": "cusparse64_11.dll"
+            }
+          ],
+          "notices": [
+            {
+              "source": "LICENSE",
+              "target": "_licenses/libcusparse-LICENSE.txt"
+            }
+          ]
+        },
+        {
+          "id": "cuda-nvprof",
+          "name": "cuda_nvprof-windows-x86_64-11.8.87-archive.zip",
+          "format": "zip",
+          "sha256": "24f0cdf3692241efb8948230ea82b57245ae9654fafdcbea31314b06a7527580",
+          "urls": {
+            "china": [
+              "https://developer.download.nvidia.cn/compute/cuda/redist/cuda_nvprof/windows-x86_64/cuda_nvprof-windows-x86_64-11.8.87-archive.zip"
+            ],
+            "official": [
+              "https://developer.download.nvidia.com/compute/cuda/redist/cuda_nvprof/windows-x86_64/cuda_nvprof-windows-x86_64-11.8.87-archive.zip"
+            ]
+          },
+          "archiveRoot": "cuda_nvprof-windows-x86_64-11.8.87-archive",
+          "files": [
+            {
+              "source": "bin/cuinj64_118.dll",
+              "target": "cuinj64_118.dll"
+            }
+          ],
+          "notices": [
+            {
+              "source": "LICENSE",
+              "target": "_licenses/cuda-nvprof-LICENSE.txt"
+            }
+          ]
+        },
+        {
+          "id": "zlib-win64",
+          "name": "zlib123dllx64.zip",
+          "format": "zip",
+          "sha256": "fd324c6923aa4f45a60413665e0b68bb34a7779d0861849e02d2711ff8efb9a4",
+          "urls": {
+            "china": [],
+            "official": [
+              "https://www.winimage.com/zLibDll/zlib123dllx64.zip"
+            ]
+          },
+          "archiveRoot": ".",
+          "files": [
+            {
+              "source": "dll_x64/zlibwapi.dll",
+              "target": "zlibwapi.dll"
+            }
+          ],
+          "notices": [
+            {
+              "source": "readme.txt",
+              "target": "_licenses/zlib-readme.txt"
+            }
+          ]
+        }
+      ],
+      "install": {
+        "relativePath": "_internal/CUDA",
+        "layout": "merge-files",
+        "requiredFreeBytes": 3758096384
+      },
+      "validation": {
+        "files": [
+          {
+            "path": "cublas64_11.dll",
+            "minBytes": 88668160
+          },
+          {
+            "path": "cublasLt64_11.dll",
+            "minBytes": 544070144
+          },
+          {
+            "path": "cudart64_110.dll",
+            "minBytes": 526848
+          },
+          {
+            "path": "cufft64_10.dll",
+            "minBytes": 279878656
+          },
+          {
+            "path": "cufftw64_10.dll",
+            "minBytes": 290816
+          },
+          {
+            "path": "cuinj64_118.dll",
+            "minBytes": 1317376
+          },
+          {
+            "path": "cupti64_2022.3.0.dll",
+            "minBytes": 4291584
+          },
+          {
+            "path": "curand64_10.dll",
+            "minBytes": 65375744
+          },
+          {
+            "path": "cusolver64_11.dll",
+            "minBytes": 298449920
+          },
+          {
+            "path": "cusolverMg64_11.dll",
+            "minBytes": 182037504
+          },
+          {
+            "path": "cusparse64_11.dll",
+            "minBytes": 277443584
+          },
+          {
+            "path": "zlibwapi.dll",
+            "minBytes": 89088
+          }
+        ]
+      }
+    },
+    {
+      "id": "cudnn",
+      "displayName": "cuDNN 8.8 runtime DLLs",
+      "required": true,
+      "available": true,
+      "version": "8.8.0.121-cuda11",
+      "license": {
+        "name": "NVIDIA cuDNN Software License Agreement",
+        "reviewStatus": "official-upstream-download",
+        "notice": "Downloaded from NVIDIA's official cuDNN redist service. The archive LICENSE is retained beside the selected DLL payload."
+      },
+      "artifacts": [
+        {
+          "id": "cudnn",
+          "name": "cudnn-windows-x86_64-8.8.0.121_cuda11-archive.zip",
+          "format": "zip",
+          "sha256": "4f0105a51ac6ea947154e252c8b220baf3345803f55644b5aad84e22ae4f8986",
+          "urls": {
+            "china": [
+              "https://developer.download.nvidia.cn/compute/cudnn/redist/cudnn/windows-x86_64/cudnn-windows-x86_64-8.8.0.121_cuda11-archive.zip"
+            ],
+            "official": [
+              "https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/windows-x86_64/cudnn-windows-x86_64-8.8.0.121_cuda11-archive.zip"
+            ]
+          },
+          "archiveRoot": "cudnn-windows-x86_64-8.8.0.121_cuda11-archive",
+          "files": [
+            {
+              "source": "bin/cudnn64_8.dll",
+              "target": "cudnn64_8.dll"
+            },
+            {
+              "source": "bin/cudnn_adv_infer64_8.dll",
+              "target": "cudnn_adv_infer64_8.dll"
+            },
+            {
+              "source": "bin/cudnn_adv_train64_8.dll",
+              "target": "cudnn_adv_train64_8.dll"
+            },
+            {
+              "source": "bin/cudnn_cnn_infer64_8.dll",
+              "target": "cudnn_cnn_infer64_8.dll"
+            },
+            {
+              "source": "bin/cudnn_cnn_train64_8.dll",
+              "target": "cudnn_cnn_train64_8.dll"
+            },
+            {
+              "source": "bin/cudnn_ops_infer64_8.dll",
+              "target": "cudnn_ops_infer64_8.dll"
+            },
+            {
+              "source": "bin/cudnn_ops_train64_8.dll",
+              "target": "cudnn_ops_train64_8.dll"
+            }
+          ],
+          "notices": [
+            {
+              "source": "LICENSE",
+              "target": "_licenses/cudnn-LICENSE.txt"
+            }
+          ]
+        }
+      ],
+      "install": {
+        "relativePath": "_internal/CUDNN",
+        "layout": "merge-files",
+        "requiredFreeBytes": 5368709120
+      },
+      "validation": {
+        "files": [
+          {
+            "path": "cudnn64_8.dll",
+            "minBytes": 288296
+          },
+          {
+            "path": "cudnn_adv_infer64_8.dll",
+            "minBytes": 125408808
+          },
+          {
+            "path": "cudnn_adv_train64_8.dll",
+            "minBytes": 118476328
+          },
+          {
+            "path": "cudnn_cnn_infer64_8.dll",
+            "minBytes": 606158376
+          },
+          {
+            "path": "cudnn_cnn_train64_8.dll",
+            "minBytes": 97627704
+          },
+          {
+            "path": "cudnn_ops_infer64_8.dll",
+            "minBytes": 89630776
+          },
+          {
+            "path": "cudnn_ops_train64_8.dll",
+            "minBytes": 70695464
+          }
+        ]
+      }
+    },
+    {
+      "id": "python",
+      "displayName": "DeepFaceLabSN Python runtime",
+      "required": true,
+      "available": true,
+      "version": "3.7.1-tf-gpu-2.10.1-wheelhouse-v1",
+      "license": {
+        "name": "Python Software Foundation License plus package-specific upstream licenses",
+        "reviewStatus": "approved-upstream-download",
+        "notice": "The launcher downloads the official CPython embeddable distribution and hash-pinned PyPI artifacts. Installed wheel metadata and license files are retained; each dependency remains governed by its own upstream license."
+      },
+      "wheelLock": "python-runtime/runtime-wheel-lock.json",
+      "wheelLockSha256": "d0719b8a776c6fc252ba5a40274f8cef6927240e4ac376c5233fa24de29a6503",
+      "install": {
+        "relativePath": "_internal/python_common",
+        "layout": "python-wheelhouse",
+        "requiredFreeBytes": 6442450944
+      },
+      "validation": {
+        "files": [
+          {
+            "path": "python.exe",
+            "minBytes": 90000
+          },
+          {
+            "path": "python37.dll",
+            "minBytes": 3700000
+          },
+          {
+            "path": "Lib/site-packages",
+            "kind": "directory"
+          },
+          {
+            "path": "Lib/site-packages/tensorflow/python/_pywrap_tensorflow_internal.pyd",
+            "minBytes": 900000000
+          },
+          {
+            "path": "Lib/site-packages/cv2/cv2.cp37-win_amd64.pyd",
+            "minBytes": 70000000
+          },
+          {
+            "path": "Lib/site-packages/numpy/core/_multiarray_umath.cp37-win_amd64.pyd",
+            "minBytes": 2000000
+          },
+          {
+            "path": "Lib/site-packages/scipy/_lib/_ccallback_c.cp37-win_amd64.pyd",
+            "minBytes": 50000
+          },
+          {
+            "path": "Lib/site-packages/PyQt5/QtCore.pyd",
+            "minBytes": 2000000
+          },
+          {
+            "path": "Lib/site-packages/onnx/onnx_cpp2py_export.cp37-win_amd64.pyd",
+            "minBytes": 2000000
+          },
+          {
+            "path": "Lib/site-packages/tf2onnx/__init__.py",
+            "minBytes": 100
+          },
+          {
+            "path": "_licenses/runtime-wheel-lock.json",
+            "minBytes": 100000
+          }
+        ],
+        "command": {
+          "path": "python.exe",
+          "arguments": [
+            "-c",
+            "import sys,pkg_resources as p; print('{}.{}.{}|{}'.format(sys.version_info[0],sys.version_info[1],sys.version_info[2],p.get_distribution('tensorflow-gpu').version))"
+          ],
+          "outputRegex": "^3\\.7\\.1\\|2\\.10\\.1$"
+        }
+      }
+    }
+  ]
+}
