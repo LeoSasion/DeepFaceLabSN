@@ -7,13 +7,26 @@ namespace DeepFaceLabSN.Launcher
     internal static class Program
     {
         [STAThread]
-        private static int Main()
+        private static int Main(string[] args)
         {
             Application application = null;
             try
             {
+                int? applyUpdateResult = LauncherSelfUpdater.TryRunApplyUpdate(args);
+                if (applyUpdateResult.HasValue)
+                {
+                    return applyUpdateResult.Value;
+                }
+                LauncherSelfUpdater.ScheduleCleanup(args);
+
                 application = new Application();
                 application.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                if (!LauncherSelfUpdater.ShouldSkipStartupCheck(args) &&
+                    LauncherSelfUpdater.CheckAtStartup())
+                {
+                    application.Shutdown();
+                    return 0;
+                }
                 if (!WebView2RuntimeBootstrapper.EnsureInstalled())
                 {
                     application.Shutdown();

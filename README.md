@@ -17,9 +17,16 @@ DeepFaceLabSN 是一套面向 Windows 与 NVIDIA GPU 的本地 DeepFaceLab 工�
 
 ### 单文件下载启动器
 
-仓库现已提供轻量原生启动器的构建源码。发布产物只有一个
-`DeepFaceLabSN.Launcher.exe`；它内嵌首次配置页、常态启动页、依赖引导脚本、
+仓库提供轻量原生启动器的构建源码，用户使用的 EXE 只放在 GitHub/Gitee
+Release，不再提交到源码根目录。发布产物只有一个 `DeepFaceLabSN.Launcher.exe`；
+它内嵌首次配置页、常态启动页、依赖引导脚本、
 WebView2 宿主和 ConPTY 终端桥，不需要把 DLL 或前端文件放在 EXE 旁边。
+
+每次打开时，启动器会先并行检查 GitHub 与 Gitee 的轻量更新清单。发现新版后，
+会从两个 Release 源并行尝试下载，核对文件大小与 SHA-256，再退出旧进程、安全
+替换并自动重新打开；替换失败会保留或恢复旧版。这个过程只更新启动器自身，
+不会覆盖项目源码、`workspace`、模型或配置。项目源码仍由界面中的“检查项目更新”
+使用 `git fetch` 与用户确认后的 `merge --ff-only` 更新。
 
 如果系统缺少 Microsoft Edge WebView2 Runtime，EXE 会先显示不依赖 WebView2
 的原生安装窗，只从 Microsoft 官方地址下载安装器，校验 Authenticode 签名后静默

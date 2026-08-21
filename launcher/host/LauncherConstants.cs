@@ -8,6 +8,10 @@ namespace DeepFaceLabSN.Launcher
         public const string GitRemote = "https://github.com/LeoSasion/DeepFaceLabSN.git";
         public const string GitFallbackMirror = "https://gitee.com/LeoSasion/DeepFaceLabSN.git";
         public const string GitBranch = "main";
+        public const string LauncherUpdateManifestGitHub =
+            "https://raw.githubusercontent.com/LeoSasion/DeepFaceLabSN/main/launcher/update-channel.json";
+        public const string LauncherUpdateManifestGitee =
+            "https://gitee.com/LeoSasion/DeepFaceLabSN/raw/main/launcher/update-channel.json";
         public const string VirtualHost = "launcher.local";
         public const string WebUiUrl = "http://127.0.0.1:4173/";
         public const string WebUiRuntimeHealthUrl = "http://127.0.0.1:4174/api/health";

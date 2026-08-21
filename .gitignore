@@ -60,3 +60,7 @@ data.json
 /launcher/vendor/
 /launcher/bin/
 /launcher/bin-host-verify/
+
+# Launcher binaries are published as Release assets, never as repository source
+/神农DFL启动器.exe
+/DeepFaceLabSN.Launcher.exe

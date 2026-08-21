@@ -25,6 +25,29 @@ startup, the host verifies and atomically extracts its versioned payload under
 and per-file SHA-256 checks prevent a partial or corrupted payload from being
 used. No DLL, UI, or bootstrap sidecar is required next to the EXE.
 
+Launcher binaries are Release assets and are intentionally excluded from the
+repository root. Before WebView2 or the embedded UI starts, the native host
+checks the small `launcher/update-channel.json` file from GitHub and Gitee in
+parallel. A newer EXE may only come from trusted HTTPS hosts, must match both
+the declared size and SHA-256, and is copied into place by the downloaded new
+EXE after the old process exits. The previous EXE is kept until the replacement
+has been verified and restarted; a failed replacement is rolled back. Project
+source updates remain the separate, user-confirmed `git fetch` plus
+`merge --ff-only` flow.
+
+For a release, update `AssemblyInfo.cs`, build the EXE, then generate the pinned
+channel metadata before committing and publishing the matching tag:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File launcher\new-update-channel.ps1 -Version 0.2.0
+```
+
+Upload `launcher\bin\DeepFaceLabSN.Launcher.exe` to both GitHub and Gitee
+Releases with the unchanged filename. The generated channel uses deterministic
+`releases/download/<tag>/<asset>` URLs. Set `DFLSN_LAUNCHER_SKIP_UPDATE=1` only
+for offline diagnostics; the one-shot replacement restart skips the check
+automatically to prevent an update loop.
+
 WebView2 is also bootstrapped without a sidecar. Before loading any WebView2
 type, the EXE checks the official runtime registration. A missing runtime opens
 a native WPF progress window, downloads only through Microsoft HTTPS hosts,
