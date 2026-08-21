@@ -10,7 +10,6 @@ namespace DeepFaceLabSN.Launcher
     {
         public static IDictionary<string, string> Load(string projectRoot, LogBuffer logs)
         {
-            Dictionary<string, string> values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             string setenvPath = Path.Combine(projectRoot, "_internal", "setenv.bat");
             if (!File.Exists(setenvPath))
             {
@@ -42,20 +41,39 @@ namespace DeepFaceLabSN.Launcher
                     throw new InvalidOperationException("无法加载 _internal\\setenv.bat。退出码：" + process.ExitCode);
                 }
 
-                string[] lines = output.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
-                for (int index = 0; index < lines.Length; index++)
-                {
-                    int separator = lines[index].IndexOf('=');
-                    if (separator <= 0)
-                    {
-                        continue;
-                    }
-                    string key = lines[index].Substring(0, separator);
-                    string value = lines[index].Substring(separator + 1);
-                    values[key] = value;
-                }
+                return ParseOutput(output, projectRoot);
             }
+        }
 
+        internal static IDictionary<string, string> ParseOutput(string output, string projectRoot)
+        {
+            Dictionary<string, string> values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            string internalRoot = Path.Combine(projectRoot, "_internal");
+            string selectedPath = null;
+            string[] lines = (output ?? String.Empty).Split(
+                new[] { "\r\n", "\n" },
+                StringSplitOptions.RemoveEmptyEntries);
+            for (int index = 0; index < lines.Length; index++)
+            {
+                int separator = lines[index].IndexOf('=');
+                if (separator <= 0)
+                {
+                    continue;
+                }
+                string key = lines[index].Substring(0, separator);
+                string value = lines[index].Substring(separator + 1);
+                if (String.Equals(key, "PATH", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (selectedPath == null
+                        || value.IndexOf(internalRoot, StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        selectedPath = value;
+                        values["PATH"] = value;
+                    }
+                    continue;
+                }
+                values[key] = value;
+            }
             return values;
         }
     }

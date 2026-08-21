@@ -74,9 +74,8 @@ namespace DeepFaceLabSN.Launcher
             RuntimeComponentValidation pythonRuntime = runtimeValidation.Get("python");
             RuntimeComponentValidation cudaRuntime = runtimeValidation.Get("cuda");
             RuntimeComponentValidation cudnnRuntime = runtimeValidation.Get("cudnn");
-            string webuiVite = Path.Combine(projectRoot, "webui", "node_modules", "vite", "bin", "vite.js");
             string webuiBuild = Path.Combine(projectRoot, "webui", "dist", "client", "index.html");
-            bool buildReady = File.Exists(webuiVite) && File.Exists(webuiBuild);
+            bool buildReady = WebUiDependencyFilesPresent(projectRoot) && File.Exists(webuiBuild);
             bool webUiServicesOnline = await AreWebUiServicesOnlineAsync();
             bool webuiRunning = webUiActivatedInSession && webUiServicesOnline;
             int? webUiPid = webuiRunning ? TryReadManagedWebUiPid(projectRoot) : null;
@@ -371,7 +370,9 @@ namespace DeepFaceLabSN.Launcher
                     throw new InvalidOperationException("WebUI 运行环境不完整，请先执行首次设置或修复依赖。");
                 }
 
-                IDictionary<string, string> environment = DflEnvironment.Load(root, logs);
+                IDictionary<string, string> environment = PortableNodeEnvironment.Ensure(
+                    DflEnvironment.Load(root, logs),
+                    node);
                 environment["DFL_UI_LANG"] = "zh";
                 CommandResult result = await runner.RunAsync(node, ProcessRunner.Quote(manager) + " start", root, environment, "webui");
                 EnsureSuccess(result, "WebUI 启动失败");
@@ -398,7 +399,9 @@ namespace DeepFaceLabSN.Launcher
                     webUiActivatedInSession = false;
                     return await GetStateAsync();
                 }
-                IDictionary<string, string> environment = DflEnvironment.Load(root, logs);
+                IDictionary<string, string> environment = PortableNodeEnvironment.Ensure(
+                    DflEnvironment.Load(root, logs),
+                    node);
                 environment["DFL_UI_LANG"] = "zh";
                 CommandResult result = await runner.RunAsync(node, ProcessRunner.Quote(manager) + " stop", root, environment, "webui");
                 EnsureSuccess(result, "WebUI 停止失败");
@@ -571,31 +574,52 @@ namespace DeepFaceLabSN.Launcher
             string webuiRoot = Path.Combine(projectRoot, "webui");
             string vite = Path.Combine(webuiRoot, "node_modules", "vite", "bin", "vite.js");
             string index = Path.Combine(webuiRoot, "dist", "client", "index.html");
-            if (!force && File.Exists(vite) && File.Exists(index))
-            {
-                return;
-            }
             if (!File.Exists(node))
             {
                 throw new FileNotFoundException("WebUI 构建需要项目内的便携 Node.js。", node);
             }
 
-            IDictionary<string, string> environment = DflEnvironment.Load(projectRoot, logs);
+            IDictionary<string, string> environment = PortableNodeEnvironment.Ensure(
+                DflEnvironment.Load(projectRoot, logs),
+                node);
             environment = MirrorEnvironment(environment);
-            if (force || !File.Exists(vite))
+            bool dependencyTreePresent = Directory.Exists(Path.Combine(webuiRoot, "node_modules"));
+            bool dependencyFilesPresent = WebUiDependencyFilesPresent(projectRoot);
+            bool dependenciesLoad = dependencyFilesPresent
+                && await CanLoadWebUiDependenciesAsync(node, webuiRoot, environment);
+            if (!force && dependenciesLoad && File.Exists(index))
+            {
+                return;
+            }
+
+            if (force || !dependenciesLoad)
             {
                 if (!File.Exists(corepack))
                 {
                     throw new FileNotFoundException("缺少 Node.js Corepack，无法安装 WebUI 依赖。", corepack);
                 }
                 logs.Add("bootstrap", "正在按 pnpm 锁文件安装 WebUI 依赖…", "info");
+                string installArguments = ProcessRunner.Quote(corepack)
+                    + " pnpm install --frozen-lockfile --prefer-offline";
+                if (dependencyTreePresent && !dependenciesLoad)
+                {
+                    installArguments += " --force";
+                    logs.Add("bootstrap", "检测到依赖残留或正在修复，将强制重建原生 Node.js 依赖。", "warning");
+                }
                 CommandResult install = await runner.RunAsync(
                     node,
-                    ProcessRunner.Quote(corepack) + " pnpm install --frozen-lockfile --prefer-offline",
+                    installArguments,
                     webuiRoot,
                     environment,
                     "bootstrap");
                 EnsureSuccess(install, "WebUI 依赖安装失败");
+
+                if (!WebUiDependencyFilesPresent(projectRoot)
+                    || !await CanLoadWebUiDependenciesAsync(node, webuiRoot, environment))
+                {
+                    throw new InvalidOperationException(
+                        "WebUI 依赖安装命令已结束，但 node-pty 或 esbuild 仍无法加载；请重试修复依赖。");
+                }
             }
 
             if (force || !File.Exists(index))
@@ -608,6 +632,43 @@ namespace DeepFaceLabSN.Launcher
                     "bootstrap");
                 EnsureSuccess(build, "WebUI 构建失败");
             }
+        }
+
+        private async Task<bool> CanLoadWebUiDependenciesAsync(
+            string node,
+            string webuiRoot,
+            IDictionary<string, string> environment)
+        {
+            CommandResult validation = await runner.RunAsync(
+                node,
+                "-e \"try{require('node-pty');require('esbuild').transformSync('let ready=true')}catch(error){process.exit(1)}\"",
+                webuiRoot,
+                environment,
+                "bootstrap");
+            if (!validation.Success)
+            {
+                logs.Add("bootstrap", "检测到未完成的 Node.js 依赖安装，将自动修复。", "warning");
+            }
+            return validation.Success;
+        }
+
+        private static bool WebUiDependencyFilesPresent(string projectRoot)
+        {
+            string webuiRoot = Path.Combine(projectRoot, "webui");
+            return File.Exists(Path.Combine(webuiRoot, "node_modules", "vite", "bin", "vite.js"))
+                && File.Exists(Path.Combine(
+                    webuiRoot,
+                    "node_modules",
+                    "node-pty",
+                    "prebuilds",
+                    "win32-x64",
+                    "pty.node"))
+                && File.Exists(Path.Combine(
+                    webuiRoot,
+                    "node_modules",
+                    "@esbuild",
+                    "win32-x64",
+                    "esbuild.exe"));
         }
 
         private IDictionary<string, string> MirrorEnvironment(IDictionary<string, string> source)

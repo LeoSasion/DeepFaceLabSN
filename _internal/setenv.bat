@@ -25,6 +25,10 @@ SET PYTHON_LIB_PATH=%PYTHON_PATH%\Lib\site-packages
 SET QT_QPA_PLATFORM_PLUGIN_PATH=%PYTHON_LIB_PATH%\PyQt5\Qt\plugins
 SET PATH=%PYTHON_PATH%;%PYTHON_PATH%\Scripts;%PATH%
 
+rem ========== Node.js环境变量 ==========
+rem 依赖安装脚本（例如 node-pty、esbuild）会按命令名再次调用 node。
+SET NODE_BIN_PATH=%INTERNAL%\node\bin
+SET PATH=%NODE_BIN_PATH%;%PATH%
 rem ========== CUDA环境变量 ==========
 SET PATH=%INTERNAL%\CUDA;%INTERNAL%\CUDNN;%PATH%
 for /f "tokens=4-7 delims=[.] " %%i in ('ver') do (if %%i==Version (set v=%%j.%%k) else (set v=%%i.%%j))

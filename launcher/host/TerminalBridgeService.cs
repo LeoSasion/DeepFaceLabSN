@@ -64,7 +64,9 @@ namespace DeepFaceLabSN.Launcher
                 }
 
                 string token = CreateToken();
-                IDictionary<string, string> environment = DflEnvironment.Load(projectRoot, logs);
+                IDictionary<string, string> environment = PortableNodeEnvironment.Ensure(
+                    DflEnvironment.Load(projectRoot, logs),
+                    node);
                 ProcessStartInfo startInfo = new ProcessStartInfo();
                 startInfo.FileName = node;
                 startInfo.Arguments = ProcessRunner.Quote(entry)
