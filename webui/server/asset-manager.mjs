@@ -292,8 +292,16 @@ export async function resolveQuarantinedImage(side, token, encodedName) {
   return target;
 }
 
-function runAssetHelper(args, input) {
+function runAssetHelper(args, input, {
+  signal,
+  onProgress,
+  timeoutMs = 120_000,
+} = {}) {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new AssetError("操作已取消", "OPERATION_CANCELLED", 499));
+      return;
+    }
     const helper = path.join(PATHS.webuiRoot, "python", "dfl_asset_tool.py");
     const child = spawn(PATHS.python, [helper, ...args], {
       cwd: PATHS.currentDflRoot,
@@ -303,21 +311,32 @@ function runAssetHelper(args, input) {
     });
     const stdout = [];
     const stderr = [];
+    let stderrRemainder = "";
     let outputBytes = 0;
     let settled = false;
     const finish = (callback, value) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
+      signal?.removeEventListener("abort", abort);
       callback(value);
     };
+    const abort = () => {
+      child.kill();
+      finish(reject, new AssetError("操作已取消", "OPERATION_CANCELLED", 499));
+    };
+    signal?.addEventListener("abort", abort, { once: true });
     const timeout = setTimeout(() => {
       child.kill();
       finish(
         reject,
-        new AssetError("DFL 分析超过 120 秒，已安全终止", "HELPER_TIMEOUT", 504),
+        new AssetError(
+          `DFL 分析超过 ${Math.ceil(timeoutMs / 60_000)} 分钟，已安全终止`,
+          "HELPER_TIMEOUT",
+          504,
+        ),
       );
-    }, 120_000);
+    }, timeoutMs);
     const collect = (target) => (chunk) => {
       outputBytes += chunk.length;
       if (outputBytes > MAX_HELPER_OUTPUT) {
@@ -331,10 +350,45 @@ function runAssetHelper(args, input) {
       target.push(chunk);
     };
     child.stdout.on("data", collect(stdout));
-    child.stderr.on("data", collect(stderr));
+    child.stderr.on("data", (chunk) => {
+      outputBytes += chunk.length;
+      if (outputBytes > MAX_HELPER_OUTPUT) {
+        child.kill();
+        finish(
+          reject,
+          new AssetError("DFL 分析响应超过 4 MiB", "HELPER_OUTPUT_TOO_LARGE", 500),
+        );
+        return;
+      }
+      stderrRemainder += chunk.toString("utf8");
+      const lines = stderrRemainder.split(/\r?\n/);
+      stderrRemainder = lines.pop() || "";
+      for (const line of lines) {
+        if (line.startsWith("DFL_PROGRESS ")) {
+          try {
+            onProgress?.(JSON.parse(line.slice("DFL_PROGRESS ".length)));
+          } catch {
+            // A malformed progress update must not invalidate the analysis result.
+          }
+        } else if (line) {
+          stderr.push(Buffer.from(`${line}\n`, "utf8"));
+        }
+      }
+    });
     child.once("error", (error) => finish(reject, error));
     child.once("exit", (code) => {
       if (settled) return;
+      if (stderrRemainder) {
+        if (stderrRemainder.startsWith("DFL_PROGRESS ")) {
+          try {
+            onProgress?.(JSON.parse(stderrRemainder.slice("DFL_PROGRESS ".length)));
+          } catch {
+            // Ignore malformed progress while preserving the final result.
+          }
+        } else {
+          stderr.push(Buffer.from(stderrRemainder, "utf8"));
+        }
+      }
       if (code !== 0) {
         finish(reject, new AssetError(
           Buffer.concat(stderr).toString("utf8").trim() || "读取 DFL 元数据失败",
@@ -413,7 +467,7 @@ function invalidateAnalysis(side) {
   }
 }
 
-export async function buildAlignedPoseAtlas(side) {
+export async function buildAlignedPoseAtlas(side, { signal, onProgress } = {}) {
   const directory = await verifyAlignedDirectory(side);
   if (!directory) {
     return {
@@ -432,7 +486,11 @@ export async function buildAlignedPoseAtlas(side) {
       cells: [],
     };
   }
-  const result = await runAssetHelper(["atlas", "--directory", directory]);
+  const result = await runAssetHelper(
+    ["atlas", "--directory", directory],
+    undefined,
+    { signal, onProgress, timeoutMs: 600_000 },
+  );
   return {
     side,
     ...result,
@@ -455,7 +513,7 @@ function recoveryToken() {
 
 export async function buildAlignedSimilarityGroups(
   side,
-  { refresh = false, threshold = 0.86, limit = 500 } = {},
+  { refresh = false, threshold = 0.86, limit = 500, signal, onProgress } = {},
 ) {
   const directory = await verifyAlignedDirectory(side);
   const safeThreshold = Math.min(Math.max(Number(threshold) || 0.86, 0.72), 0.98);
@@ -474,7 +532,7 @@ export async function buildAlignedSimilarityGroups(
     () => runAssetHelper([
       "similarity", "--directory", directory, "--threshold", String(safeThreshold),
       "--limit", String(safeLimit),
-    ]),
+    ], undefined, { signal, onProgress, timeoutMs: 600_000 }),
   );
   return {
     side,
@@ -517,7 +575,9 @@ export async function buildAlignedPoseProbe(side) {
   ]);
 }
 
-export async function auditAlignedAssets(side, { refresh = false, offset = 0, limit = 120 } = {}) {
+export async function auditAlignedAssets(side, {
+  refresh = false, offset = 0, limit = 120, signal, onProgress,
+} = {}) {
   const directory = await verifyAlignedDirectory(side);
   const safeOffset = Math.max(Number(offset) || 0, 0);
   const safeLimit = Math.min(Math.max(Number(limit) || 120, 1), 500);
@@ -554,7 +614,7 @@ export async function auditAlignedAssets(side, { refresh = false, offset = 0, li
       String(safeOffset),
       "--limit",
       String(safeLimit),
-    ])
+    ], undefined, { signal, onProgress, timeoutMs: 600_000 })
   ));
   return {
     side,
@@ -566,20 +626,20 @@ export async function auditAlignedAssets(side, { refresh = false, offset = 0, li
   };
 }
 
-export async function inspectAlignedPack(side, { refresh = false } = {}) {
+export async function inspectAlignedPack(side, { refresh = false, signal } = {}) {
   const directory = await verifyAlignedDirectory(side);
   if (!directory) {
     return { side, present: false, status: "aligned_missing", warnings: [], cached: false };
   }
   const result = await cachedAnalysis(side, "pack", refresh, () => (
-    runAssetHelper(["pack-inspect", "--directory", directory])
+    runAssetHelper(["pack-inspect", "--directory", directory], undefined, { signal })
   ));
   return { side, ...result };
 }
 
 export async function inspectExtractionCoverage(
   side,
-  { refresh = false, offset = 0, limit = 120 } = {},
+  { refresh = false, offset = 0, limit = 120, signal, onProgress } = {},
 ) {
   const directory = await verifyAlignedDirectory(side);
   const frames = path.join(PATHS.workspaceRoot, `data_${side}`);
@@ -611,7 +671,7 @@ export async function inspectExtractionCoverage(
       String(safeOffset),
       "--limit",
       String(safeLimit),
-    ])
+    ], undefined, { signal, onProgress, timeoutMs: 600_000 })
   ));
   return {
     side,

@@ -408,7 +408,7 @@ export function QualityDiagnosticsView({
         <div className="diagnostics-selectors">
           <label>
             <span>{t("基线")}</span>
-            <select value={baselineId ?? ""} onChange={(event) => handleBaseline(event.target.value)}>
+            <select aria-label={t("选择基线快照") } value={baselineId ?? ""} onChange={(event) => handleBaseline(event.target.value)}>
               {snapshots.filter((snapshot, index) => index < currentIndex).map((snapshot) => (
                 <option key={snapshot.snapshotId} value={snapshot.snapshotId}>{t("迭代 {count}", { count: snapshot.iteration.toLocaleString() })}</option>
               ))}
@@ -417,7 +417,7 @@ export function QualityDiagnosticsView({
           <IconArrowRight size={16} stroke={1.6}/>
           <label>
             <span>{t("当前")}</span>
-            <select value={currentId ?? ""} onChange={(event) => handleCurrent(event.target.value)}>
+            <select aria-label={t("选择当前快照") } value={currentId ?? ""} onChange={(event) => handleCurrent(event.target.value)}>
               {snapshots.filter((snapshot, index) => index > baselineIndex).map((snapshot) => (
                 <option key={snapshot.snapshotId} value={snapshot.snapshotId}>{t("迭代 {count}", { count: snapshot.iteration.toLocaleString() })}</option>
               ))}

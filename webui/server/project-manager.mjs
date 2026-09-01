@@ -5,6 +5,25 @@ import { PATHS, assertWithin, pathExists } from "./paths.mjs";
 const PROJECT_ID = /^[a-z0-9][a-z0-9-]{0,47}$/;
 const ACTIVE_JOB_STATES = new Set(["queued", "starting", "running", "waiting_input", "stopping"]);
 const PROJECT_DIRECTORIES = ["data_src", "data_dst", "model", "xseg_model", ".webui"];
+const registryMutationLocks = new Map();
+
+async function withRegistryMutation(registryFile, callback) {
+  const key = path.resolve(registryFile).toLocaleLowerCase("en-US");
+  const previous = registryMutationLocks.get(key) ?? Promise.resolve();
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const queued = previous.catch(() => {}).then(() => gate);
+  registryMutationLocks.set(key, queued);
+  await previous.catch(() => {});
+  try {
+    return await callback();
+  } finally {
+    release();
+    if (registryMutationLocks.get(key) === queued) registryMutationLocks.delete(key);
+  }
+}
 
 export class ProjectError extends Error {
   constructor(message, code = "PROJECT_ERROR", status = 400, details) {
@@ -80,7 +99,9 @@ export class ProjectManager {
   async initialize() {
     await mkdir(this.registryRoot, { recursive: true });
     await mkdir(this.managedRoot, { recursive: true });
-    if (!(await pathExists(this.registryFile))) await this.writeRegistry(defaultRegistry());
+    await withRegistryMutation(this.registryFile, async () => {
+      if (!(await pathExists(this.registryFile))) await this.writeRegistry(defaultRegistry());
+    });
   }
 
   async readRegistry() {
@@ -127,30 +148,36 @@ export class ProjectManager {
     await this.initialize();
     const safeName = normalizeName(name);
     const safeId = normalizeId(id || safeName);
-    const registry = await this.readRegistry();
-    if (registry.projects.some((project) => project.id === safeId)) {
-      throw new ProjectError("项目标识已存在", "PROJECT_EXISTS", 409);
-    }
-    const workspaceRoot = this.workspaceFor(safeId);
-    await Promise.all(PROJECT_DIRECTORIES.map((directory) => (
-      mkdir(path.join(workspaceRoot, directory), { recursive: true })
-    )));
-    const record = {
-      id: safeId,
-      name: safeName,
-      managed: true,
-      createdAt: new Date().toISOString(),
-    };
-    await this.writeRegistry({ ...registry, projects: [...registry.projects, record] });
-    return { ...record, active: false, ready: true, workspaceRoot };
+    return withRegistryMutation(this.registryFile, async () => {
+      let registry = await this.readRegistry();
+      if (registry.projects.some((project) => project.id === safeId)) {
+        throw new ProjectError("项目标识已存在", "PROJECT_EXISTS", 409);
+      }
+      const workspaceRoot = this.workspaceFor(safeId);
+      await Promise.all(PROJECT_DIRECTORIES.map((directory) => (
+        mkdir(path.join(workspaceRoot, directory), { recursive: true })
+      )));
+
+      // Re-read immediately before commit so another manager cannot overwrite a
+      // project registered while this process was preparing the workspace.
+      registry = await this.readRegistry();
+      if (registry.projects.some((project) => project.id === safeId)) {
+        throw new ProjectError("项目标识已存在", "PROJECT_EXISTS", 409);
+      }
+      const record = {
+        id: safeId,
+        name: safeName,
+        managed: true,
+        createdAt: new Date().toISOString(),
+      };
+      await this.writeRegistry({ ...registry, projects: [...registry.projects, record] });
+      return { ...record, active: false, ready: true, workspaceRoot };
+    });
   }
 
   async activate(id, jobs = []) {
     await this.initialize();
     if (!PROJECT_ID.test(id)) throw new ProjectError("项目标识无效", "PROJECT_ID_INVALID");
-    const registry = await this.readRegistry();
-    const project = registry.projects.find((candidate) => candidate.id === id);
-    if (!project) throw new ProjectError("项目不存在", "PROJECT_MISSING", 404);
     const activeJobs = jobs.filter((job) => ACTIVE_JOB_STATES.has(job?.state));
     if (activeJobs.length) {
       throw new ProjectError(
@@ -160,13 +187,18 @@ export class ProjectManager {
         { jobIds: activeJobs.map((job) => job.id) },
       );
     }
-    if (registry.activeId === id) return { ...project, changed: false, restartRequired: false };
-    const workspaceRoot = this.workspaceFor(id);
-    await Promise.all(PROJECT_DIRECTORIES.map((directory) => (
-      mkdir(path.join(workspaceRoot, directory), { recursive: true })
-    )));
-    await this.writeRegistry({ ...registry, activeId: id });
-    return { ...project, changed: true, restartRequired: true, workspaceRoot };
+    return withRegistryMutation(this.registryFile, async () => {
+      const registry = await this.readRegistry();
+      const project = registry.projects.find((candidate) => candidate.id === id);
+      if (!project) throw new ProjectError("项目不存在", "PROJECT_MISSING", 404);
+      if (registry.activeId === id) return { ...project, changed: false, restartRequired: false };
+      const workspaceRoot = this.workspaceFor(id);
+      await Promise.all(PROJECT_DIRECTORIES.map((directory) => (
+        mkdir(path.join(workspaceRoot, directory), { recursive: true })
+      )));
+      await this.writeRegistry({ ...registry, activeId: id });
+      return { ...project, changed: true, restartRequired: true, workspaceRoot };
+    });
   }
 }
 

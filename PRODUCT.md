@@ -32,6 +32,8 @@ The product is not a cloud service and must not turn DeepFaceLab into an arbitra
 5. Every bridge to a legacy window or CLI must explain why it is needed and what state will be carried across.
 6. CLI compatibility and DeepFaceLab output equivalence are acceptance requirements, not optional polish.
 7. Optimize measured bottlenecks only; do not trade model correctness or deterministic outputs for cosmetic speed.
+8. Long operations report measured progress when available, persist their state, and propagate cancellation to the actual worker; indeterminate work must never invent a percentage.
+9. Recovery belongs beside the protected asset, and exported diagnostics are privacy-bounded summaries rather than raw paths, commands, or terminal logs.
 
 ## Brand commitments
 

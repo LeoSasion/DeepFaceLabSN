@@ -47,10 +47,34 @@ MAX_PROBE_SAMPLES_PER_SIDE = 180
 MAX_PROBE_SAMPLES_PER_CELL = 3
 MAX_SIMILARITY_ITEMS = 500
 QUARANTINE_TOKEN_PATTERN = re.compile(r"^\d{14}-[a-f0-9]{10}$")
+PROGRESS_PREFIX = "DFL_PROGRESS "
 
 
 def emit(value):
     sys.stdout.write(json.dumps(value, ensure_ascii=False))
+
+
+def emit_progress(stage, current, total, detail=None):
+    """Send machine-readable progress on stderr without contaminating JSON stdout."""
+    safe_total = max(int(total or 0), 0)
+    safe_current = min(max(int(current or 0), 0), safe_total) if safe_total else 0
+    payload = {
+        "stage": str(stage),
+        "current": safe_current,
+        "total": safe_total,
+        "percent": round((safe_current / safe_total) * 100, 1) if safe_total else None,
+    }
+    if detail:
+        payload["detail"] = str(detail)
+    sys.stderr.write(PROGRESS_PREFIX + json.dumps(payload, ensure_ascii=False) + "\n")
+    sys.stderr.flush()
+
+
+def progress_due(current, total):
+    """Limit progress traffic to about 100 updates even for quadratic scans."""
+    if total <= 0:
+        return current == 0
+    return current in (0, 1, total) or current % max(total // 100, 1) == 0
 
 
 def load_dfl_image(image_path):
@@ -467,7 +491,13 @@ def audit_directory(directory, offset=0, limit=120):
     safe_offset = max(offset, 0)
     safe_limit = min(max(limit, 1), MAX_AUDIT_ITEMS)
     page_files = files[safe_offset:safe_offset + safe_limit]
-    items = [audit_sample(image_path) for image_path in page_files]
+    items = []
+    total_work = len(page_files)
+    emit_progress("audit-samples", 0, total_work, "正在分析样本质量")
+    for index, image_path in enumerate(page_files, start=1):
+        items.append(audit_sample(image_path))
+        if progress_due(index, total_work):
+            emit_progress("audit-samples", index, total_work, image_path.name)
     source_counts = Counter(
         item["sourceFilename"]
         for item in items
@@ -619,7 +649,11 @@ def build_extraction_coverage(frames_directory, aligned_directory, offset=0, lim
     faces_by_frame = {name: [] for name in page_names}
     orphan_alignment_count = 0
 
-    for aligned_path in iter_images(aligned_directory):
+    aligned_paths = iter_images(aligned_directory)
+    total_work = len(aligned_paths) + len(page_paths)
+    completed = 0
+    emit_progress("coverage-alignments", completed, total_work, "正在关联 aligned 人脸")
+    for aligned_path in aligned_paths:
         try:
             dfl_image = load_dfl_image(aligned_path)
             source_name = Path(dfl_image.get_source_filename() or "").name
@@ -642,6 +676,10 @@ def build_extraction_coverage(frames_directory, aligned_directory, offset=0, lim
             })
         except Exception:
             orphan_alignment_count += 1
+        finally:
+            completed += 1
+            if progress_due(completed, total_work):
+                emit_progress("coverage-alignments", completed, total_work, aligned_path.name)
 
     items = []
     for frame_path in page_paths:
@@ -655,6 +693,9 @@ def build_extraction_coverage(frames_directory, aligned_directory, offset=0, lim
             "faceCount": len(faces),
             "faces": faces,
         })
+        completed += 1
+        if progress_due(completed, total_work):
+            emit_progress("coverage-frames", completed, total_work, frame_path.name)
 
     return {
         "schemaVersion": AUDIT_SCHEMA_VERSION,
@@ -715,11 +756,15 @@ def build_pose_atlas(directory):
     sharpness_total = 0.0
     low_quality_count = 0
 
-    for image_path in files:
+    total_work = len(files)
+    emit_progress("pose-atlas", 0, total_work, "正在估计姿态与质量")
+    for index, image_path in enumerate(files, start=1):
         try:
             sample = analyze_pose(image_path)
         except Exception:
             invalid_count += 1
+            if progress_due(index, total_work):
+                emit_progress("pose-atlas", index, total_work, image_path.name)
             continue
 
         pitch_tick = nearest_tick(sample["pitch"], PITCH_TICKS)
@@ -739,6 +784,8 @@ def build_pose_atlas(directory):
         candidates.append(sample)
         candidates.sort(key=lambda item: item["sharpness"])
         del candidates[8:]
+        if progress_due(index, total_work):
+            emit_progress("pose-atlas", index, total_work, image_path.name)
 
     valid_count = len(files) - invalid_count
     occupied_count = sum(1 for cell in cells.values() if cell["count"])
@@ -1006,18 +1053,26 @@ def group_similar_images(directory, threshold=0.86, limit=MAX_SIMILARITY_ITEMS):
     files = all_files[:safe_limit]
     records = []
     invalid_count = 0
+    pair_total = len(files) * max(len(files) - 1, 0) // 2
+    total_work = len(files) + pair_total
+    completed = 0
+    emit_progress("similarity-features", completed, total_work, "正在提取相似度特征")
     for image_path in files:
-        image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
-        if image is None:
-            invalid_count += 1
-            continue
         try:
+            image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+            if image is None:
+                invalid_count += 1
+                continue
             records.append({
                 "name": image_path.name,
                 "descriptor": similarity_descriptor(image),
             })
         except Exception:
             invalid_count += 1
+        finally:
+            completed += 1
+            if progress_due(completed, total_work):
+                emit_progress("similarity-features", completed, total_work, image_path.name)
 
     count = len(records)
     parents = list(range(count))
@@ -1041,6 +1096,18 @@ def group_similar_images(directory, threshold=0.86, limit=MAX_SIMILARITY_ITEMS):
             similarities[left, right] = similarities[right, left] = score
             if score >= safe_threshold:
                 union(left, right)
+            completed += 1
+            if progress_due(completed, total_work):
+                emit_progress(
+                    "similarity-pairs",
+                    completed,
+                    total_work,
+                    f"{left + 1}/{count}",
+                )
+
+    # Invalid images reduce the actual pair count; still finish at 100% for callers.
+    if completed < total_work:
+        emit_progress("similarity-groups", total_work, total_work, "正在整理相似组")
 
     grouped = {}
     for index in range(count):

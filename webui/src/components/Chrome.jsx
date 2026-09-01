@@ -99,6 +99,8 @@ export function Sidebar({ activeNav, onNavigate }) {
             key={id}
             type="button"
             aria-label={t(label)}
+            data-label={t(label)}
+            title={t(label)}
             aria-current={activeNav === id ? "page" : undefined}
             onClick={() => onNavigate(id, t(label))}
           >
@@ -111,6 +113,8 @@ export function Sidebar({ activeNav, onNavigate }) {
         className={`nav-item sidebar-settings ${activeNav === "settings" ? "is-active" : ""}`}
         type="button"
         aria-label={t("设置")}
+        data-label={t("设置")}
+        title={t("设置")}
         aria-current={activeNav === "settings" ? "page" : undefined}
         onClick={() => onNavigate("settings", t("设置"))}
       >

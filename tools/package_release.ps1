@@ -158,6 +158,13 @@ try {
     Pop-Location
 }
 
+$verifyRelease = Join-Path $PSScriptRoot "verify-release.ps1"
+Write-Host "[release] Running mandatory tests, build, signature policy, freshness, and smoke gates."
+& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $verifyRelease
+if ($LASTEXITCODE -ne 0) {
+    throw "Mandatory release verification failed with exit code $LASTEXITCODE."
+}
+
 # These masks intentionally keep the directory entries for workspace,
 # workspaces, _internal/_e, and webui/.runtime while excluding their contents.
 # Developer .git metadata is excluded here; a clean, path-scrubbed clone is

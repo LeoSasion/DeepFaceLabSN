@@ -8,7 +8,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { IconActivityHeartbeat, IconChevronRight } from "@tabler/icons-react";
+import { IconActivityHeartbeat, IconChevronRight, IconX } from "@tabler/icons-react";
 import { useI18n } from "../i18n.jsx";
 import {
   createProgressStore,
@@ -171,17 +171,31 @@ function ProgressHudCard({ entry, compact = false }) {
         <b className={determinate ? "is-value" : "is-state"}>
           {determinate ? `${Math.round(entry.progress)}%` : t("进行中")}
         </b>
-        {expandable ? (
-          <button
-            className="progress-hud-toggle"
-            type="button"
-            aria-expanded={expanded}
-            aria-label={t(expanded ? "收起进度详情" : "展开进度详情")}
-            onClick={() => setExpanded((current) => !current)}
-          >
-            <IconChevronRight size={18} stroke={1.8} />
-          </button>
-        ) : <span className="progress-hud-toggle-placeholder" aria-hidden="true" />}
+        <div className="progress-hud-actions">
+          {entry.onCancel ? (
+            <button
+              className="progress-hud-cancel"
+              type="button"
+              disabled={entry.cancelPending}
+              aria-label={t("取消后台任务：{label}", { label: entry.label })}
+              title={t(entry.cancelPending ? "正在取消…" : "取消任务")}
+              onClick={entry.onCancel}
+            >
+              <IconX size={17} stroke={1.9} />
+            </button>
+          ) : null}
+          {expandable ? (
+            <button
+              className="progress-hud-toggle"
+              type="button"
+              aria-expanded={expanded}
+              aria-label={t(expanded ? "收起进度详情" : "展开进度详情")}
+              onClick={() => setExpanded((current) => !current)}
+            >
+              <IconChevronRight size={18} stroke={1.8} />
+            </button>
+          ) : null}
+        </div>
       </div>
       <div
         className={`progress-hud-track${determinate ? " is-determinate" : " is-indeterminate"}`}
@@ -261,6 +275,8 @@ export function LoadingProgress({
   inline = false,
   className = "",
   showDelayMs,
+  onCancel,
+  cancelPending = false,
 }) {
   const { language, t } = useI18n();
   const store = useContext(ProgressFeedbackContext);
@@ -305,7 +321,9 @@ export function LoadingProgress({
     tone,
     operationKey,
     showDelayMs,
-  }), [countText, detail, label, operationKey, progress, showDelayMs, timingText, tone]);
+    onCancel,
+    cancelPending,
+  }), [cancelPending, countText, detail, label, onCancel, operationKey, progress, showDelayMs, timingText, tone]);
   const entryRef = useRef(entry);
   entryRef.current = entry;
 

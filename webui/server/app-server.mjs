@@ -4,6 +4,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
+import { releaseVersion } from "../../release/version.mjs";
 import {
   auditAlignedAssets,
   applyAlignedRepair,
@@ -30,8 +31,10 @@ import { listCommands, prepareCommand } from "./command-registry.mjs";
 import { describeEnvironment } from "./environment.mjs";
 import { DisabledExternalWindowAdapter } from "./external-window-adapter.mjs";
 import { JobManager } from "./job-manager.mjs";
+import { OperationManager } from "./operation-manager.mjs";
 import { PATHS, pathExists } from "./paths.mjs";
 import { ProjectManager } from "./project-manager.mjs";
+import { buildDiagnosticSnapshot, inspectStorage } from "./system-diagnostics.mjs";
 import { getGpuTelemetry } from "./telemetry.mjs";
 import { TrainingEvaluationManager } from "./training-evaluation-manager.mjs";
 import {
@@ -39,9 +42,11 @@ import {
   inspectExportReadiness,
   inspectWorkspace,
   listMergeReview,
+  listWorkspaceMaterialArchives,
   resolveReviewAsset,
   resolveWorkspaceArtifact,
   resolveWorkspaceMaterial,
+  restoreWorkspaceMaterial,
 } from "./workspace-manager.mjs";
 import {
   detectVideoScenes,
@@ -53,9 +58,31 @@ import {
 } from "./video-tool-manager.mjs";
 
 const MAX_BODY_BYTES = 256 * 1024;
+export const LARGE_UPLOAD_REQUEST_TIMEOUT_MS = 12 * 60 * 60 * 1000;
+export const PROJECT_RESTART_RETRY_MS = 2_000;
+export const SUPPORTED_OPERATION_KINDS = Object.freeze([
+  "asset-audit",
+  "pose-atlas",
+  "similarity",
+  "pack",
+  "coverage",
+  "detect-scenes",
+]);
+const OPERATION_KIND_SET = new Set(SUPPORTED_OPERATION_KINDS);
+const OPERATION_STAGE_LABELS = Object.freeze({
+  "audit-samples": "分析素材质量",
+  "coverage-alignments": "关联 aligned 人脸",
+  "coverage-frames": "检查源帧覆盖",
+  "pose-atlas": "估计姿态与质量",
+  "similarity-features": "提取相似度特征",
+  "similarity-pairs": "比较相似样本",
+  "similarity-groups": "整理相似样本组",
+});
+const RUNTIME_VERSION = releaseVersion.version;
 const SESSION_COOKIE = "dfl_web_session";
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
 const ACTIVE_JOB_STATES = new Set(["queued", "starting", "running", "waiting_input", "stopping"]);
+const ACTIVE_OPERATION_STATES = new Set(["queued", "running", "cancelling"]);
 const DEFAULT_ALLOWED_ORIGINS = new Set([
   "http://127.0.0.1:4173",
   "http://localhost:4173",
@@ -103,6 +130,26 @@ function runtimeConflict(message, code, details) {
   error.status = 409;
   error.details = details;
   return error;
+}
+
+function apiError(message, code, status = 400, details) {
+  const error = new Error(message);
+  error.code = code;
+  error.status = status;
+  error.details = details;
+  return error;
+}
+
+function parseRequiredBytes(value) {
+  if (value == null || value === "") return 0;
+  if (!/^\d+$/.test(String(value))) {
+    throw apiError("requiredBytes 必须是非负整数字节数", "REQUIRED_BYTES_INVALID");
+  }
+  const bytes = Number(value);
+  if (!Number.isSafeInteger(bytes)) {
+    throw apiError("requiredBytes 超出安全整数范围", "REQUIRED_BYTES_INVALID");
+  }
+  return bytes;
 }
 
 async function sendVideoArtifact(request, response, target) {
@@ -230,25 +277,34 @@ export class RuntimeServer {
   constructor({
     trainingEvaluationManager = new TrainingEvaluationManager(),
     jobManager = null,
+    operationManager = new OperationManager(),
     externalWindowAdapter = new DisabledExternalWindowAdapter(),
     projectManager = new ProjectManager(),
-    onProjectActivation = (result) => {
-      if (!result.restartRequired) return;
-      const timer = setTimeout(() => process.exit(75), 250);
-      timer.unref();
-    },
+    commandPreparer = prepareCommand,
+    onProjectActivation = null,
+    requestProcessExit = (code) => process.exit(code),
+    requestTimeoutMs = LARGE_UPLOAD_REQUEST_TIMEOUT_MS,
+    projectRestartRetryMs = PROJECT_RESTART_RETRY_MS,
     staticRoot = PATHS.staticRoot,
     allowedOrigins = DEFAULT_ALLOWED_ORIGINS,
   } = {}) {
     this.trainingEvaluationManager = trainingEvaluationManager;
     this.jobManager = jobManager ?? new JobManager({ trainingEvaluationManager });
+    this.operationManager = operationManager;
     this.externalWindowAdapter = externalWindowAdapter;
     this.projectManager = projectManager;
-    this.onProjectActivation = onProjectActivation;
+    this.commandPreparer = commandPreparer;
+    this.onProjectActivation = onProjectActivation ?? ((result) => this.scheduleProjectRestart(result));
+    this.requestProcessExit = requestProcessExit;
+    this.requestTimeoutMs = Math.max(Number(requestTimeoutMs) || LARGE_UPLOAD_REQUEST_TIMEOUT_MS, 5 * 60 * 1000);
+    this.projectRestartRetryMs = Math.max(500, Number(projectRestartRetryMs) || PROJECT_RESTART_RETRY_MS);
     this.staticRoot = staticRoot;
     this.allowedOrigins = new Set(allowedOrigins);
     this.sessionToken = randomBytes(32).toString("hex");
     this.workspaceMutation = null;
+    this.projectRestartPending = false;
+    this.projectRestartTimer = null;
+    this.projectRestartBusyWarningIssued = false;
     this.httpServer = null;
     this.webSocketServer = null;
   }
@@ -259,12 +315,14 @@ export class RuntimeServer {
     }
     await Promise.all([
       this.jobManager.initialize(),
+      this.operationManager.initialize(),
       this.trainingEvaluationManager.initialize(),
     ]);
     this.webSocketServer = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
     this.httpServer = createServer((request, response) => {
       void this.handleRequest(request, response);
     });
+    this.httpServer.requestTimeout = this.requestTimeoutMs;
     this.httpServer.on("upgrade", (request, socket, head) => {
       void this.handleUpgrade(request, socket, head);
     });
@@ -292,7 +350,85 @@ export class RuntimeServer {
       : null;
   }
 
-  async stop() {
+  activeJobs() {
+    if (typeof this.jobManager.activeJobs === "function") return this.jobManager.activeJobs();
+    return this.jobManager.list().filter((job) => ACTIVE_JOB_STATES.has(job?.state));
+  }
+
+  activeOperations() {
+    return this.operationManager.list().filter((operation) => ACTIVE_OPERATION_STATES.has(operation?.status));
+  }
+
+  scheduleProjectRestart(result) {
+    if (!result.restartRequired) return;
+    this.projectRestartPending = true;
+    this.projectRestartBusyWarningIssued = false;
+    this.armProjectRestart(250);
+  }
+
+  armProjectRestart(delayMs) {
+    if (this.projectRestartTimer) clearTimeout(this.projectRestartTimer);
+    this.projectRestartTimer = setTimeout(() => {
+      this.projectRestartTimer = null;
+      void (async () => {
+        const activeJobs = this.activeJobs();
+        const activeOperations = this.activeOperations();
+        if (activeJobs.length || activeOperations.length) {
+          if (!this.projectRestartBusyWarningIssued) {
+            this.projectRestartBusyWarningIssued = true;
+            this.jobManager.emit?.("warning", {
+              message: "项目切换后的计划重启正在等待运行中任务结束，服务不会放弃任务控制权",
+              jobId: activeJobs[0]?.id,
+              operationId: activeOperations[0]?.id,
+            });
+          }
+          this.armProjectRestart(this.projectRestartRetryMs);
+          return;
+        }
+        try {
+          await this.stop({ plannedRestart: true });
+          this.requestProcessExit(75);
+        } catch (error) {
+          if (["RUNTIME_RESTART_JOB_BUSY", "RUNTIME_RESTART_OPERATION_BUSY"].includes(error?.code)) {
+            this.armProjectRestart(this.projectRestartRetryMs);
+            return;
+          }
+          this.projectRestartPending = false;
+          this.projectRestartBusyWarningIssued = false;
+          this.jobManager.emit?.("warning", {
+            message: "项目切换后的计划重启失败，请手动重启本地服务",
+            error,
+          });
+        }
+      })();
+    }, delayMs);
+    this.projectRestartTimer.unref?.();
+  }
+
+  async stop({ plannedRestart = false } = {}) {
+    const activeJobs = this.activeJobs();
+    if (plannedRestart && activeJobs.length) {
+      throw runtimeConflict(
+        "运行中的任务阻止本地服务计划重启；请先安全停止任务",
+        "RUNTIME_RESTART_JOB_BUSY",
+        { jobIds: activeJobs.map((job) => job.id) },
+      );
+    }
+    const activeOperations = this.activeOperations();
+    if (plannedRestart && activeOperations.length) {
+      throw runtimeConflict(
+        "运行中的后台操作阻止本地服务计划重启；请等待操作完成或取消操作",
+        "RUNTIME_RESTART_OPERATION_BUSY",
+        { operationIds: activeOperations.map((operation) => operation.id) },
+      );
+    }
+    if (!plannedRestart) {
+      if (this.projectRestartTimer) clearTimeout(this.projectRestartTimer);
+      this.projectRestartTimer = null;
+      this.projectRestartPending = false;
+      this.projectRestartBusyWarningIssued = false;
+    }
+    await this.jobManager.flushAll?.();
     for (const client of this.webSocketServer?.clients ?? []) client.close(1001, "服务停止");
     await new Promise((resolve) => {
       if (!this.httpServer?.listening) return resolve();
@@ -307,6 +443,12 @@ export class RuntimeServer {
   }
 
   assertNoWorkspaceMutation() {
+    if (this.projectRestartPending) {
+      throw runtimeConflict(
+        "项目已切换，正在重启本地服务；请稍候",
+        "PROJECT_RESTART_PENDING",
+      );
+    }
     if (this.workspaceMutation) {
       throw runtimeConflict(
         `工作区正在执行“${this.workspaceMutation}”，请等待完成后重试`,
@@ -332,6 +474,155 @@ export class RuntimeServer {
     } finally {
       this.workspaceMutation = null;
     }
+  }
+
+  operationSpec(body = {}) {
+    const kind = typeof body.kind === "string" ? body.kind.trim() : "";
+    if (!OPERATION_KIND_SET.has(kind)) {
+      throw apiError(
+        "不支持的后台操作类型",
+        "OPERATION_KIND_NOT_ALLOWED",
+        400,
+        { allowedKinds: SUPPORTED_OPERATION_KINDS },
+      );
+    }
+    const parameters = body.parameters && typeof body.parameters === "object" && !Array.isArray(body.parameters)
+      ? body.parameters
+      : body;
+    const side = body.side ?? parameters.side;
+    if (!["src", "dst"].includes(side)) {
+      throw apiError("后台操作需要指定 src 或 dst", "OPERATION_SIDE_INVALID");
+    }
+    const refresh = parameters.refresh === true;
+    const definitions = {
+      "asset-audit": {
+        label: `${side.toUpperCase()} 数据审计`,
+        stage: "分析素材质量",
+        run: ({ signal, onProgress }) => auditAlignedAssets(side, {
+          refresh,
+          offset: parameters.offset,
+          limit: parameters.limit,
+          signal,
+          onProgress,
+        }),
+      },
+      "pose-atlas": {
+        label: `${side.toUpperCase()} 姿势图谱`,
+        stage: "生成姿势图谱",
+        run: ({ signal, onProgress }) => buildAlignedPoseAtlas(side, { signal, onProgress }),
+      },
+      similarity: {
+        label: `${side.toUpperCase()} 相似样本分析`,
+        stage: "生成相似样本候选",
+        run: ({ signal, onProgress }) => buildAlignedSimilarityGroups(side, {
+          refresh,
+          threshold: parameters.threshold,
+          limit: parameters.limit,
+          signal,
+          onProgress,
+        }),
+      },
+      pack: {
+        label: `${side.toUpperCase()} 对齐包检查`,
+        stage: "检查对齐包",
+        run: ({ signal }) => inspectAlignedPack(side, { refresh, signal }),
+      },
+      coverage: {
+        label: `${side.toUpperCase()} 提取覆盖检查`,
+        stage: "检查提取覆盖",
+        run: ({ signal, onProgress }) => inspectExtractionCoverage(side, {
+          refresh,
+          offset: parameters.offset,
+          limit: parameters.limit,
+          signal,
+          onProgress,
+        }),
+      },
+      "detect-scenes": {
+        label: `${side.toUpperCase()} 场景检测`,
+        stage: "检测视频场景",
+        cancellable: false,
+        run: () => detectVideoScenes(side, { threshold: parameters.threshold }),
+      },
+    };
+    return { kind, side, ...definitions[kind] };
+  }
+
+  async startOperation(body) {
+    const spec = this.operationSpec(body);
+    return this.operationManager.start(
+      spec.kind,
+      async ({ signal, report }) => {
+        await report({ stage: "准备输入" });
+        if (signal.aborted) throw new DOMException("cancelled", "AbortError");
+        await report({ stage: spec.stage });
+        let progressError = null;
+        let progressWrites = Promise.resolve();
+        const onProgress = (update = {}) => {
+          progressWrites = progressWrites
+            .then(() => report({
+              ...update,
+              stage: OPERATION_STAGE_LABELS[update.stage] ?? spec.stage,
+            }))
+            .catch((error) => {
+              progressError ??= error;
+            });
+        };
+        const result = await spec.run({ signal, onProgress });
+        await progressWrites;
+        if (progressError) throw progressError;
+        await report({ stage: "整理结果" });
+        return result;
+      },
+      {
+        label: spec.label,
+        cancellable: spec.cancellable !== false,
+        detail: `${spec.side.toUpperCase()} · ${spec.kind}`,
+      },
+    );
+  }
+
+  async inspectSystemStorage(requiredBytes) {
+    return inspectStorage(PATHS.workspaceRoot, { requiredBytes });
+  }
+
+  async buildSystemDiagnostic() {
+    const [workspace, telemetry, storage, pythonAvailable, currentAvailable, legacyAvailable, workspaceAvailable] =
+      await Promise.all([
+        inspectWorkspace(),
+        getGpuTelemetry(),
+        inspectStorage(PATHS.workspaceRoot),
+        pathExists(PATHS.python),
+        pathExists(PATHS.currentMain),
+        pathExists(PATHS.legacyMain),
+        pathExists(PATHS.workspaceRoot),
+      ]);
+    return buildDiagnosticSnapshot({
+      version: RUNTIME_VERSION,
+      workspace: { ...workspace, projectId: PATHS.activeProject.id },
+      telemetry,
+      storage,
+      jobs: this.jobManager.list().map((job) => ({
+        ...job,
+        status: job.state,
+        finishedAt: job.endedAt,
+      })),
+      runtime: {
+        profile: "local",
+        pythonAvailable,
+        currentAvailable,
+        legacyAvailable,
+        workspaceAvailable,
+      },
+    });
+  }
+
+  async listMaterialArchives(side) {
+    return listWorkspaceMaterialArchives(side);
+  }
+
+  async restoreMaterialArchive(side, token) {
+    return restoreWorkspaceMaterial(side, token);
   }
 
   async handleRequest(request, response) {
@@ -380,7 +671,7 @@ export class RuntimeServer {
           ok: true,
           data: {
             service: "DeepFaceLabSN Local Runtime",
-            version: "0.1.0",
+            version: RUNTIME_VERSION,
             loopbackOnly: true,
             runtime: {
               pythonAvailable,
@@ -415,6 +706,37 @@ export class RuntimeServer {
     if (request.method === "GET" && url.pathname === "/api/workspace") {
       return sendJson(response, 200, { ok: true, data: await inspectWorkspace() });
     }
+    if (request.method === "GET" && url.pathname === "/api/system/storage") {
+      const requiredBytes = parseRequiredBytes(url.searchParams.get("requiredBytes"));
+      return sendJson(response, 200, {
+        ok: true,
+        data: await this.inspectSystemStorage(requiredBytes),
+      });
+    }
+    if (request.method === "GET" && url.pathname === "/api/system/diagnostics") {
+      return sendJson(response, 200, { ok: true, data: await this.buildSystemDiagnostic() });
+    }
+    if (request.method === "GET" && url.pathname === "/api/operations") {
+      return sendJson(response, 200, { ok: true, data: this.operationManager.list() });
+    }
+    if (request.method === "POST" && url.pathname === "/api/operations") {
+      return sendJson(response, 202, {
+        ok: true,
+        data: await this.startOperation(await readJsonBody(request)),
+      });
+    }
+    const operationCancelMatch = url.pathname.match(/^\/api\/operations\/(op-[a-z0-9-]+)\/cancel$/i);
+    if (request.method === "POST" && operationCancelMatch) {
+      const operation = await this.operationManager.cancel(operationCancelMatch[1]);
+      if (!operation) throw apiError("后台操作不存在", "OPERATION_NOT_FOUND", 404);
+      return sendJson(response, 200, { ok: true, data: operation });
+    }
+    const operationMatch = url.pathname.match(/^\/api\/operations\/(op-[a-z0-9-]+)$/i);
+    if (request.method === "GET" && operationMatch) {
+      const operation = this.operationManager.get(operationMatch[1]);
+      if (!operation) throw apiError("后台操作不存在", "OPERATION_NOT_FOUND", 404);
+      return sendJson(response, 200, { ok: true, data: operation });
+    }
     if (request.method === "GET" && url.pathname === "/api/projects") {
       return sendJson(response, 200, { ok: true, data: await this.projectManager.list() });
     }
@@ -429,6 +751,7 @@ export class RuntimeServer {
       const result = await this.withWorkspaceMutation("切换项目", () => (
         this.projectManager.activate(projectActivateMatch[1], this.jobManager.list())
       ));
+      if (result.restartRequired) this.projectRestartPending = true;
       this.onProjectActivation(result);
       return sendJson(response, 200, { ok: true, data: result });
     }
@@ -791,6 +1114,24 @@ export class RuntimeServer {
         )),
       });
     }
+    const materialArchivesMatch = url.pathname.match(/^\/api\/workspace\/material-archives\/(src|dst)$/);
+    if (request.method === "GET" && materialArchivesMatch) {
+      return sendJson(response, 200, {
+        ok: true,
+        data: await this.listMaterialArchives(materialArchivesMatch[1]),
+      });
+    }
+    const materialRestoreMatch = url.pathname.match(
+      /^\/api\/workspace\/material-archives\/(src|dst)\/(\d{14}(?:-[a-f0-9]{10})?)\/restore$/,
+    );
+    if (request.method === "POST" && materialRestoreMatch) {
+      return sendJson(response, 200, {
+        ok: true,
+        data: await this.withWorkspaceMutation("恢复视频素材", () => (
+          this.restoreMaterialArchive(materialRestoreMatch[1], materialRestoreMatch[2])
+        )),
+      });
+    }
     const workspaceImportMatch = url.pathname.match(/^\/api\/workspace\/import\/(src|dst)$/);
     if (request.method === "POST" && workspaceImportMatch) {
       const imported = await this.withWorkspaceMutation("导入视频素材", () => (
@@ -818,7 +1159,7 @@ export class RuntimeServer {
       const body = await readJsonBody(request);
       const commandId = decodeURIComponent(commandPreflightMatch[1]);
       const prepared = await this.withWorkspaceMutation("检查任务参数", () => (
-        prepareCommand(commandId, {
+        this.commandPreparer(commandId, {
           launchMode: body.launchMode,
           parameters: body.parameters,
           trainingEvaluationManager: this.trainingEvaluationManager,
@@ -833,6 +1174,7 @@ export class RuntimeServer {
           profile: prepared.definition.profile,
           stage: prepared.definition.stage,
           locks: prepared.definition.locks,
+          resources: prepared.preflight?.resources ?? null,
           evaluation: prepared.preflight?.evaluation
             ? {
                 enabled: prepared.preflight.evaluation.enabled,

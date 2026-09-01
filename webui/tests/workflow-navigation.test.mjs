@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  getInitialReadinessDestination,
   navigationWorkflowStages,
   workflowStageDestinations,
   workflowStages,
@@ -42,11 +43,22 @@ test("primary navigation keeps the workflow highlight synchronized", () => {
   assert.equal(navigationWorkflowStages.export, "encode");
 });
 
+test("initial readiness navigation only claims the pre-training setup stages", async () => {
+  assert.deepEqual(getInitialReadinessDestination("material"), { nav: "video" });
+  assert.deepEqual(getInitialReadinessDestination("frames"), { nav: "workflow.frames", task: "extract" });
+  assert.deepEqual(getInitialReadinessDestination("faces"), { nav: "workflow.faces", task: "src" });
+  assert.equal(getInitialReadinessDestination("train"), null);
+  assert.equal(getInitialReadinessDestination("diagnose"), null);
+
+  const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  assert.match(source, /initialWorkspaceNavigationRef\.current === workspaceKey/);
+  assert.match(source, /navigationTouchedRef\.current \|\| activeNav !== "overview"/);
+});
+
 test("terminal safe stop targets the selected training session", async () => {
   const source = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
-  assert.match(
-    source,
-    /onSafeStop=\{\(\) => selectedJob\?\.id && setStopTargetJobId\(selectedJob\.id\)\}/,
-  );
-  assert.match(source, /runtime\.control\("close", targetJobId\)/);
+  assert.match(source, /const safeStopSelectedJob = useCallback\(\(\) => \{/);
+  assert.match(source, /if \(selectedJob\?\.id\) setStopTargetJobId\(selectedJob\.id\);/);
+  assert.match(source, /onSafeStop=\{safeStopSelectedJob\}/);
+  assert.match(source, /control\("close", targetJobId\)/);
 });

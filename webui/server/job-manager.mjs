@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { appendFile, mkdir, readFile, readdir, rename, stat } from "node:fs/promises";
+import { appendFile, mkdir, open, readdir, rename, stat } from "node:fs/promises";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import {
@@ -33,6 +33,55 @@ const ALLOWED_CONTROL_OPERATIONS = new Set([
 const MAX_EVENTS_IN_MEMORY = 1000;
 const MAX_INPUT_LENGTH = 8192;
 const SAFE_STOP_GRACE_MS = 12_000;
+export const DEFAULT_EVENT_SEGMENT_BYTES = 4 * 1024 * 1024;
+export const DEFAULT_EVENT_READ_LIMIT = 2000;
+export const DEFAULT_EVENT_READ_BYTES = 4 * 1024 * 1024;
+export const DEFAULT_METADATA_FLUSH_MS = 500;
+const EVENT_SEGMENT_PATTERN = /^events\.(\d{6})\.ndjson$/;
+
+function eventSegmentPath(job, index) {
+  return path.join(job.directory, `events.${String(index).padStart(6, "0")}.ndjson`);
+}
+
+async function inspectEventLogState(directory, eventsFile) {
+  let currentEventBytes = 0;
+  try {
+    currentEventBytes = (await stat(eventsFile)).size;
+  } catch {
+    // A new or archived job may not have a current segment yet.
+  }
+  let eventSegmentIndex = 0;
+  try {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      if (!entry.isFile()) continue;
+      const match = entry.name.match(EVENT_SEGMENT_PATTERN);
+      if (match) eventSegmentIndex = Math.max(eventSegmentIndex, Number(match[1]));
+    }
+  } catch {
+    // The caller already handles an unreadable job directory.
+  }
+  return { currentEventBytes, eventSegmentIndex };
+}
+
+async function readUtf8Tail(target, maxBytes) {
+  const handle = await open(target, "r");
+  try {
+    const fileStat = await handle.stat();
+    const length = Math.min(fileStat.size, maxBytes);
+    if (length <= 0) return "";
+    const start = fileStat.size - length;
+    const buffer = Buffer.allocUnsafe(length);
+    const { bytesRead } = await handle.read(buffer, 0, length, start);
+    let text = buffer.subarray(0, bytesRead).toString("utf8");
+    if (start > 0) {
+      const firstNewline = text.indexOf("\n");
+      text = firstNewline >= 0 ? text.slice(firstNewline + 1) : "";
+    }
+    return text;
+  } finally {
+    await handle.close();
+  }
+}
 
 export class JobError extends Error {
   constructor(message, code = "JOB_ERROR", status = 400, details) {
@@ -95,11 +144,21 @@ export class JobManager extends EventEmitter {
     runnerFactory = createPtyRunner,
     trainingEvaluationManager = new TrainingEvaluationManager(),
     now = () => new Date(),
+    eventSegmentBytes = DEFAULT_EVENT_SEGMENT_BYTES,
+    eventReadLimit = DEFAULT_EVENT_READ_LIMIT,
+    eventReadBytes = DEFAULT_EVENT_READ_BYTES,
+    metadataFlushMs = DEFAULT_METADATA_FLUSH_MS,
+    metadataWriter = writeJsonAtomic,
   } = {}) {
     super();
     this.runnerFactory = runnerFactory;
     this.trainingEvaluationManager = trainingEvaluationManager;
     this.now = now;
+    this.eventSegmentBytes = Math.max(Number(eventSegmentBytes) || DEFAULT_EVENT_SEGMENT_BYTES, 1024);
+    this.eventReadLimit = Math.max(Number(eventReadLimit) || DEFAULT_EVENT_READ_LIMIT, 1);
+    this.eventReadBytes = Math.max(Number(eventReadBytes) || DEFAULT_EVENT_READ_BYTES, 1024);
+    this.metadataFlushMs = Math.max(Number(metadataFlushMs) || DEFAULT_METADATA_FLUSH_MS, 10);
+    this.metadataWriter = metadataWriter;
     this.jobs = new Map();
     this.locks = new Map();
   }
@@ -117,11 +176,13 @@ export class JobManager extends EventEmitter {
       if (!(await pathExists(metadataFile))) continue;
       try {
         const metadata = await readJson(metadataFile);
+        const eventsFile = path.join(directory, "events.ndjson");
+        const eventLogState = await inspectEventLogState(directory, eventsFile);
         const job = {
           ...metadata,
           directory,
           metadataFile,
-          eventsFile: path.join(directory, "events.ndjson"),
+          eventsFile,
           controlFile: path.join(directory, "control.jsonl"),
           previewFile: path.join(directory, "preview.png"),
           runner: null,
@@ -129,6 +190,11 @@ export class JobManager extends EventEmitter {
           events: [],
           writeChain: Promise.resolve(),
           metadataWriteChain: Promise.resolve(),
+          metadataTimer: null,
+          metadataScheduledPromise: null,
+          metadataScheduledResolve: null,
+          metadataScheduledReject: null,
+          ...eventLogState,
           previewTimer: null,
           stopTimer: null,
           artifactPollPending: false,
@@ -238,6 +304,12 @@ export class JobManager extends EventEmitter {
       events: [],
       writeChain: Promise.resolve(),
       metadataWriteChain: Promise.resolve(),
+      metadataTimer: null,
+      metadataScheduledPromise: null,
+      metadataScheduledResolve: null,
+      metadataScheduledReject: null,
+      currentEventBytes: 0,
+      eventSegmentIndex: 0,
       previewTimer: null,
       stopTimer: null,
       artifactPollPending: false,
@@ -245,7 +317,7 @@ export class JobManager extends EventEmitter {
     };
     this.jobs.set(id, job);
     try {
-      await this.persist(job);
+      await this.persist(job, { force: true });
     } catch (error) {
       this.jobs.delete(id);
       this.releaseLocks(job);
@@ -278,7 +350,7 @@ export class JobManager extends EventEmitter {
       });
       if (job.category === "training") this.startPreviewWatcher(job);
       this.record(job, "job.state", { state: "running", pid: job.pid });
-      await this.persist(job);
+      await this.persist(job, { force: true });
       return publicJob(job);
     } catch (error) {
       job.state = "failed";
@@ -289,7 +361,7 @@ export class JobManager extends EventEmitter {
       runner?.kill?.();
       this.releaseLocks(job);
       this.record(job, "job.state", { state: "failed", error: job.error });
-      await this.persist(job);
+      await this.persist(job, { force: true });
       throw new JobError(`无法启动任务：${job.error}`, "PROCESS_START_FAILED", 500);
     }
   }
@@ -329,7 +401,7 @@ export class JobManager extends EventEmitter {
       if (parsed.type === "job.error") job.error = parsed.payload.message;
       this.record(job, parsed.type, parsed.payload);
     }
-    void this.persist(job);
+    void this.persist(job).catch(() => {});
   }
 
   async handleExit(job, exitCode, signal) {
@@ -371,7 +443,10 @@ export class JobManager extends EventEmitter {
       signal,
       stopReason: job.stopReason,
     });
-    await this.persist(job);
+    await Promise.all([
+      job.writeChain,
+      this.persist(job, { force: true }),
+    ]);
   }
 
   async sendInput(jobId, input) {
@@ -389,7 +464,7 @@ export class JobManager extends EventEmitter {
       this.record(job, "job.state", { state: "running" });
     }
     this.record(job, "terminal.input", { length: input.length });
-    await this.persist(job);
+    await this.persist(job, { force: true });
     return publicJob(job);
   }
 
@@ -417,7 +492,7 @@ export class JobManager extends EventEmitter {
       job.stopTimer = null;
       this.record(job, "job.state", { state: "stopping", operation });
       job.runner.kill();
-      await this.persist(job);
+      await this.persist(job, { force: true });
       return publicJob(job);
     }
     if (!job.controls.includes(operation)) {
@@ -436,7 +511,7 @@ export class JobManager extends EventEmitter {
         data: "\r\n\u001b[38;2;240;199;91m[WEB]\u001b[0m 训练尚未开始，已结束当前模型创建问答；此阶段没有需要保存的模型。\r\n",
       });
       job.runner.kill();
-      await this.persist(job);
+      await this.persist(job, { force: true });
       return publicJob(job);
     }
 
@@ -461,35 +536,77 @@ export class JobManager extends EventEmitter {
           data: "\r\n\u001b[38;2;240;199;91m[WEB]\u001b[0m Trainer 在 12 秒内未响应安全停止，已自动结束进程，避免任务永久停留。\r\n",
         });
         job.runner.kill();
-        void this.persist(job);
+        void this.persist(job, { force: true }).catch(() => {});
       }, SAFE_STOP_GRACE_MS);
       job.stopTimer.unref?.();
     }
     this.record(job, "job.control", { operation });
-    await this.persist(job);
+    await this.persist(job, { force: true });
     return publicJob(job);
   }
 
   async eventsAfter(jobId, after = 0) {
     const job = this.getInternal(jobId);
-    if (!(await pathExists(job.eventsFile))) return [];
-    const text = await readFile(job.eventsFile, "utf8");
-    return text
-      .split(/\r?\n/)
-      .filter(Boolean)
-      .map((line) => {
-        try {
-          return JSON.parse(line);
-        } catch {
-          return null;
-        }
+    if (after >= job.sequence) return [];
+    const pendingWrites = job.writeChain;
+    await pendingWrites;
+    let entries;
+    try {
+      entries = await readdir(job.directory, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    const files = entries
+      .filter((entry) => entry.isFile())
+      .map((entry) => {
+        if (entry.name === "events.ndjson") return { order: Number.MAX_SAFE_INTEGER, name: entry.name };
+        const match = entry.name.match(EVENT_SEGMENT_PATTERN);
+        return match ? { order: Number(match[1]), name: entry.name } : null;
       })
-      .filter((event) => event && event.sequence > after);
+      .filter(Boolean)
+      .sort((left, right) => left.order - right.order);
+    const collected = [];
+    for (let index = files.length - 1; index >= 0; index -= 1) {
+      let text;
+      try {
+        text = await readUtf8Tail(path.join(job.directory, files[index].name), this.eventReadBytes);
+      } catch {
+        continue;
+      }
+      const events = text
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .filter((event) => event && Number.isInteger(event.sequence));
+      const newer = events.filter((event) => event.sequence > after);
+      collected.unshift(...newer);
+      if (
+        collected.length >= this.eventReadLimit
+        || events.some((event) => event.sequence <= after)
+      ) break;
+    }
+    return collected.slice(-this.eventReadLimit);
   }
 
   async waitForWrites(jobId) {
     const job = this.getInternal(jobId);
-    await job.writeChain;
+    await this.flushJob(job);
+  }
+
+  activeJobs() {
+    return [...this.jobs.values()]
+      .filter((job) => ACTIVE_STATES.has(job.state))
+      .map(publicJob);
+  }
+
+  async flushAll() {
+    await Promise.all([...this.jobs.values()].map((job) => this.flushJob(job)));
   }
 
   async archiveCompleted() {
@@ -503,7 +620,7 @@ export class JobManager extends EventEmitter {
     await mkdir(archiveDirectory, { recursive: true });
     let archived = 0;
     for (const job of completed) {
-      await Promise.all([job.writeChain, job.metadataWriteChain]);
+      await this.flushJob(job);
       await rename(job.directory, path.join(archiveDirectory, job.id));
       this.jobs.delete(job.id);
       archived += 1;
@@ -607,20 +724,70 @@ export class JobManager extends EventEmitter {
     if (job.events.length > MAX_EVENTS_IN_MEMORY) {
       job.events.splice(0, job.events.length - MAX_EVENTS_IN_MEMORY);
     }
+    const line = `${JSON.stringify(event)}\n`;
+    const lineBytes = Buffer.byteLength(line);
     job.writeChain = job.writeChain
-      .then(() => appendFile(job.eventsFile, `${JSON.stringify(event)}\n`, "utf8"))
+      .then(async () => {
+        if (
+          (job.currentEventBytes ?? 0) > 0
+          && (job.currentEventBytes ?? 0) + lineBytes > this.eventSegmentBytes
+        ) {
+          job.eventSegmentIndex = (job.eventSegmentIndex ?? 0) + 1;
+          await rename(job.eventsFile, eventSegmentPath(job, job.eventSegmentIndex));
+          job.currentEventBytes = 0;
+        }
+        await appendFile(job.eventsFile, line, "utf8");
+        job.currentEventBytes = (job.currentEventBytes ?? 0) + lineBytes;
+      })
       .catch((error) => this.emit("warning", { message: "任务日志写入失败", error, jobId: job.id }));
     this.emit("event", event);
     return event;
   }
 
-  async persist(job) {
+  enqueueMetadataWrite(job) {
     const operation = job.metadataWriteChain.then(
-      () => writeJsonAtomic(job.metadataFile, metadataFromJob(job)),
+      () => this.metadataWriter(job.metadataFile, metadataFromJob(job)),
     );
     job.metadataWriteChain = operation.catch((error) => {
       this.emit("warning", { message: "任务元数据写入失败", error, jobId: job.id });
     });
     return operation;
+  }
+
+  async persist(job, { force = false } = {}) {
+    if (force) {
+      if (job.metadataTimer) clearTimeout(job.metadataTimer);
+      job.metadataTimer = null;
+      const scheduledResolve = job.metadataScheduledResolve;
+      const scheduledReject = job.metadataScheduledReject;
+      job.metadataScheduledPromise = null;
+      job.metadataScheduledResolve = null;
+      job.metadataScheduledReject = null;
+      const operation = this.enqueueMetadataWrite(job);
+      if (scheduledResolve) operation.then(scheduledResolve, scheduledReject);
+      return operation;
+    }
+    if (job.metadataScheduledPromise) return job.metadataScheduledPromise;
+    job.metadataScheduledPromise = new Promise((resolve, reject) => {
+      job.metadataScheduledResolve = resolve;
+      job.metadataScheduledReject = reject;
+    });
+    const scheduled = job.metadataScheduledPromise;
+    job.metadataTimer = setTimeout(() => {
+      const resolve = job.metadataScheduledResolve;
+      const reject = job.metadataScheduledReject;
+      job.metadataTimer = null;
+      job.metadataScheduledPromise = null;
+      job.metadataScheduledResolve = null;
+      job.metadataScheduledReject = null;
+      this.enqueueMetadataWrite(job).then(resolve, reject);
+    }, this.metadataFlushMs);
+    return scheduled;
+  }
+
+  async flushJob(job) {
+    const metadataWrite = this.persist(job, { force: true });
+    const eventWrites = job.writeChain;
+    await Promise.all([eventWrites, metadataWrite, job.metadataWriteChain]);
   }
 }

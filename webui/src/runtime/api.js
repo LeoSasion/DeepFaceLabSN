@@ -1,12 +1,22 @@
 async function request(path, options = {}) {
-  const response = await fetch(path, {
-    credentials: "same-origin",
-    ...options,
-    headers: {
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
-      ...options.headers,
-    },
-  });
+  let response;
+  try {
+    response = await fetch(path, {
+      credentials: "same-origin",
+      ...options,
+      headers: {
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...options.headers,
+      },
+    });
+  } catch (cause) {
+    if (cause?.name === "AbortError") throw cause;
+    const error = new Error("无法连接本地服务，请确认服务在线后重试");
+    error.code = "RUNTIME_UNREACHABLE";
+    error.retryable = true;
+    error.cause = cause;
+    throw error;
+  }
   const payload = await response.json().catch(() => ({
     ok: false,
     error: { message: `本地服务返回了无法解析的响应（HTTP ${response.status}）` },
@@ -15,9 +25,191 @@ async function request(path, options = {}) {
     const error = new Error(payload.error?.message ?? `请求失败（HTTP ${response.status}）`);
     error.code = payload.error?.code ?? "REQUEST_FAILED";
     error.details = payload.error?.details;
+    error.status = response.status;
+    error.retryable = response.status === 408
+      || response.status === 425
+      || response.status === 429
+      || response.status >= 500;
     throw error;
   }
   return payload.data;
+}
+
+const ACTIVE_OPERATION_STATES = new Set(["queued", "running", "cancelling"]);
+
+function abortError() {
+  if (typeof DOMException === "function") {
+    return new DOMException("后台操作轮询已取消", "AbortError");
+  }
+  const error = new Error("后台操作轮询已取消");
+  error.name = "AbortError";
+  error.code = "ABORT_ERR";
+  return error;
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw signal.reason?.name === "AbortError" ? signal.reason : abortError();
+}
+
+function wait(milliseconds, { signal } = {}) {
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    const finish = () => {
+      signal?.removeEventListener("abort", cancel);
+      resolve();
+    };
+    const cancel = () => {
+      globalThis.clearTimeout(timer);
+      signal?.removeEventListener("abort", cancel);
+      reject(signal.reason?.name === "AbortError" ? signal.reason : abortError());
+    };
+    const timer = globalThis.setTimeout(finish, milliseconds);
+    signal?.addEventListener("abort", cancel, { once: true });
+  });
+}
+
+function boundedInterval(value, fallback, { minimum = 100, maximum = 30_000 } = {}) {
+  const parsed = Number(value);
+  return Math.max(minimum, Math.min(maximum, Number.isFinite(parsed) ? parsed : fallback));
+}
+
+function notifyProgress(callback, operation, previousFingerprint) {
+  const fingerprint = JSON.stringify(operation);
+  if (fingerprint === previousFingerprint) return previousFingerprint;
+  try {
+    callback?.(operation);
+  } catch {
+    // Progress presentation must not abandon a server-side operation.
+  }
+  return fingerprint;
+}
+
+function operationError(operation) {
+  const error = new Error(
+    operation?.error?.message
+      ?? (operation?.status === "cancelled" ? "操作已取消" : "后台操作未完成"),
+  );
+  error.code = operation?.error?.code
+    ?? (operation?.status === "cancelled" ? "OPERATION_CANCELLED" : "OPERATION_INCOMPLETE");
+  error.operation = operation;
+  return error;
+}
+
+async function runOperation(kind, side, parameters = {}, {
+  onProgress,
+  pollIntervalMs = 350,
+  maxPollIntervalMs = 5_000,
+  maxConsecutiveErrors = 5,
+  signal,
+} = {}) {
+  const baseInterval = boundedInterval(pollIntervalMs, 350, { maximum: 5_000 });
+  const maximumInterval = boundedInterval(maxPollIntervalMs, 5_000, {
+    minimum: baseInterval,
+    maximum: 30_000,
+  });
+  const retryLimit = Math.max(0, Math.min(20, Number.isFinite(Number(maxConsecutiveErrors))
+    ? Math.floor(Number(maxConsecutiveErrors))
+    : 5));
+  throwIfAborted(signal);
+  let operation = await request("/api/operations", {
+    method: "POST",
+    body: JSON.stringify({ kind, side, parameters }),
+    signal,
+  });
+  let progressFingerprint = notifyProgress(onProgress, operation, null);
+  let consecutiveErrors = 0;
+  while (ACTIVE_OPERATION_STATES.has(operation.status)) {
+    const retryMultiplier = consecutiveErrors > 0 ? 2 ** Math.min(consecutiveErrors, 6) : 1;
+    await wait(Math.min(maximumInterval, baseInterval * retryMultiplier), { signal });
+    try {
+      operation = await request(`/api/operations/${encodeURIComponent(operation.id)}`, { signal });
+      consecutiveErrors = 0;
+      progressFingerprint = notifyProgress(onProgress, operation, progressFingerprint);
+    } catch (error) {
+      if (error?.name === "AbortError") throw error;
+      consecutiveErrors += 1;
+      if (!error?.retryable || consecutiveErrors > retryLimit) throw error;
+    }
+  }
+  if (operation.status !== "succeeded") throw operationError(operation);
+  return operation.result;
+}
+
+function operationListFingerprint(records) {
+  return JSON.stringify(records);
+}
+
+export function watchOperations({
+  fetchOperations = ({ signal } = {}) => request("/api/operations", { signal }),
+  onUpdate,
+  onError,
+  pollIntervalMs = 750,
+  maxPollIntervalMs = 8_000,
+  setTimer = (callback, delay) => globalThis.setTimeout(callback, delay),
+  clearTimer = (timer) => globalThis.clearTimeout(timer),
+} = {}) {
+  const baseInterval = boundedInterval(pollIntervalMs, 750);
+  const maximumInterval = boundedInterval(maxPollIntervalMs, 8_000, {
+    minimum: baseInterval,
+    maximum: 60_000,
+  });
+  let disposed = false;
+  let timer = null;
+  let requestController = null;
+  let consecutiveErrors = 0;
+  let errorReported = false;
+  let previousFingerprint = null;
+
+  const refresh = async () => {
+    requestController = new AbortController();
+    try {
+      const records = await fetchOperations({ signal: requestController.signal });
+      if (disposed) return;
+      if (!Array.isArray(records)) {
+        const error = new Error("后台操作列表格式无效");
+        error.code = "INVALID_OPERATION_LIST";
+        throw error;
+      }
+      const activeRecords = records.filter((item) => ACTIVE_OPERATION_STATES.has(item?.status));
+      const fingerprint = operationListFingerprint(activeRecords);
+      if (fingerprint !== previousFingerprint) {
+        previousFingerprint = fingerprint;
+        try {
+          onUpdate?.(activeRecords);
+        } catch {
+          // A presentation callback must not stop monitoring.
+        }
+      }
+      consecutiveErrors = 0;
+      errorReported = false;
+    } catch (error) {
+      if (disposed || error?.name === "AbortError") return;
+      consecutiveErrors += 1;
+      if (!errorReported) {
+        errorReported = true;
+        try {
+          onError?.(error);
+        } catch {
+          // Error presentation is isolated from the monitor lifecycle.
+        }
+      }
+    } finally {
+      requestController = null;
+      if (!disposed) {
+        const retryMultiplier = consecutiveErrors > 1
+          ? 2 ** Math.min(consecutiveErrors - 1, 6)
+          : 1;
+        timer = setTimer(refresh, Math.min(maximumInterval, baseInterval * retryMultiplier));
+      }
+    }
+  };
+
+  void refresh();
+  return () => {
+    disposed = true;
+    requestController?.abort();
+    if (timer != null) clearTimer(timer);
+  };
 }
 
 async function uploadVideoWithFetch(side, file, replace) {
@@ -93,6 +285,31 @@ export const runtimeApi = {
   telemetry: () => request("/api/telemetry"),
   commands: () => request("/api/commands"),
   workspace: () => request("/api/workspace"),
+  storage: (requiredBytes = 0) => request(
+    `/api/system/storage?requiredBytes=${encodeURIComponent(requiredBytes)}`,
+  ),
+  diagnostics: () => request("/api/system/diagnostics"),
+  operations: (options = {}) => request("/api/operations", options),
+  operation: (id, options = {}) => request(`/api/operations/${encodeURIComponent(id)}`, options),
+  startOperation: (kind, side, parameters = {}, options = {}) => request("/api/operations", {
+    ...options,
+    method: "POST",
+    body: JSON.stringify({ kind, side, parameters }),
+  }),
+  runOperation,
+  watchOperations,
+  cancelOperation: (id, options = {}) => request(`/api/operations/${encodeURIComponent(id)}/cancel`, {
+    ...options,
+    method: "POST",
+  }),
+  materialArchives: (side, options = {}) => request(
+    `/api/workspace/material-archives/${encodeURIComponent(side)}`,
+    options,
+  ),
+  restoreMaterialArchive: (side, token, options = {}) => request(
+    `/api/workspace/material-archives/${encodeURIComponent(side)}/${encodeURIComponent(token)}/restore`,
+    { ...options, method: "POST" },
+  ),
   projects: () => request("/api/projects"),
   createProject: (payload) => request("/api/projects", {
     method: "POST",
@@ -104,7 +321,7 @@ export const runtimeApi = {
   alignedAssets: (side, { offset = 0, limit = 60 } = {}) => request(
     `/api/assets/${side}/aligned?offset=${offset}&limit=${limit}`,
   ),
-  alignedPoseAtlas: (side) => request(`/api/assets/${side}/pose-atlas`),
+  alignedPoseAtlas: (side, options = {}) => runOperation("pose-atlas", side, {}, options),
   trainingEvaluationManifests: (modelKey) => request(
     `/api/training-evaluations/${encodeURIComponent(modelKey)}/manifests`,
   ),
@@ -115,18 +332,35 @@ export const runtimeApi = {
     `/api/training-evaluations/${encodeURIComponent(modelKey)}`
       + `/snapshots/${encodeURIComponent(snapshotId)}`,
   ),
-  alignedAudit: (side, { refresh = false, offset = 0, limit = 120 } = {}) => request(
-    `/api/tools/assets/${side}/audit?offset=${offset}&limit=${limit}${refresh ? "&refresh=1" : ""}`,
+  alignedAudit: (side, {
+    refresh = false, offset = 0, limit = 120, ...operationOptions
+  } = {}) => runOperation(
+    "asset-audit",
+    side,
+    { refresh, offset, limit },
+    operationOptions,
   ),
-  alignedSimilarity: (side, { refresh = false, threshold = 0.86, limit = 500 } = {}) => request(
-    `/api/tools/assets/${side}/similarity?threshold=${encodeURIComponent(threshold)}`
-      + `&limit=${encodeURIComponent(limit)}${refresh ? "&refresh=1" : ""}`,
+  alignedSimilarity: (side, {
+    refresh = false, threshold = 0.86, limit = 500, ...operationOptions
+  } = {}) => runOperation(
+    "similarity",
+    side,
+    { refresh, threshold, limit },
+    operationOptions,
   ),
-  alignedPack: (side, { refresh = false } = {}) => request(
-    `/api/tools/assets/${side}/pack${refresh ? "?refresh=1" : ""}`,
+  alignedPack: (side, { refresh = false, ...operationOptions } = {}) => runOperation(
+    "pack",
+    side,
+    { refresh },
+    operationOptions,
   ),
-  extractionCoverage: (side, { refresh = false, offset = 0, limit = 120 } = {}) => request(
-    `/api/tools/assets/${side}/coverage?offset=${offset}&limit=${limit}${refresh ? "&refresh=1" : ""}`,
+  extractionCoverage: (side, {
+    refresh = false, offset = 0, limit = 120, ...operationOptions
+  } = {}) => runOperation(
+    "coverage",
+    side,
+    { refresh, offset, limit },
+    operationOptions,
   ),
   mergeReview: ({ offset = 0, limit = 120 } = {}) => request(
     `/api/tools/merge-review?offset=${offset}&limit=${limit}`,
@@ -176,10 +410,12 @@ export const runtimeApi = {
   ),
   importVideo: uploadVideo,
   videoTimeline: (side) => request(`/api/tools/video/${side}/timeline`),
-  detectVideoScenes: (side, threshold) => request(`/api/tools/video/${side}/detect-scenes`, {
-    method: "POST",
-    body: JSON.stringify({ threshold }),
-  }),
+  detectVideoScenes: (side, threshold, options = {}) => runOperation(
+    "detect-scenes",
+    side,
+    { threshold },
+    options,
+  ),
   saveVideoSegments: (side, segments) => request(`/api/tools/video/${side}/segments`, {
     method: "PUT",
     body: JSON.stringify({ segments }),

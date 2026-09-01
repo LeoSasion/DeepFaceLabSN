@@ -49,7 +49,7 @@ function LoadingState({ label }) {
   const { t } = useI18n();
   return (
     <div className="tool-workbench-state is-loading">
-      <LoadingProgress className="in-panel" label={label} detail={t("仅在本地读取与分析，不会调用外部服务")} />
+      <LoadingProgress inline className="in-panel" label={label} detail={t("仅在本地读取与分析，不会调用外部服务")} />
     </div>
   );
 }
@@ -211,7 +211,7 @@ export function DatasetAuditPanel({
           <div className="audit-filter-bar">
             <label className="audit-search"><IconSearch size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("搜索文件名或源帧…")} aria-label={t("搜索审计样本")} /></label>
             <label><IconFilter size={14} /><span>{t("问题")}</span>
-              <select value={issue} onChange={(event) => setIssue(event.target.value)}>
+              <select aria-label={t("按问题筛选") } value={issue} onChange={(event) => setIssue(event.target.value)}>
                 <option value="all">{t("全部样本")}</option>
                 {Object.entries(ISSUE_LABELS).map(([value, label]) => (
                   <option key={value} value={value}>{t(label)} · {audit.issueCounts[value] ?? 0}</option>
@@ -219,14 +219,14 @@ export function DatasetAuditPanel({
               </select>
             </label>
             <label><IconMask size={14} /><span>{t("遮罩")}</span>
-              <select value={maskFilter} onChange={(event) => setMaskFilter(event.target.value)}>
+              <select aria-label={t("按遮罩状态筛选") } value={maskFilter} onChange={(event) => setMaskFilter(event.target.value)}>
                 <option value="all">{t("全部遮罩状态")}</option>
                 <option value="xseg">{t("已有 XSeg")}</option>
                 <option value="none">{t("无 XSeg")}</option>
               </select>
             </label>
             <label><span>{t("排序")}</span>
-              <select value={sort} onChange={(event) => setSort(event.target.value)}>
+              <select aria-label={t("审计样本排序") } value={sort} onChange={(event) => setSort(event.target.value)}>
                 <option value="quality">{t("质量从低到高")}</option>
                 <option value="sharpness">{t("清晰度从低到高")}</option>
                 <option value="brightness">{t("亮度从低到高")}</option>
@@ -357,7 +357,7 @@ export function ExtractionReviewPanel({ side, refreshVersion, onError, onOpenCom
         </CompactSummary>
         <div className="tool-filter-row extraction-review-controls">
           <label>{t("帧范围")}
-            <select value={filter} onChange={(event) => { setFilter(event.target.value); setIndex(0); }}>
+            <select aria-label={t("帧范围筛选") } value={filter} onChange={(event) => { setFilter(event.target.value); setIndex(0); }}>
               <option value="all">{t("全部帧")}</option>
               <option value="missing">{t("仅未提取")}</option>
               <option value="multi">{t("仅多人脸")}</option>

@@ -5,6 +5,7 @@ import { buildDflEnvironment } from "./environment.mjs";
 import { summarizeXSegLabels } from "./asset-manager.mjs";
 import { PATHS, pathExists } from "./paths.mjs";
 import { createTrainingModelKey } from "./training-evaluation-manager.mjs";
+import { getGpuTelemetry } from "./telemetry.mjs";
 
 const GPU_PARAMETERS = [
   {
@@ -164,6 +165,63 @@ const TRAIN_PARAMETERS = [
   },
   ...GPU_PARAMETERS,
 ];
+
+async function inspectTrainingResources(parameters = {}) {
+  if (parameters.cpuOnly) {
+    return {
+      available: true,
+      mode: "cpu",
+      severity: "warning",
+      summary: "CPU 模式可用于兼容性验证，但不适合长时间训练",
+      recommendation: { resolution: 128, batchSize: 2 },
+    };
+  }
+  const telemetry = await getGpuTelemetry().catch(() => null);
+  if (!telemetry?.available || !telemetry.gpus?.length) {
+    return {
+      available: false,
+      mode: "gpu",
+      severity: "warning",
+      summary: telemetry?.error ?? "无法读取 GPU 显存，请在终端确认训练配置",
+      recommendation: { resolution: 128, batchSize: 2 },
+    };
+  }
+  const requested = String(parameters.gpuIndexes ?? "")
+    .split(",")
+    .map((value) => Number.parseInt(value.trim(), 10))
+    .filter(Number.isInteger);
+  const candidates = requested.length
+    ? telemetry.gpus.filter((gpu) => requested.includes(gpu.index))
+    : telemetry.gpus;
+  const gpu = [...(candidates.length ? candidates : telemetry.gpus)]
+    .sort((left, right) => (right.memoryTotalMiB ?? 0) - (left.memoryTotalMiB ?? 0))[0];
+  const totalGiB = Math.max(0, Number(gpu.memoryTotalMiB ?? 0) / 1024);
+  const freeGiB = Math.max(0, Number(gpu.memoryTotalMiB ?? 0) - Number(gpu.memoryUsedMiB ?? 0)) / 1024;
+  const recommendation = totalGiB < 6
+    ? { resolution: 128, batchSize: 2 }
+    : totalGiB < 8
+      ? { resolution: 160, batchSize: 4 }
+      : totalGiB < 12
+        ? { resolution: 192, batchSize: 4 }
+        : totalGiB < 16
+          ? { resolution: 256, batchSize: 4 }
+          : { resolution: 320, batchSize: 6 };
+  return {
+    available: true,
+    mode: "gpu",
+    severity: freeGiB < 2 ? "warning" : "info",
+    summary: freeGiB < 2
+      ? "当前空闲显存偏低，建议关闭占用 GPU 的程序后再启动"
+      : "建议值是安全起点，最终配置仍以 DFL 实际显存占用为准",
+    gpu: {
+      index: gpu.index,
+      name: gpu.name,
+      totalGiB: Number(totalGiB.toFixed(1)),
+      freeGiB: Number(freeGiB.toFixed(1)),
+    },
+    recommendation,
+  };
+}
 
 const MERGE_PARAMETERS = [
   {
@@ -1214,9 +1272,11 @@ const definitions = Object.freeze({
         path.join(PATHS.workspaceRoot, "data_dst", "aligned"),
         "DST aligned 人脸集不存在或为空",
       );
+      const resources = await inspectTrainingResources(context.parameters);
       const modelName = context.parameters?.forceModelName;
       if (!modelName) {
         return {
+          resources,
           evaluation: {
             enabled: false,
             reason: "姿态评测需要在引导模式中明确指定 SAEHD 模型名称",
@@ -1225,6 +1285,7 @@ const definitions = Object.freeze({
       }
       if (!context.trainingEvaluationManager) {
         return {
+          resources,
           evaluation: {
             enabled: false,
             reason: "本地姿态评测管理器不可用",
@@ -1239,6 +1300,7 @@ const definitions = Object.freeze({
         );
         const existing = await context.trainingEvaluationManager.listSnapshots(modelKey);
         return {
+          resources,
           evaluation: {
             enabled: true,
             modelKey,
@@ -1253,6 +1315,7 @@ const definitions = Object.freeze({
         };
       } catch (error) {
         return {
+          resources,
           evaluation: {
             enabled: false,
             reason: error instanceof Error ? error.message : "姿态评测集生成失败",

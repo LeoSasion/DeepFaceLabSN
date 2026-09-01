@@ -15,7 +15,12 @@ export function mergeJobs(current, incoming) {
     ) continue;
     byId.set(job.id, { ...existing, ...job });
   }
-  return [...byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const merged = [...byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return JSON.stringify(merged) === JSON.stringify(current) ? current : merged;
+}
+
+function preserveEqualSnapshot(current, incoming) {
+  return JSON.stringify(current) === JSON.stringify(incoming) ? current : incoming;
 }
 
 function appendUniqueEvents(current, incoming) {
@@ -89,8 +94,8 @@ export function useRuntime() {
         runtimeApi.commands(),
         runtimeApi.jobs(),
       ]);
-      setHealth(nextHealth);
-      setCommands(nextCommands);
+      setHealth((current) => preserveEqualSnapshot(current, nextHealth));
+      setCommands((current) => preserveEqualSnapshot(current, nextCommands));
       setJobs((current) => mergeJobs(current, nextJobs));
       setSelectedJobId((current) => (
         current && nextJobs.some((job) => job.id === current)

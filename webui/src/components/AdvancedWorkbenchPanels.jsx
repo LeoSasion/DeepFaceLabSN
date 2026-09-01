@@ -4,8 +4,10 @@ import {
   IconArchive,
   IconArrowBackUp,
   IconCheck,
+  IconChevronDown,
   IconChevronLeft,
   IconChevronRight,
+  IconChevronUp,
   IconCopy,
   IconDeviceFloppy,
   IconPhoto,
@@ -34,7 +36,7 @@ const LANDMARK_GROUPS = {
 function PanelState({ icon, title, detail, loading = false }) {
   return (
     <div className={`tool-workbench-state${loading ? " is-loading" : ""}`} role={loading ? undefined : "status"}>
-      {loading ? <LoadingProgress className="in-panel" label={title} detail={detail} /> : (
+      {loading ? <LoadingProgress inline className="in-panel" label={title} detail={detail} /> : (
         <>
           {icon}
           <strong>{title}</strong>
@@ -196,6 +198,8 @@ export function AlignmentRepairPanel({ side, refreshVersion, onError, onNotice, 
   const [baseline, setBaseline] = useState([]);
   const [group, setGroup] = useState("all");
   const [dragging, setDragging] = useState(null);
+  const [selectedLandmark, setSelectedLandmark] = useState(null);
+  const [landmarkAnnouncement, setLandmarkAnnouncement] = useState("");
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(null);
   const [retry, setRetry] = useState(0);
@@ -227,6 +231,7 @@ export function AlignmentRepairPanel({ side, refreshVersion, onError, onNotice, 
     setLandmarks(next);
     setBaseline(cloneLandmarks(next));
     setPreview(null);
+    setSelectedLandmark(null);
   }, [face?.alignedName, faceLandmarksKey]);
 
   const previewMatches = sameLandmarks(preview?.sourceLandmarks, landmarks);
@@ -249,6 +254,28 @@ export function AlignmentRepairPanel({ side, refreshVersion, onError, onNotice, 
     setLandmarks((current) => current.map(([x, y], index) => indexes.has(index)
       ? [Math.min(Math.max(x + dx, 0), frame.width - 1), Math.min(Math.max(y + dy, 0), frame.height - 1)]
       : [x, y]));
+  };
+  const nudgeOne = (pointIndex, dx, dy) => {
+    if (!frame?.width || !frame?.height) return;
+    setPreview(null);
+    setLandmarks((current) => current.map(([x, y], index) => index === pointIndex
+      ? [Math.min(Math.max(x + dx, 0), frame.width - 1), Math.min(Math.max(y + dy, 0), frame.height - 1)]
+      : [x, y]));
+    setLandmarkAnnouncement(t("定位点 {point} 已移动", { point: pointIndex + 1 }));
+  };
+  const handleLandmarkKeyDown = (event, pointIndex) => {
+    const distance = event.shiftKey ? 5 : 1;
+    const movement = {
+      ArrowUp: [0, -distance],
+      ArrowDown: [0, distance],
+      ArrowLeft: [-distance, 0],
+      ArrowRight: [distance, 0],
+    }[event.key];
+    if (!movement) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setSelectedLandmark(pointIndex);
+    nudgeOne(pointIndex, movement[0], movement[1]);
   };
   const neighborFace = (direction) => {
     for (let next = frameIndex + direction; next >= 0 && next < frames.length; next += direction) {
@@ -307,14 +334,14 @@ export function AlignmentRepairPanel({ side, refreshVersion, onError, onNotice, 
       <header className="alignment-toolbar">
         <div><strong>{t("对齐修复工作台")}</strong><span>{t("拖动源帧 landmarks，预览确认后重新裁切；不会只改元数据。")}</span></div>
         <div className="frame-stepper">
-          <button type="button" disabled={frameIndex <= 0} onClick={() => { setFrameIndex((value) => value - 1); setFaceIndex(0); }}><IconChevronLeft size={17} /></button>
+          <button type="button" aria-label={t("上一帧") } disabled={frameIndex <= 0} onClick={() => { setFrameIndex((value) => value - 1); setFaceIndex(0); }}><IconChevronLeft size={17} /></button>
           <span>{frameIndex + 1} / {frames.length}</span>
-          <button type="button" disabled={frameIndex >= frames.length - 1} onClick={() => { setFrameIndex((value) => value + 1); setFaceIndex(0); }}><IconChevronRight size={17} /></button>
+          <button type="button" aria-label={t("下一帧") } disabled={frameIndex >= frames.length - 1} onClick={() => { setFrameIndex((value) => value + 1); setFaceIndex(0); }}><IconChevronRight size={17} /></button>
         </div>
         <div className="frame-stepper">
-          <button type="button" disabled={offset <= 0} onClick={() => setOffset((value) => Math.max(0, value - REVIEW_PAGE_SIZE))}><IconChevronLeft size={17} /></button>
+          <button type="button" aria-label={t("上一批") } disabled={offset <= 0} onClick={() => setOffset((value) => Math.max(0, value - REVIEW_PAGE_SIZE))}><IconChevronLeft size={17} /></button>
           <span>{coverage.offset + 1}–{coverage.offset + coverage.analyzedCount} / {coverage.total}</span>
-          <button type="button" disabled={coverage.offset + coverage.analyzedCount >= coverage.total} onClick={() => setOffset((value) => value + REVIEW_PAGE_SIZE)}><IconChevronRight size={17} /></button>
+          <button type="button" aria-label={t("下一批") } disabled={coverage.offset + coverage.analyzedCount >= coverage.total} onClick={() => setOffset((value) => value + REVIEW_PAGE_SIZE)}><IconChevronRight size={17} /></button>
         </div>
       </header>
       <div className="alignment-repair-layout">
@@ -323,6 +350,8 @@ export function AlignmentRepairPanel({ side, refreshVersion, onError, onNotice, 
             <div className="alignment-source-canvas" style={{ aspectRatio: `${frame.width || 16}/${frame.height || 9}` }}>
               <svg
                 viewBox={`0 0 ${frame.width} ${frame.height}`}
+                role="group"
+                aria-label={t("{name} 的 68 点定位编辑器", { name: frame.name })}
                 onPointerMove={updatePoint}
                 onPointerUp={() => setDragging(null)}
                 onPointerLeave={() => setDragging(null)}
@@ -336,7 +365,16 @@ export function AlignmentRepairPanel({ side, refreshVersion, onError, onNotice, 
                     cx={x}
                     cy={y}
                     r={dragging === pointIndex ? 3.3 : 2.2}
-                    onPointerDown={(event) => { event.preventDefault(); setDragging(pointIndex); }}
+                    tabIndex={busy ? -1 : 0}
+                    role="button"
+                    aria-pressed={selectedLandmark === pointIndex}
+                    aria-label={t("定位点 {point}；方向键微调", { point: pointIndex + 1 })}
+                    onFocus={() => {
+                      setSelectedLandmark(pointIndex);
+                      setLandmarkAnnouncement(t("已选择定位点 {point}", { point: pointIndex + 1 }));
+                    }}
+                    onKeyDown={(event) => handleLandmarkKeyDown(event, pointIndex)}
+                    onPointerDown={(event) => { event.preventDefault(); setDragging(pointIndex); setSelectedLandmark(pointIndex); }}
                   />
                 ))}
               </svg>
@@ -352,18 +390,19 @@ export function AlignmentRepairPanel({ side, refreshVersion, onError, onNotice, 
             {frame && !frame.faces.length ? <span>{t("该帧没有可修复的 aligned 人脸")}</span> : null}
           </div>
         </section>
-        <aside className="alignment-control-panel">
+          <aside className="alignment-control-panel">
+          <span className="visually-hidden" role="status" aria-live="polite">{landmarkAnnouncement}</span>
           <section>
-            <header><strong>{t("点组与微调")}</strong><span>{landmarks.length}/68</span></header>
-            <select value={group} onChange={(event) => setGroup(event.target.value)}>
+            <header><strong>{t("点组与微调")}</strong><span>{selectedLandmark == null ? `${landmarks.length}/68` : t("点 {point} / 68", { point: selectedLandmark + 1 })}</span></header>
+            <select aria-label={t("选择定位点组") } value={group} onChange={(event) => setGroup(event.target.value)}>
               <option value="all">{t("全部点")}</option><option value="jaw">{t("下颌")}</option><option value="brows">{t("眉毛")}</option>
               <option value="nose">{t("鼻部")}</option><option value="eyes">{t("双眼")}</option><option value="mouth">{t("嘴部")}</option>
             </select>
             <div className="alignment-nudge-grid">
-              <button type="button" onClick={() => nudge(0, -1)}>↑</button>
-              <button type="button" onClick={() => nudge(-1, 0)}>←</button>
-              <button type="button" onClick={() => nudge(1, 0)}>→</button>
-              <button type="button" onClick={() => nudge(0, 1)}>↓</button>
+              <button type="button" aria-label={t("向上微调点组") } onClick={() => nudge(0, -1)}><IconChevronUp size={16} /></button>
+              <button type="button" aria-label={t("向左微调点组") } onClick={() => nudge(-1, 0)}><IconChevronLeft size={16} /></button>
+              <button type="button" aria-label={t("向右微调点组") } onClick={() => nudge(1, 0)}><IconChevronRight size={16} /></button>
+              <button type="button" aria-label={t("向下微调点组") } onClick={() => nudge(0, 1)}><IconChevronDown size={16} /></button>
             </div>
             <button type="button" onClick={() => { setLandmarks(cloneLandmarks(baseline)); setPreview(null); }}><IconArrowBackUp size={15} />{t("恢复本帧原始点")}</button>
           </section>
@@ -484,6 +523,7 @@ export function SegmentTimelinePanel({ side, refreshVersion, onError, onNotice, 
     <div className="segment-timeline-workbench">
       {busy ? (
         <LoadingProgress
+          inline={busy === "detect"}
           compact
           label={t({ save: "正在保存分段清单…", detect: "正在检测场景边界…", extract: "正在提取选中分段…", restore: "正在恢复帧归档…" }[busy])}
           detail={t("当前时间线保持可见，完成后自动刷新")}
@@ -508,7 +548,7 @@ export function SegmentTimelinePanel({ side, refreshVersion, onError, onNotice, 
         <div className="segment-list">
           {segments.map((segment, index) => (
             <article key={segment.id}>
-              <input type="checkbox" checked={segment.selected} onChange={(event) => setSegments((current) => current.map((item) => item.id === segment.id ? { ...item, selected: event.target.checked } : item))} />
+              <input type="checkbox" aria-label={t("选择片段 {label}", { label: segment.label })} checked={segment.selected} onChange={(event) => setSegments((current) => current.map((item) => item.id === segment.id ? { ...item, selected: event.target.checked } : item))} />
               <button type="button" onClick={() => seek(segment.start)}><strong>{segment.label}</strong><span>{formatTime(segment.start)} – {formatTime(segment.end)}</span></button>
               <small>{(segment.end - segment.start).toFixed(2)} s</small>
               <button type="button" aria-label={t("移除片段")} onClick={() => setSegments((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button>

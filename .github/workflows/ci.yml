@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "codex/**"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  webui-linux:
+    name: Linux WebUI verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install pinned Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+
+      - name: Install fixture Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Enable pinned pnpm
+        shell: bash
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.19.0 --activate
+          test "$(pnpm --version)" = "11.19.0"
+
+      - name: Install WebUI dependencies
+        shell: bash
+        run: pnpm --dir webui install --frozen-lockfile
+
+      - name: Install deterministic DFL fixture dependencies
+        shell: bash
+        run: python -m pip install --disable-pip-version-check numpy==1.26.4 opencv-python-headless==4.10.0.84
+
+      - name: Verify versions, translations, and update signatures
+        shell: bash
+        run: |
+          node tools/verify-version.mjs
+          node tools/check-i18n.mjs
+          node tools/update-channel-signature.mjs verify-policy
+          node --test tools/tests/update-channel-signature.test.mjs
+
+      - name: Run hermetic WebUI tests
+        shell: bash
+        run: pnpm --dir webui test
+
+      - name: Build and smoke-test WebUI artifacts
+        shell: bash
+        run: |
+          pnpm --dir webui run build
+          pnpm --dir webui run test:sites
+          node tools/dist-provenance.mjs check
+          node tools/smoke-dist.mjs
+
+  verify-release:
+    name: Windows release verification
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install pinned Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+
+      - name: Install fixture Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Enable pinned pnpm
+        shell: pwsh
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.19.0 --activate
+          pnpm --version
+
+      - name: Install WebUI dependencies
+        shell: pwsh
+        working-directory: webui
+        run: pnpm install --frozen-lockfile
+
+      - name: Install deterministic DFL fixture dependencies
+        shell: pwsh
+        run: python -m pip install --disable-pip-version-check numpy==1.26.4 opencv-python-headless==4.10.0.84
+
+      - name: Install Windows PowerShell test runner
+        shell: powershell
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module Pester -RequiredVersion 4.10.1 -Scope CurrentUser -Force
+
+      - name: Run release gates
+        shell: powershell
+        run: powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File tools\verify-release.ps1
+
+      - name: Upload verified WebUI build
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: webui-dist-${{ github.sha }}
+          path: webui/dist
+          if-no-files-found: error
+          retention-days: 7

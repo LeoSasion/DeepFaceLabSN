@@ -1,10 +1,15 @@
 import { createWriteStream } from "node:fs";
 import {
   mkdir,
+  lstat,
   readdir,
+  readFile,
+  realpath,
   rename,
+  rm,
   stat,
   unlink,
+  writeFile,
 } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -12,7 +17,8 @@ import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Transform } from "node:stream";
 import { promisify } from "node:util";
-import { PATHS, pathExists } from "./paths.mjs";
+import { PATHS, assertWithin, pathExists } from "./paths.mjs";
+import { inspectStorage } from "./system-diagnostics.mjs";
 
 const execFileAsync = promisify(execFile);
 const VIDEO_EXTENSIONS = new Set([".avi", ".mkv", ".mov", ".mp4", ".m4v", ".webm"]);
@@ -24,6 +30,7 @@ const REVIEW_SLOTS = Object.freeze({
   mask: path.join(PATHS.workspaceRoot, "data_dst", "merged_mask"),
 });
 const MAX_VIDEO_BYTES = 100 * 1024 * 1024 * 1024;
+const MATERIAL_ARCHIVE_TOKEN = /^\d{14}(?:-[a-f0-9]{10})?$/;
 const ARTIFACTS = Object.freeze({
   "result.mp4": path.join(PATHS.workspaceRoot, "result.mp4"),
   "result_mask.mp4": path.join(PATHS.workspaceRoot, "result_mask.mp4"),
@@ -107,6 +114,191 @@ async function findMaterial(side) {
   } catch {
     return material;
   }
+}
+
+function materialArchiveToken() {
+  return `${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${randomBytes(5).toString("hex")}`;
+}
+
+function validateMaterialSide(side) {
+  if (!["src", "dst"].includes(side)) {
+    throw new WorkspaceError("素材类型不受支持", "SIDE_INVALID");
+  }
+}
+
+function validateMaterialArchiveToken(token) {
+  if (!MATERIAL_ARCHIVE_TOKEN.test(token ?? "")) {
+    throw new WorkspaceError("素材归档标识无效", "MATERIAL_ARCHIVE_INVALID");
+  }
+  return token;
+}
+
+async function writeArchiveManifest(directory, manifest) {
+  const target = path.join(directory, "manifest.json");
+  const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  await rename(temporary, target);
+}
+
+async function verifyMaterialArchiveDirectory(directory) {
+  const info = await lstat(directory);
+  if (!info.isDirectory() || info.isSymbolicLink()) {
+    throw new WorkspaceError("素材归档目录不安全", "MATERIAL_ARCHIVE_UNSAFE", 400);
+  }
+  const [workspaceRealPath, directoryRealPath] = await Promise.all([
+    realpath(PATHS.workspaceRoot),
+    realpath(directory),
+  ]);
+  try {
+    assertWithin(workspaceRealPath, directoryRealPath, "素材归档目录");
+  } catch {
+    throw new WorkspaceError("素材归档目录超出工作区", "MATERIAL_ARCHIVE_UNSAFE", 400);
+  }
+  return directory;
+}
+
+async function ensureSafeMaterialArchiveRoot(side) {
+  await verifyMaterialArchiveDirectory(PATHS.runtimeRoot);
+  const segments = [
+    PATHS.archiveRoot,
+    path.join(PATHS.archiveRoot, "materials"),
+    path.join(PATHS.archiveRoot, "materials", side),
+  ];
+  for (const directory of segments) {
+    await mkdir(directory, { recursive: true });
+    await verifyMaterialArchiveDirectory(directory);
+  }
+  return segments.at(-1);
+}
+
+async function archiveMaterialFile(side, material) {
+  const token = materialArchiveToken();
+  const archiveRoot = await ensureSafeMaterialArchiveRoot(side);
+  const directory = path.join(archiveRoot, token);
+  const archivedPath = path.join(directory, material.name);
+  await mkdir(directory, { recursive: true });
+  await verifyMaterialArchiveDirectory(directory);
+  await rename(material.path, archivedPath);
+  const manifest = {
+    schemaVersion: 1,
+    token,
+    side,
+    originalName: material.name,
+    archivedAt: new Date().toISOString(),
+    bytes: material.bytes,
+  };
+  try {
+    await writeArchiveManifest(directory, manifest);
+  } catch (error) {
+    await rollbackArchivedMaterial({
+      ...manifest,
+      directory,
+      archivedPath,
+      originalPath: material.path,
+    });
+    throw error;
+  }
+  return { ...manifest, directory, archivedPath, originalPath: material.path };
+}
+
+export async function rollbackArchivedMaterial(archive, {
+  renameFile = rename,
+  removeDirectory = rm,
+} = {}) {
+  try {
+    await renameFile(archive.archivedPath, archive.originalPath);
+  } catch {
+    throw new WorkspaceError(
+      "素材回滚失败；恢复副本已保留，请停止覆盖并检查恢复历史",
+      "MATERIAL_ROLLBACK_FAILED",
+      500,
+      { token: archive.token, side: archive.side },
+    );
+  }
+  await removeDirectory(archive.directory, { recursive: true, force: true }).catch(() => {});
+}
+
+async function readMaterialArchive(side, token) {
+  validateMaterialSide(side);
+  validateMaterialArchiveToken(token);
+  const modernDirectory = path.join(PATHS.archiveRoot, "materials", side, token);
+  const legacyDirectory = path.join(PATHS.archiveRoot, "materials", token);
+  for (const directory of [modernDirectory, legacyDirectory]) {
+    if (!(await pathExists(directory))) continue;
+    await verifyMaterialArchiveDirectory(directory);
+    let manifest = null;
+    try {
+      manifest = JSON.parse(await readFile(path.join(directory, "manifest.json"), "utf8"));
+    } catch {
+      // Legacy archives predate manifests; the allowlisted filename is sufficient.
+    }
+    const entries = await readdir(directory, { withFileTypes: true });
+    const expectedPrefix = `data_${side}.`;
+    const file = entries.find((entry) => (
+      entry.isFile()
+      && entry.name.toLowerCase().startsWith(expectedPrefix)
+      && VIDEO_EXTENSIONS.has(path.extname(entry.name).toLowerCase())
+    ));
+    if (!file) continue;
+    const archivedPath = path.join(directory, file.name);
+    const fileStat = await stat(archivedPath);
+    return {
+      token,
+      side,
+      originalName: file.name,
+      archivedAt: manifest?.archivedAt ?? fileStat.mtime.toISOString(),
+      bytes: fileStat.size,
+      directory,
+      archivedPath,
+    };
+  }
+  throw new WorkspaceError("素材归档不存在", "MATERIAL_ARCHIVE_MISSING", 404);
+}
+
+export async function listWorkspaceMaterialArchives(side) {
+  validateMaterialSide(side);
+  const root = path.join(PATHS.archiveRoot, "materials");
+  if (!(await pathExists(root))) return [];
+  await verifyMaterialArchiveDirectory(root);
+  const candidates = [];
+  const modernRoot = path.join(root, side);
+  if (await pathExists(modernRoot)) {
+    await verifyMaterialArchiveDirectory(modernRoot);
+    const entries = await readdir(modernRoot, { withFileTypes: true });
+    candidates.push(...entries
+      .filter((entry) => entry.isDirectory() && MATERIAL_ARCHIVE_TOKEN.test(entry.name))
+      .map((entry) => entry.name));
+  }
+  const legacyEntries = await readdir(root, { withFileTypes: true });
+  candidates.push(...legacyEntries
+    .filter((entry) => entry.isDirectory() && MATERIAL_ARCHIVE_TOKEN.test(entry.name))
+    .map((entry) => entry.name));
+  const unique = [...new Set(candidates)].sort().reverse().slice(0, 200);
+  const records = await Promise.all(unique.map((token) => readMaterialArchive(side, token).catch(() => null)));
+  return records.filter(Boolean).map(({ directory: _directory, archivedPath: _archivedPath, ...record }) => record);
+}
+
+export async function restoreWorkspaceMaterial(side, token) {
+  const archive = await readMaterialArchive(side, token);
+  const existing = await findMaterial(side);
+  let undoArchive = null;
+  if (existing) undoArchive = await archiveMaterialFile(side, existing);
+  const target = path.join(PATHS.workspaceRoot, archive.originalName);
+  try {
+    await rename(archive.archivedPath, target);
+  } catch (error) {
+    if (undoArchive) {
+      await rollbackArchivedMaterial(undoArchive);
+    }
+    throw error;
+  }
+  await rm(archive.directory, { recursive: true, force: true }).catch(() => {});
+  return {
+    side,
+    token,
+    restored: await describeFile(target),
+    undoToken: undoArchive?.token ?? null,
+  };
 }
 
 async function discoverModels() {
@@ -287,6 +479,7 @@ export async function inspectWorkspace() {
     mergedMask,
     modelInfo,
     outputFiles,
+    storage,
   ] = await Promise.all([
     findMaterial("src"),
     findMaterial("dst"),
@@ -298,6 +491,11 @@ export async function inspectWorkspace() {
     directFileStats(path.join(PATHS.workspaceRoot, "data_dst", "merged_mask")),
     discoverModels(),
     Promise.all(Object.values(ARTIFACTS).map(describeFile)),
+    inspectStorage(PATHS.workspaceRoot).catch((error) => ({
+      ready: null,
+      error: error?.code ?? "STORAGE_UNAVAILABLE",
+      sampledAt: new Date().toISOString(),
+    })),
   ]);
   return {
     root: PATHS.workspaceRoot,
@@ -315,6 +513,7 @@ export async function inspectWorkspace() {
       ...file,
       url: `/api/workspace/artifacts/${encodeURIComponent(file.name)}`,
     })),
+    storage,
     readiness: {
       materials: Boolean(srcMaterial && dstMaterial),
       frames: srcFrames.count > 0 && dstFrames.count > 0,
@@ -345,10 +544,9 @@ function createLimitTransform() {
 export async function importWorkspaceVideo(side, request, {
   encodedFileName,
   replace = false,
+  inspectStorageFn = inspectStorage,
 } = {}) {
-  if (!["src", "dst"].includes(side)) {
-    throw new WorkspaceError("素材类型不受支持", "SIDE_INVALID");
-  }
+  validateMaterialSide(side);
   let fileName;
   try {
     fileName = path.basename(decodeURIComponent(encodedFileName ?? ""));
@@ -365,6 +563,22 @@ export async function importWorkspaceVideo(side, request, {
   const declaredSize = Number(request.headers["content-length"] ?? 0);
   if (declaredSize > MAX_VIDEO_BYTES) {
     throw new WorkspaceError("视频文件超过 100 GB 限制", "VIDEO_TOO_LARGE", 413);
+  }
+  if (Number.isFinite(declaredSize) && declaredSize > 0) {
+    const storage = await inspectStorageFn(PATHS.workspaceRoot, { requiredBytes: declaredSize });
+    if (!storage.ready) {
+      throw new WorkspaceError(
+        "工作区可用空间不足；已保留 5 GB 安全余量，请清理磁盘后重试",
+        "STORAGE_INSUFFICIENT",
+        507,
+        {
+          requiredBytes: storage.requiredBytes,
+          usableBytes: storage.usableBytes,
+          shortfallBytes: storage.shortfallBytes,
+          reserveBytes: storage.reserveBytes,
+        },
+      );
+    }
   }
   const existing = await findMaterial(side);
   if (existing && !replace) {
@@ -389,18 +603,21 @@ export async function importWorkspaceVideo(side, request, {
     throw error;
   }
 
-  if (existing) {
-    const archiveDirectory = path.join(
-      PATHS.archiveRoot,
-      "materials",
-      new Date().toISOString().replace(/\D/g, "").slice(0, 14),
-    );
-    await mkdir(archiveDirectory, { recursive: true });
-    await rename(existing.path, path.join(archiveDirectory, existing.name));
-  }
+  const archived = existing ? await archiveMaterialFile(side, existing) : null;
   const target = path.join(PATHS.workspaceRoot, `data_${side}${extension}`);
-  await rename(temporary, target);
-  return describeFile(target);
+  try {
+    await rename(temporary, target);
+  } catch (error) {
+    let rollbackError = null;
+    if (archived) await rollbackArchivedMaterial(archived).catch((cause) => { rollbackError = cause; });
+    await unlink(temporary).catch(() => {});
+    if (rollbackError) throw rollbackError;
+    throw error;
+  }
+  return {
+    ...(await describeFile(target)),
+    archiveToken: archived?.token ?? null,
+  };
 }
 
 export function resolveWorkspaceArtifact(name) {

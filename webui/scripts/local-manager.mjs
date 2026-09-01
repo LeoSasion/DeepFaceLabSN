@@ -31,6 +31,26 @@ const managedPorts = [4173, 4174];
 const command = process.argv[2] ?? "start";
 const outputLanguage = process.env.DFL_UI_LANG === "en" ? "en" : "zh";
 const message = (zh, en) => outputLanguage === "en" ? en : zh;
+export const PLANNED_RESTART_EXIT_CODE = 75;
+
+export function classifyServiceExit({ code, signal, failures = [], now = Date.now() }) {
+  if (code === PLANNED_RESTART_EXIT_CODE && !signal) {
+    return {
+      plannedRestart: true,
+      failures: [...failures],
+      delay: 0,
+      shouldStopSupervisor: false,
+    };
+  }
+  const recentFailures = failures.filter((time) => now - time < 60_000);
+  recentFailures.push(now);
+  return {
+    plannedRestart: false,
+    failures: recentFailures,
+    delay: Math.min(500 * (2 ** (recentFailures.length - 1)), 8000),
+    shouldStopSupervisor: recentFailures.length > 5,
+  };
+}
 
 mkdirSync(logsRoot, { recursive: true });
 
@@ -393,14 +413,24 @@ function runSupervisor() {
     });
     service.child.once("exit", (code, signal) => {
       if (stopping) return;
-      service.state = "crashed";
-      const now = Date.now();
-      service.failures = service.failures.filter((time) => now - time < 60000);
-      service.failures.push(now);
-      console.error(
-        `[local-manager] ${service.label} exited (${signal ?? code ?? "unknown"})`,
-      );
-      if (service.failures.length > 5) {
+      const exitPlan = classifyServiceExit({
+        code,
+        signal,
+        failures: service.failures,
+      });
+      service.failures = exitPlan.failures;
+      if (exitPlan.plannedRestart) {
+        service.state = "restarting";
+        console.log(
+          `[local-manager] ${service.label} requested a planned restart (exit ${code})`,
+        );
+      } else {
+        service.state = "crashed";
+        console.error(
+          `[local-manager] ${service.label} exited (${signal ?? code ?? "unknown"})`,
+        );
+      }
+      if (exitPlan.shouldStopSupervisor) {
         console.error(
           `[local-manager] ${service.label} crashed too often; stopping the local manager`,
         );
@@ -408,8 +438,7 @@ function runSupervisor() {
         return;
       }
       service.restarts += 1;
-      const delay = Math.min(500 * (2 ** (service.failures.length - 1)), 8000);
-      service.restartTimer = setTimeout(() => launch(service), delay);
+      service.restartTimer = setTimeout(() => launch(service), exitPlan.delay);
     });
   };
 
@@ -458,7 +487,9 @@ async function main() {
   throw new Error(message(`未知操作：${command}`, `Unknown action: ${command}`));
 }
 
-main().catch((error) => {
-  console.error(`[WebUI] ${error.message}`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === scriptPath) {
+  main().catch((error) => {
+    console.error(`[WebUI] ${error.message}`);
+    process.exitCode = 1;
+  });
+}

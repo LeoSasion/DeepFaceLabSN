@@ -5,10 +5,14 @@ import {
   IconBoxModel2,
   IconCheck,
   IconFile,
+  IconHistory,
   IconMovie,
   IconPlayerPlay,
   IconRefresh,
+  IconRestore,
+  IconServer,
   IconUpload,
+  IconX,
 } from "@tabler/icons-react";
 import { runtimeApi } from "../runtime/api.js";
 import { useI18n } from "../i18n.jsx";
@@ -33,7 +37,16 @@ function formatDuration(seconds) {
     .join(":");
 }
 
-function MaterialSlot({ side, material, busy, progress, onImport }) {
+function MaterialSlot({
+  side,
+  material,
+  busy,
+  progress,
+  archiveCount,
+  archivesLoading,
+  onImport,
+  onOpenHistory,
+}) {
   const { language, t } = useI18n();
   const inputRef = useRef(null);
   const label = side === "src" ? t("SRC 源视频") : t("DST 目标视频");
@@ -43,6 +56,7 @@ function MaterialSlot({ side, material, busy, progress, onImport }) {
         ref={inputRef}
         className="visually-hidden"
         type="file"
+        aria-label={t("选择 {side} 视频文件", { side: side.toUpperCase() })}
         accept=".mp4,.mov,.avi,.mkv,.m4v,.webm,video/*"
         onChange={(event) => {
           const file = event.target.files?.[0];
@@ -71,7 +85,7 @@ function MaterialSlot({ side, material, busy, progress, onImport }) {
             aria-label={t("{side} 素材预览", { side: side.toUpperCase() })}
           />
           <div className="material-details">
-            <strong title={material.path}>{material.name}</strong>
+            <strong>{material.name}</strong>
             <dl>
               <div><dt>{t("时长")}</dt><dd>{formatDuration(material.durationSeconds)}</dd></div>
               <div><dt>{t("分辨率")}</dt><dd>{material.width ? `${material.width} × ${material.height}` : "—"}</dd></div>
@@ -86,14 +100,27 @@ function MaterialSlot({ side, material, busy, progress, onImport }) {
           <p>{t("导入后会保存为固定的 data_{side}.* 素材。", { side })}</p>
         </div>
       )}
-      <button
-        className="button secondary material-import"
-        type="button"
-        onClick={() => inputRef.current?.click()}
-        disabled={busy}
-      >
-        <IconUpload size={15} />{busy ? t("正在导入…") : material ? t("更换") : t("导入")}
-      </button>
+      <div className="material-slot-actions">
+        <button
+          className="button secondary material-import"
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          disabled={busy}
+        >
+          <IconUpload size={15} />{busy ? t("正在导入…") : material ? t("更换") : t("导入")}
+        </button>
+        <button
+          className="button secondary material-history-trigger"
+          type="button"
+          aria-haspopup="dialog"
+          aria-busy={archivesLoading}
+          onClick={() => onOpenHistory(side)}
+          disabled={busy}
+        >
+          <IconHistory size={15} />
+          {t("恢复历史（{count}）", { count: archiveCount })}
+        </button>
+      </div>
       {busy ? (
         <LoadingProgress
           compact
@@ -110,6 +137,98 @@ function MaterialSlot({ side, material, busy, progress, onImport }) {
   );
 }
 
+function archiveFormat(archive) {
+  const extension = String(archive?.originalName ?? "").split(".").pop();
+  return extension && extension !== archive?.originalName ? extension.toUpperCase() : "—";
+}
+
+function MaterialHistoryDrawer({ side, archives, loading, restoring, onClose, onRestore }) {
+  const { language, t } = useI18n();
+  const closeRef = useRef(null);
+  useEffect(() => {
+    const previousFocus = document.activeElement;
+    closeRef.current?.focus();
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape" && !restoring) onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      previousFocus?.focus?.();
+    };
+  }, [onClose, restoring]);
+
+  return (
+    <div
+      className="material-history-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !restoring) onClose();
+      }}
+    >
+      <aside
+        className="material-history-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="material-history-title"
+      >
+        <header>
+          <div>
+            <span>{side.toUpperCase()}</span>
+            <h3 id="material-history-title">{t("素材恢复历史")}</h3>
+          </div>
+          <button
+            ref={closeRef}
+            className="icon-button quiet"
+            type="button"
+            aria-label={t("关闭恢复历史")}
+            onClick={onClose}
+            disabled={restoring}
+          >
+            <IconX size={17} />
+          </button>
+        </header>
+        <p>{t("恢复归档前，当前素材会自动移入恢复历史，可继续撤回。")}</p>
+        {loading ? (
+          <div className="material-history-state" role="status">{t("正在读取恢复历史…")}</div>
+        ) : archives.length ? (
+          <div className="material-history-list">
+            {archives.map((archive) => {
+              const busy = restoring === archive.token;
+              return (
+                <article key={archive.token}>
+                  <span className="material-history-icon"><IconMovie size={17} /></span>
+                  <div>
+                    <strong>{new Date(archive.archivedAt).toLocaleString(language === "zh" ? "zh-CN" : "en-US")}</strong>
+                    <small>{archiveFormat(archive)} · {formatBytes(archive.bytes)}</small>
+                  </div>
+                  <button
+                    className="button secondary"
+                    type="button"
+                    onClick={() => onRestore(archive)}
+                    disabled={Boolean(restoring)}
+                  >
+                    <IconRestore size={15} />{busy ? t("恢复中…") : t("恢复")}
+                  </button>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="material-history-state">{t("还没有可恢复的素材历史")}</div>
+        )}
+        {restoring ? (
+          <LoadingProgress
+            inline
+            compact
+            label={t("正在恢复素材…")}
+            detail={t("当前素材会先创建可撤回归档")}
+          />
+        ) : null}
+      </aside>
+    </div>
+  );
+}
+
 function ReadinessItem({ label, value, ready }) {
   return (
     <div className={`readiness-item ${ready ? "is-ready" : "is-missing"}`}>
@@ -122,28 +241,51 @@ function ReadinessItem({ label, value, ready }) {
   );
 }
 
-export function WorkspaceView({ serviceOnline, onError, onArchived }) {
+export function WorkspaceView({ serviceOnline, onError, onNotice, onArchived, onWorkspaceChange }) {
   const { language, t } = useI18n();
   const [workspace, setWorkspace] = useState(null);
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(null);
   const [importProgress, setImportProgress] = useState(null);
   const [archiving, setArchiving] = useState(false);
+  const [archives, setArchives] = useState({ src: [], dst: [] });
+  const [archivesLoading, setArchivesLoading] = useState({ src: false, dst: false });
+  const [historySide, setHistorySide] = useState(null);
+  const [restoringArchive, setRestoringArchive] = useState(null);
+  const closeHistory = useCallback(() => setHistorySide(null), []);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      setWorkspace(await runtimeApi.workspace());
+      const nextWorkspace = await runtimeApi.workspace();
+      setWorkspace(nextWorkspace);
+      onWorkspaceChange?.(nextWorkspace);
     } catch (error) {
       onError(error);
     } finally {
       setLoading(false);
     }
+  }, [onError, onWorkspaceChange]);
+
+  const refreshArchives = useCallback(async (side) => {
+    setArchivesLoading((current) => ({ ...current, [side]: true }));
+    try {
+      const records = await runtimeApi.materialArchives(side);
+      setArchives((current) => ({ ...current, [side]: records }));
+    } catch (error) {
+      onError(error);
+    } finally {
+      setArchivesLoading((current) => ({ ...current, [side]: false }));
+    }
   }, [onError]);
 
+  const refreshEverything = useCallback(async () => {
+    await Promise.all([refresh(), refreshArchives("src"), refreshArchives("dst")]);
+  }, [refresh, refreshArchives]);
+
   useEffect(() => {
-    if (serviceOnline) void refresh();
-  }, [refresh, serviceOnline]);
+    if (serviceOnline) void refreshEverything();
+  }, [refreshEverything, serviceOnline]);
 
   const handleImport = async (side, file, replacing) => {
     if (replacing && !window.confirm(
@@ -156,12 +298,31 @@ export function WorkspaceView({ serviceOnline, onError, onArchived }) {
         replace: replacing,
         onProgress: ({ loaded, total, percent }) => setImportProgress({ loaded, total, percent }),
       });
-      await refresh();
+      await Promise.all([refresh(), refreshArchives(side)]);
     } catch (error) {
       onError(error);
     } finally {
       setImporting(null);
       setImportProgress(null);
+    }
+  };
+
+  const handleRestoreArchive = async (archive) => {
+    const side = historySide;
+    if (!side || !window.confirm(t(
+      "确定恢复这份 {side} 素材吗？当前素材会先进入恢复历史。",
+      { side: side.toUpperCase() },
+    ))) return;
+    setRestoringArchive(archive.token);
+    try {
+      await runtimeApi.restoreMaterialArchive(side, archive.token);
+      await Promise.all([refresh(), refreshArchives(side)]);
+      onNotice?.(t("{side} 素材已恢复；原素材已保存为可撤回历史。", { side: side.toUpperCase() }));
+      setHistorySide(null);
+    } catch (error) {
+      onError(error);
+    } finally {
+      setRestoringArchive(null);
     }
   };
 
@@ -235,6 +396,14 @@ export function WorkspaceView({ serviceOnline, onError, onArchived }) {
       ready: data.readiness.merged,
     },
   ];
+  const storage = data.storage;
+  const storageWarning = Boolean(
+    storage?.error
+    || storage?.ready === false
+    || (Number.isFinite(storage?.freeBytes)
+      && Number.isFinite(storage?.reserveBytes)
+      && storage.freeBytes < storage.reserveBytes),
+  );
 
   return (
     <section className="workspace-manager">
@@ -244,7 +413,7 @@ export function WorkspaceView({ serviceOnline, onError, onArchived }) {
           <h2>{t("工作区管理")}</h2>
           <code>{data.root}</code>
         </div>
-        <button className="button secondary" type="button" onClick={() => void refresh()} disabled={loading}>
+        <button className="button secondary" type="button" onClick={() => void refreshEverything()} disabled={loading}>
           <IconRefresh size={15} />{loading ? t("扫描中") : t("刷新")}
         </button>
       </header>
@@ -258,6 +427,23 @@ export function WorkspaceView({ serviceOnline, onError, onArchived }) {
         />
       ) : null}
 
+      <div className={`workspace-storage-strip${storageWarning ? " is-warning" : ""}`}>
+        <IconServer size={17} />
+        <strong>{t("磁盘可用空间")}</strong>
+        {!storage || storage.error ? (
+          <span>{t("磁盘信息暂不可用")}</span>
+        ) : (
+          <>
+            <b>{formatBytes(storage?.freeBytes)}</b>
+            <span>{t("安全余量 {reserve} · 可用于任务 {usable}", {
+              reserve: formatBytes(storage?.reserveBytes),
+              usable: formatBytes(storage?.usableBytes),
+            })}</span>
+          </>
+        )}
+        {storageWarning && !storage?.error ? <em>{t("可用空间低于安全余量")}</em> : null}
+      </div>
+
       <div className="workspace-layout">
         <div className="workspace-primary">
           <div className="material-grid">
@@ -266,14 +452,20 @@ export function WorkspaceView({ serviceOnline, onError, onArchived }) {
               material={data.materials.src}
               busy={importing === "src"}
               progress={importing === "src" ? importProgress : null}
+              archiveCount={archives.src.length}
+              archivesLoading={archivesLoading.src}
               onImport={handleImport}
+              onOpenHistory={setHistorySide}
             />
             <MaterialSlot
               side="dst"
               material={data.materials.dst}
               busy={importing === "dst"}
               progress={importing === "dst" ? importProgress : null}
+              archiveCount={archives.dst.length}
+              archivesLoading={archivesLoading.dst}
               onImport={handleImport}
+              onOpenHistory={setHistorySide}
             />
           </div>
 
@@ -344,6 +536,16 @@ export function WorkspaceView({ serviceOnline, onError, onArchived }) {
           <LoadingProgress compact label={t("正在归档已结束任务…")} detail={t("素材、模型与输出不会被删除")} operationKey="workspace-archive-jobs" />
         ) : null}
       </section>
+      {historySide ? (
+        <MaterialHistoryDrawer
+          side={historySide}
+          archives={archives[historySide]}
+          loading={archivesLoading[historySide]}
+          restoring={restoringArchive}
+          onClose={closeHistory}
+          onRestore={(archive) => void handleRestoreArchive(archive)}
+        />
+      ) : null}
     </section>
   );
 }

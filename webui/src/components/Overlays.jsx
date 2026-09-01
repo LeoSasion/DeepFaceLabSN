@@ -62,6 +62,35 @@ function useDialogFocus(open, onClose) {
   return { dialogRef, initialFocusRef };
 }
 
+function preflightRecovery(error, command, t) {
+  if (!error || !command) return null;
+  if (["PARAMETER_INVALID", "PARAMETERS_INVALID", "PARAMETER_NOT_ALLOWED"].includes(error.code)) {
+    return { target: "parameters", label: t("返回修改参数") };
+  }
+  if (error.code === "XSEG_LABELS_MISSING") {
+    return { target: "xseg", label: t("打开 XSeg 标注") };
+  }
+  if (error.code === "RESOURCE_LOCKED") {
+    return { target: "console", label: t("查看占用任务") };
+  }
+  if (["INPUT_MISSING", "INPUT_EMPTY", "OUTPUT_MISSING", "OUTPUT_EMPTY"].includes(error.code)) {
+    const targetByStage = {
+      material: ["workspace", "打开工作区导入素材"],
+      frames: ["workspace", "打开工作区导入素材"],
+      faces: ["frames", "先提取视频帧"],
+      sort: ["faces", "检查 aligned 人脸"],
+      mask: ["xseg", "打开 XSeg 标注"],
+      train: ["faces", "检查 aligned 人脸"],
+      training: ["faces", "检查 aligned 人脸"],
+      merge: ["training", "检查训练模型"],
+      encode: ["merge", "先完成模型合成"],
+    };
+    const [target, label] = targetByStage[command.stage] ?? ["workspace", "检查工作区素材"];
+    return { target, label: t(label) };
+  }
+  return { target: "workspace", label: t("检查工作区状态") };
+}
+
 export function Toast({ message, tone = "success", onDismiss }) {
   const { t } = useI18n();
   if (!message) return null;
@@ -84,6 +113,7 @@ export function NewTaskDialog({
   commands,
   onTaskType,
   onPreflight,
+  onResolvePreflight,
   onClose,
   onCreate,
 }) {
@@ -161,11 +191,26 @@ export function NewTaskDialog({
 
   const formatParameter = (schema) => {
     const value = parameters[schema.id];
+    if (value === "" || value === undefined || value === null) return t("自动 / 终端询问");
     if (schema.type === "boolean") return value ? t("是") : t("否");
     if (schema.type === "select") {
-      return schema.options.find((option) => String(option.value) === String(value))?.label ?? value;
+      return schema.options.find((option) => String(option.value) === String(value))?.label ?? String(value);
     }
-    return value === "" ? t("自动 / 终端询问") : `${value}${schema.suffix ? ` ${schema.suffix}` : ""}`;
+    return `${value}${schema.suffix ? ` ${schema.suffix}` : ""}`;
+  };
+
+  const recovery = preflight.state === "failed"
+    ? preflightRecovery(preflight.error, selectedCommand, t)
+    : null;
+  const resourceAdvice = preflight.state === "ready" ? preflight.data?.resources : null;
+
+  const resolvePreflight = () => {
+    if (!recovery) return;
+    if (recovery.target === "parameters") {
+      setStep(2);
+      return;
+    }
+    onResolvePreflight?.(recovery.target);
   };
 
   const launch = async (launchMode) => {
@@ -245,7 +290,7 @@ export function NewTaskDialog({
                 </label>
                 <div className="command-profile">
                   <span className="command-profile-icon"><IconSettings size={20} /></span>
-                  <div>
+                  <div className="preflight-copy">
                     <strong>{selectedCommand?.label}</strong>
                     <p>{selectedCommand?.description}</p>
                     <div className="command-tags">
@@ -351,8 +396,42 @@ export function NewTaskDialog({
                           ? t("素材、运行时和资源锁均可用于创建任务。")
                           : t("不会在检查期间启动 DFL 进程。"))}
                     </p>
+                    {preflight.error?.code ? <code>{preflight.error.code}</code> : null}
                   </div>
+                  {recovery ? (
+                    <button className="button secondary preflight-recovery" type="button" onClick={resolvePreflight}>
+                      {recovery.label}<IconArrowRight size={15} />
+                    </button>
+                  ) : null}
                 </div>
+                {resourceAdvice ? (
+                  <section
+                    className={`preflight-resource-advice is-${resourceAdvice.severity ?? "info"}`}
+                    aria-label={t("训练资源建议")}
+                  >
+                    <IconSettings size={17} aria-hidden="true" />
+                    <div>
+                      <strong>{t("显存与安全起点")}</strong>
+                      <p>{t(resourceAdvice.summary ?? "训练资源状态已检查")}</p>
+                      <dl>
+                        {resourceAdvice.gpu ? (
+                          <div>
+                            <dt>{t("GPU")}</dt>
+                            <dd>{resourceAdvice.gpu.name ?? `GPU ${resourceAdvice.gpu.index ?? "—"}`} · {resourceAdvice.gpu.freeGiB ?? "—"} / {resourceAdvice.gpu.totalGiB ?? "—"} GB {t("可用")}</dd>
+                          </div>
+                        ) : null}
+                        <div>
+                          <dt>{t("建议参数")}</dt>
+                          <dd>{t("分辨率 {resolution} · Batch {batch}", {
+                            resolution: resourceAdvice.recommendation?.resolution ?? "—",
+                            batch: resourceAdvice.recommendation?.batchSize ?? "—",
+                          })}</dd>
+                        </div>
+                      </dl>
+                      <small>{t("这是保守的安全起点，不保证最终显存占用；以 DFL 实际训练为准。")}</small>
+                    </div>
+                  </section>
+                ) : null}
                 <dl className="wizard-review">
                   <div><dt>{t("任务")}</dt><dd>{selectedCommand?.label}</dd></div>
                   {parameterSchemas.map((schema) => (

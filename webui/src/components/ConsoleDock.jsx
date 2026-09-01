@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, memo, Suspense, useEffect, useMemo, useState } from "react";
 import {
   IconArchive,
   IconChevronDown,
@@ -7,6 +7,7 @@ import {
   IconCopy,
   IconDeviceFloppy,
   IconFolderOpen,
+  IconPlayerPlay,
   IconPlayerStop,
   IconPlugConnected,
   IconPlugConnectedX,
@@ -104,7 +105,17 @@ function ConnectionBadge({ serviceState, socketState, hasJob }) {
   );
 }
 
-function EmptyTerminal({ serviceState, commands, onStart, onOpenNewTask, onRetry }) {
+const commonCommandIds = ["src.extract_frames", "dst.extract_frames", "train.saehd", "merge.saehd"];
+
+function EmptyTerminal({
+  serviceState,
+  commands,
+  recommendedAction,
+  onOpenCommand,
+  onStart,
+  onOpenNewTask,
+  onRetry,
+}) {
   const { t } = useI18n();
   if (serviceState !== "online") {
     return (
@@ -116,26 +127,42 @@ function EmptyTerminal({ serviceState, commands, onStart, onOpenNewTask, onRetry
       </div>
     );
   }
+  const commonCommands = commonCommandIds
+    .filter((commandId) => commandId !== recommendedAction?.commandId)
+    .map((commandId) => commands.find((command) => command.id === commandId))
+    .filter(Boolean)
+    .slice(0, 3);
   return (
     <div className="terminal-empty">
       <IconTerminal2 size={25} stroke={1.55} />
       <strong>{t("还没有任务会话")}</strong>
-      <p>{t("启动一个白名单工作流，真实 CLI 输出和问答会出现在这里。")}</p>
+      <p>{t("先完成当前推荐步骤；真实 CLI 输出和问答会保留在这里。")}</p>
       <div className="terminal-empty-actions">
-        {commands.map((command) => (
-          <button className="button secondary" type="button" key={command.id} onClick={() => onStart(command.id)}>
+        {recommendedAction ? (
+          <button className="button primary terminal-recommended-action" type="button" onClick={recommendedAction.onActivate}>
+            <IconPlayerPlay size={16} />
+            <span>{t("推荐：{label}", { label: recommendedAction.label })}</span>
+          </button>
+        ) : null}
+        {commonCommands.map((command) => (
+          <button
+            className="button secondary"
+            type="button"
+            key={command.id}
+            onClick={() => onOpenCommand ? onOpenCommand(command.id) : onStart(command.id)}
+          >
             {command.shortLabel}
           </button>
         ))}
-        <button className="button primary" type="button" onClick={onOpenNewTask}>
-          <IconPlus size={16} />{t("新建任务")}
+        <button className="button secondary" type="button" onClick={onOpenNewTask}>
+          <IconPlus size={16} />{t("命令目录 / 新建任务")}
         </button>
       </div>
     </div>
   );
 }
 
-export function ConsoleDock({
+function ConsoleDockComponent({
   collapsed,
   onToggle,
   serviceState,
@@ -146,7 +173,9 @@ export function ConsoleDock({
   events,
   onSelectJob,
   onStart,
+  onOpenCommand,
   onOpenNewTask,
+  recommendedAction,
   onRetry,
   onInput,
   onResize,
@@ -514,6 +543,8 @@ export function ConsoleDock({
             <EmptyTerminal
               serviceState={serviceState}
               commands={commands}
+              recommendedAction={recommendedAction}
+              onOpenCommand={onOpenCommand}
               onStart={(commandId) => run(() => onStart(commandId), t("正在创建任务并连接终端…"))}
               onOpenNewTask={onOpenNewTask}
               onRetry={() => run(onRetry, t("正在重新连接本地服务…"))}
@@ -524,3 +555,5 @@ export function ConsoleDock({
     </section>
   );
 }
+
+export const ConsoleDock = memo(ConsoleDockComponent);

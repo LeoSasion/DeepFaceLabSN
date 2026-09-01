@@ -9,6 +9,7 @@ import {
   IconClipboard,
   IconCopy,
   IconDeviceFloppy,
+  IconDownload,
   IconEye,
   IconEyeOff,
   IconHelpCircle,
@@ -165,12 +166,15 @@ function AnnotationCanvas({
 }) {
   const { t } = useI18n();
   const svgRef = useRef(null);
+  const pointInstructionsId = useId();
   const [polygons, setPolygons] = useState([]);
   const [draft, setDraft] = useState([]);
   const [polygonType, setPolygonType] = useState("include");
   const [saving, setSaving] = useState(false);
   const [loadingPrevious, setLoadingPrevious] = useState(false);
   const [dragging, setDragging] = useState(null);
+  const [selectedPoint, setSelectedPoint] = useState(null);
+  const [pointAnnouncement, setPointAnnouncement] = useState("");
   const [showAppliedMask, setShowAppliedMask] = useState(true);
   const baselineRef = useRef("[]");
   const saveInFlightRef = useRef(false);
@@ -184,6 +188,7 @@ function AnnotationCanvas({
     onDirtyChange(false);
     setDraft([]);
     setDragging(null);
+    setSelectedPoint(null);
   }, [annotation, onDirtyChange]);
 
   useEffect(() => {
@@ -309,6 +314,81 @@ function AnnotationCanvas({
     include: { stroke: "#42d89a", fill: "rgba(52, 211, 153, 0.22)" },
     exclude: { stroke: "#ff7a7a", fill: "rgba(255, 92, 92, 0.18)" },
   };
+
+  const pointName = (selection) => selection?.kind === "draft"
+    ? t("待闭合点 {point}", { point: selection.pointIndex + 1 })
+    : t("多边形 {polygon} 的点 {point}", {
+      polygon: selection.polygonIndex + 1,
+      point: selection.pointIndex + 1,
+    });
+
+  const selectPoint = (selection) => {
+    setSelectedPoint(selection);
+    setPointAnnouncement(t("已选择 {name}；方向键微调，Delete 删除", { name: pointName(selection) }));
+  };
+
+  const nudgePoint = (selection, dx, dy) => {
+    if (editorBusy || !selection) return;
+    const clamp = (value, maximum) => Math.max(0, Math.min(maximum, value));
+    if (selection.kind === "draft") {
+      const current = draft[selection.pointIndex];
+      if (!current) return;
+      const next = [clamp(current[0] + dx, annotation.width), clamp(current[1] + dy, annotation.height)];
+      setDraft((points) => points.map((point, index) => index === selection.pointIndex ? next : point));
+      setPointAnnouncement(t("{name} 已移动到 X {x}，Y {y}", {
+        name: pointName(selection), x: Math.round(next[0]), y: Math.round(next[1]),
+      }));
+      return;
+    }
+    const current = polygons[selection.polygonIndex]?.points?.[selection.pointIndex];
+    if (!current) return;
+    const next = [clamp(current[0] + dx, annotation.width), clamp(current[1] + dy, annotation.height)];
+    setPolygons((items) => items.map((polygon, polygonIndex) => (
+      polygonIndex === selection.polygonIndex
+        ? { ...polygon, points: polygon.points.map((point, pointIndex) => pointIndex === selection.pointIndex ? next : point) }
+        : polygon
+    )));
+    setPointAnnouncement(t("{name} 已移动到 X {x}，Y {y}", {
+      name: pointName(selection), x: Math.round(next[0]), y: Math.round(next[1]),
+    }));
+  };
+
+  const removePoint = (selection) => {
+    if (editorBusy || !selection) return;
+    if (selection.kind === "draft") {
+      setDraft((points) => points.filter((_, index) => index !== selection.pointIndex));
+    } else {
+      setPolygons((items) => items.flatMap((polygon, polygonIndex) => {
+        if (polygonIndex !== selection.polygonIndex) return [polygon];
+        if (polygon.points.length <= 3) return [];
+        return [{ ...polygon, points: polygon.points.filter((_, pointIndex) => pointIndex !== selection.pointIndex) }];
+      }));
+    }
+    setSelectedPoint(null);
+    setPointAnnouncement(t("已删除 {name}", { name: pointName(selection) }));
+  };
+
+  const handlePointKeyDown = (event, selection) => {
+    const distance = event.shiftKey ? 5 : 1;
+    const movement = {
+      ArrowUp: [0, -distance],
+      ArrowDown: [0, distance],
+      ArrowLeft: [-distance, 0],
+      ArrowRight: [distance, 0],
+    }[event.key];
+    if (movement) {
+      event.preventDefault();
+      event.stopPropagation();
+      setSelectedPoint(selection);
+      nudgePoint(selection, movement[0], movement[1]);
+      return;
+    }
+    if (event.key === "Delete" || event.key === "Backspace") {
+      event.preventDefault();
+      event.stopPropagation();
+      removePoint(selection);
+    }
+  };
   const appliedMaskVisible = showAppliedMask && Boolean(annotation.appliedMaskDataUrl);
   const AppliedMaskVisibilityIcon = appliedMaskVisible ? IconEye : IconEyeOff;
   const editorStatus = draft.length
@@ -384,12 +464,17 @@ function AnnotationCanvas({
         />
       ) : null}
       <div className="annotation-canvas-wrap">
+        <p className="visually-hidden" id={pointInstructionsId}>
+          {t("Tab 选择多边形顶点；方向键移动 1 像素，Shift 加方向键移动 5 像素，Delete 删除。")}
+        </p>
+        <span className="visually-hidden" role="status" aria-live="polite">{pointAnnouncement}</span>
         <svg
           ref={svgRef}
           className="annotation-canvas"
           viewBox={`0 0 ${annotation.width} ${annotation.height}`}
-          role="img"
+          role="group"
           aria-label={t("{name} XSeg 多边形编辑器", { name: item.name })}
+          aria-describedby={pointInstructionsId}
           aria-disabled={editorBusy}
           onPointerDown={addPoint}
           onPointerMove={movePoint}
@@ -436,10 +521,17 @@ function AnnotationCanvas({
                   fill={colors[polygon.type].stroke}
                   stroke="#07110e"
                   strokeWidth="1.5"
+                  tabIndex={editorBusy ? -1 : 0}
+                  role="button"
+                  aria-pressed={selectedPoint?.kind === "polygon" && selectedPoint.polygonIndex === polygonIndex && selectedPoint.pointIndex === pointIndex}
+                  aria-label={pointName({ kind: "polygon", polygonIndex, pointIndex })}
+                  onFocus={() => selectPoint({ kind: "polygon", polygonIndex, pointIndex })}
+                  onKeyDown={(event) => handlePointKeyDown(event, { kind: "polygon", polygonIndex, pointIndex })}
                   onPointerDown={(event) => {
                     event.stopPropagation();
                     event.currentTarget.setPointerCapture(event.pointerId);
                     setDragging({ polygonIndex, pointIndex });
+                    setSelectedPoint({ kind: "polygon", polygonIndex, pointIndex });
                   }}
                 />
               ))}
@@ -462,6 +554,12 @@ function AnnotationCanvas({
                   cy={point[1]}
                   r="4"
                   fill={colors[polygonType].stroke}
+                  tabIndex={editorBusy ? -1 : 0}
+                  role="button"
+                  aria-pressed={selectedPoint?.kind === "draft" && selectedPoint.pointIndex === index}
+                  aria-label={pointName({ kind: "draft", pointIndex: index })}
+                  onFocus={() => selectPoint({ kind: "draft", pointIndex: index })}
+                  onKeyDown={(event) => handlePointKeyDown(event, { kind: "draft", pointIndex: index })}
                 />
               ))}
             </g>
@@ -1249,9 +1347,10 @@ export function DatasetView({
               </div>
             )}
           </div>
-          <div className="asset-browser-pager">
+          <div className="asset-browser-pager" role="navigation" aria-label={t("素材分页") }>
             <button
               type="button"
+              aria-label={t("上一页素材")}
               disabled={loading || activeOffset <= 0}
               onClick={() => changePage(-1)}
             >
@@ -1264,6 +1363,7 @@ export function DatasetView({
             </span>
             <button
               type="button"
+              aria-label={t("下一页素材")}
               disabled={loading || activeOffset + activeItems.length >= (activeCollection?.total ?? 0)}
               onClick={() => changePage(1)}
             >
@@ -1362,12 +1462,14 @@ export function ModelSummaryAside({ workspace }) {
 }
 
 export function SettingsView({ health, jobs, onRetry, onError, onNotice }) {
-  const { t } = useI18n();
+  const { language, t } = useI18n();
   const [projects, setProjects] = useState(null);
   const [projectName, setProjectName] = useState("");
   const [projectId, setProjectId] = useState("");
   const [projectBusy, setProjectBusy] = useState(null);
   const [retryBusy, setRetryBusy] = useState(null);
+  const [diagnosticBusy, setDiagnosticBusy] = useState(false);
+  const [diagnosticMeta, setDiagnosticMeta] = useState(null);
   useEffect(() => {
     let cancelled = false;
     void runtimeApi.projects().then((value) => { if (!cancelled) setProjects(value); }).catch(onError);
@@ -1397,6 +1499,31 @@ export function SettingsView({ health, jobs, onRetry, onError, onNotice }) {
       onNotice(t("正在切换项目并重启本地服务…"));
       window.setTimeout(() => window.location.reload(), 1600);
     } catch (error) { setProjectBusy(null); onError(error); }
+  };
+  const exportDiagnostics = async () => {
+    setDiagnosticBusy(true);
+    try {
+      const snapshot = await runtimeApi.diagnostics();
+      const generatedAt = snapshot.generatedAt ?? new Date().toISOString();
+      const blob = new Blob([`${JSON.stringify(snapshot, null, 2)}\n`], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `deepfacelabsn-diagnostics-${generatedAt.replace(/[:.]/g, "-")}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setDiagnosticMeta({
+        version: snapshot.product?.version ?? health?.version ?? "—",
+        sampledAt: generatedAt,
+      });
+      onNotice(t("诊断摘要已导出到本机下载目录。"));
+    } catch (error) {
+      onError(error);
+    } finally {
+      setDiagnosticBusy(false);
+    }
   };
   return (
     <section className="operation-view settings-view">
@@ -1434,6 +1561,29 @@ export function SettingsView({ health, jobs, onRetry, onError, onNotice }) {
           <code>{t("不执行、不解析 BAT；写操作需要本机会话")}</code>
         </section>
       </div>
+      <section className="diagnostic-export-strip">
+        <span className="diagnostic-export-icon"><IconShieldCheck size={18} /></span>
+        <div>
+          <strong>{t("诊断摘要")}</strong>
+          <p>{t("仅导出运行状态摘要，不含绝对路径、命令参数或终端内容。")}</p>
+          <small aria-live="polite">
+            {t("产品版本 {version} · 最近采样 {sampledAt}", {
+              version: diagnosticMeta?.version ?? health?.version ?? "—",
+              sampledAt: diagnosticMeta?.sampledAt
+                ? new Date(diagnosticMeta.sampledAt).toLocaleString(language === "zh" ? "zh-CN" : "en-US")
+                : t("尚未采样"),
+            })}
+          </small>
+        </div>
+        <button
+          className="button secondary"
+          type="button"
+          onClick={() => void exportDiagnostics()}
+          disabled={diagnosticBusy}
+        >
+          <IconDownload size={15} />{diagnosticBusy ? t("正在生成…") : t("导出诊断摘要")}
+        </button>
+      </section>
       <section className="project-manager-section">
         <header>
           <div><IconBoxModel2 size={19} /><div><h3>{t("受管项目工作区")}</h3><p>{t("每个项目独立保存素材、模型、任务日志、诊断与恢复记录。")}</p></div></div>

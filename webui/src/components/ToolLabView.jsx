@@ -328,6 +328,7 @@ function PoseAtlas({ refreshVersion, focusCellId, focusNonce, onError, onNotice,
     return (
       <div className="pose-atlas-state">
         <LoadingProgress
+          inline
           label={t("正在并行分析 SRC / DST aligned landmarks…")}
           detail={t("两边姿态与清晰度都在本地 Python 运行时计算")}
         />
@@ -380,7 +381,7 @@ function PoseAtlas({ refreshVersion, focusCellId, focusNonce, onError, onNotice,
           operationKey="pose-atlas-quarantine"
         />
       ) : loading ? (
-        <LoadingProgress compact label={t("正在刷新姿态地图…")} detail={t("现有分析结果保持可见")} operationKey="pose-atlas-refresh" />
+        <LoadingProgress inline compact label={t("正在刷新姿态地图…")} detail={t("现有分析结果保持可见")} operationKey="pose-atlas-refresh" />
       ) : null}
       <section className="pose-atlas-main" aria-label={t("人脸姿态分布") }>
         <div className="pose-metrics">

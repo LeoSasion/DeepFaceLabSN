@@ -22,6 +22,12 @@ export const workflowStageDestinations = Object.freeze({
   encode: { nav: "export", task: "export" },
 });
 
+const initialReadinessStages = new Set(["material", "frames", "faces"]);
+
+export function getInitialReadinessDestination(stage) {
+  return initialReadinessStages.has(stage) ? workflowStageDestinations[stage] : null;
+}
+
 export const navigationWorkflowStages = Object.freeze({
   overview: "train",
   video: "material",

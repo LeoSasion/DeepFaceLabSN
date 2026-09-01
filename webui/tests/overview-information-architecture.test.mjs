@@ -33,6 +33,11 @@ test("1366x768 desktop layout keeps the collapsed terminal in the first viewport
     /\.main-surface\.is-tools:has\(\.runtime-console\.is-collapsed\)\s*\{\s*grid-template-rows:\s*72px minmax\(0, 1fr\) 58px;/s,
   );
   assert.doesNotMatch(styles, /runtime-console\.is-collapsed[\s\S]{0,180}minmax\(626px, 1fr\)/);
+  assert.match(
+    styles,
+    /@media \(min-width: 781px\) and \(max-width: 1120px\)[\s\S]*?\.workbench-grid\s*\{[^}]*grid-template-rows:\s*minmax\(320px, auto\) minmax\(300px, auto\);/s,
+    "mid-width layouts must scroll the workbench instead of crushing the Trainer preview",
+  );
 
   const virtualShellHeight = viewport.height - 42;
   const collapsedOverviewChrome = 72 + 68 + 58 + (3 * 8) + 8;
@@ -94,6 +99,26 @@ test("pipeline status derives failures from each command's latest run", async ()
   assert.match(pipelineSource, /const latestJobs = commandIds/);
   assert.match(pipelineSource, /const failedJob = latestJobs\.find/);
   assert.doesNotMatch(pipelineSource, /const failedJob = matchingJobs\.find/);
+  assert.ok(
+    pipelineSource.indexOf('state: isActive ? "active" : isComplete ? "done"')
+      < pipelineSource.indexOf('failedJob ? "failed"'),
+    "real workspace artifacts must outrank a historical failed job",
+  );
+
+  const workflowSource = source.slice(
+    source.indexOf("const workflowStates = useMemo"),
+    source.indexOf("const nextWorkflowStep = useMemo"),
+  );
+  assert.ok(
+    workflowSource.indexOf('job.state === "succeeded" || artifactReady')
+      < workflowSource.indexOf('["failed", "cancelled", "orphaned"].includes(job.state)'),
+    "workflow state must prefer artifact truth over historical failure",
+  );
+  assert.ok(
+    workflowSource.indexOf('if (artifactReady || states.every')
+      < workflowSource.indexOf('if (states.includes("failed"))'),
+    "combined workflow state must prefer artifact truth over historical failure",
+  );
 });
 
 test("tool lab primary navigation has English labels", async () => {
