@@ -34,6 +34,12 @@ the original host exit. The new process checks both hashes again before deleting
 the exact original executable. Conflicts, failed startup, or changed files keep
 the original. The release download asset still uses the legacy filename.
 
+WebUI dependency validation loads `node-pty` through Node's module resolver and
+resolves `esbuild` from Vite's package scope using `createRequire`. With pnpm,
+esbuild is a transitive dependency and need not exist at the top level. Do not
+gate installation on a fixed `@esbuild` or `node-pty/prebuilds` path. The probe
+executes an esbuild transform and reports each failing module's full exception.
+
 Dependency setup never assumes that the freshly cloned GitHub checkout already
 contains launcher source files. A complete project bootstrap is preferred when
 present; otherwise the host runs the integrity-checked bootstrap, manifest,

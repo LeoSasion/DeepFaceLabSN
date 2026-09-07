@@ -78,7 +78,7 @@ namespace DeepFaceLabSN.Launcher
             RuntimeComponentValidation cudaRuntime = runtimeValidation.Get("cuda");
             RuntimeComponentValidation cudnnRuntime = runtimeValidation.Get("cudnn");
             string webuiBuild = Path.Combine(projectRoot, "webui", "dist", "client", "index.html");
-            bool buildReady = WebUiDependencyFilesPresent(projectRoot) && File.Exists(webuiBuild);
+            bool buildReady = WebUiDependencies.EntryPointsPresent(projectRoot) && File.Exists(webuiBuild);
             bool webUiServicesOnline = await AreWebUiServicesOnlineAsync();
             bool webuiRunning = webUiActivatedInSession && webUiServicesOnline;
             int? webUiPid = webuiRunning ? TryReadManagedWebUiPid(projectRoot) : null;
@@ -605,7 +605,7 @@ namespace DeepFaceLabSN.Launcher
                 node);
             environment = MirrorEnvironment(environment);
             bool dependencyTreePresent = Directory.Exists(Path.Combine(webuiRoot, "node_modules"));
-            bool dependencyFilesPresent = WebUiDependencyFilesPresent(projectRoot);
+            bool dependencyFilesPresent = WebUiDependencies.EntryPointsPresent(projectRoot);
             bool dependenciesLoad = dependencyFilesPresent
                 && await CanLoadWebUiDependenciesAsync(node, webuiRoot, environment);
             if (!force && dependenciesLoad && File.Exists(index))
@@ -635,11 +635,10 @@ namespace DeepFaceLabSN.Launcher
                     "bootstrap");
                 EnsureSuccess(install, "WebUI 依赖安装失败");
 
-                if (!WebUiDependencyFilesPresent(projectRoot)
-                    || !await CanLoadWebUiDependenciesAsync(node, webuiRoot, environment))
+                if (!await CanLoadWebUiDependenciesAsync(node, webuiRoot, environment))
                 {
                     throw new InvalidOperationException(
-                        "WebUI 依赖安装命令已结束，但 node-pty 或 esbuild 仍无法加载；请重试修复依赖。");
+                        "WebUI 依赖安装后加载验证失败；具体模块及异常见上方检测输出和本地错误日志。");
                 }
             }
 
@@ -662,7 +661,7 @@ namespace DeepFaceLabSN.Launcher
         {
             CommandResult validation = await runner.RunAsync(
                 node,
-                "-e \"try{require('node-pty');require('esbuild').transformSync('let ready=true')}catch(error){process.exit(1)}\"",
+                "-e " + ProcessRunner.Quote(WebUiDependencies.ProbeScript),
                 webuiRoot,
                 environment,
                 "bootstrap");
@@ -671,25 +670,6 @@ namespace DeepFaceLabSN.Launcher
                 logs.Add("bootstrap", "检测到未完成的 Node.js 依赖安装，将自动修复。", "warning");
             }
             return validation.Success;
-        }
-
-        private static bool WebUiDependencyFilesPresent(string projectRoot)
-        {
-            string webuiRoot = Path.Combine(projectRoot, "webui");
-            return File.Exists(Path.Combine(webuiRoot, "node_modules", "vite", "bin", "vite.js"))
-                && File.Exists(Path.Combine(
-                    webuiRoot,
-                    "node_modules",
-                    "node-pty",
-                    "prebuilds",
-                    "win32-x64",
-                    "pty.node"))
-                && File.Exists(Path.Combine(
-                    webuiRoot,
-                    "node_modules",
-                    "@esbuild",
-                    "win32-x64",
-                    "esbuild.exe"));
         }
 
         private IDictionary<string, string> MirrorEnvironment(IDictionary<string, string> source)
