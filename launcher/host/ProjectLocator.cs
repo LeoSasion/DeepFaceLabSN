@@ -7,6 +7,71 @@ namespace DeepFaceLabSN.Launcher
     internal static class ProjectLocator
     {
         public const string DefaultInstallDirectoryName = "DFL-WEBUI";
+        public const string InstallStateDirectoryName = ".launcher-install";
+        private const string InstallMarker = "DFL-WEBUI install workspace v1";
+
+        public static bool IsInstallWorkspace(string path)
+        {
+            if (!Directory.Exists(path)) return false;
+            string[] entries = Directory.GetFileSystemEntries(path);
+            string state = Path.Combine(path, InstallStateDirectoryName);
+            return entries.Length == 1 && Directory.Exists(state)
+                && (File.GetAttributes(state) & FileAttributes.ReparsePoint) == 0
+                && File.Exists(Path.Combine(state, "owner.txt"))
+                && File.ReadAllText(Path.Combine(state, "owner.txt")) == InstallMarker;
+        }
+
+        public static string PrepareInstallWorkspace(string path)
+        {
+            AssertInstallTarget(path);
+            string state = Path.Combine(Path.GetFullPath(path), InstallStateDirectoryName);
+            if (Directory.Exists(state) && (File.GetAttributes(state) & FileAttributes.ReparsePoint) != 0)
+                throw new IOException("安装状态目录不能是重解析点：" + state);
+            Directory.CreateDirectory(state);
+            string marker = Path.Combine(state, "owner.txt");
+            if (!File.Exists(marker)) File.WriteAllText(marker, InstallMarker);
+            return state;
+        }
+
+        public static void PublishClone(string staging, string destination)
+        {
+            AssertInstallTarget(destination);
+            string[] entries = Directory.GetFileSystemEntries(staging);
+            // Preflight every collision before publishing; publish .git last.
+            Array.Sort(entries, delegate(string left, string right) {
+                return String.Equals(Path.GetFileName(left), ".git", StringComparison.OrdinalIgnoreCase) ? 1
+                    : String.Equals(Path.GetFileName(right), ".git", StringComparison.OrdinalIgnoreCase) ? -1
+                    : StringComparer.OrdinalIgnoreCase.Compare(left, right);
+            });
+            foreach (string source in entries)
+            {
+                string target = Path.Combine(destination, Path.GetFileName(source));
+                if (File.Exists(target) || Directory.Exists(target))
+                    throw new IOException("项目文件与安装目录冲突：" + target);
+            }
+            List<string> moved = new List<string>();
+            try
+            {
+                foreach (string source in entries)
+                {
+                    string target = Path.Combine(destination, Path.GetFileName(source));
+                    if (Directory.Exists(source)) Directory.Move(source, target);
+                    else File.Move(source, target);
+                    moved.Add(target);
+                }
+            }
+            catch
+            {
+                for (int index = moved.Count - 1; index >= 0; index--)
+                {
+                    string source = moved[index];
+                    string target = Path.Combine(staging, Path.GetFileName(source));
+                    if (Directory.Exists(source)) Directory.Move(source, target);
+                    else File.Move(source, target);
+                }
+                throw;
+            }
+        }
 
         public static string Resolve(LauncherSettings settings)
         {
@@ -47,7 +112,7 @@ namespace DeepFaceLabSN.Launcher
                 throw new InvalidOperationException("所选安装路径是文件，不是目录。");
 
             string destination = selected;
-            if (isRoot || (Directory.Exists(selected) && !IsEmptyDirectory(selected) && !IsProject(selected)))
+            if (isRoot || (Directory.Exists(selected) && !IsEmptyDirectory(selected) && !IsProject(selected) && !IsInstallWorkspace(selected)))
             {
                 if (!isRoot && String.Equals(Path.GetFileName(trimmed), DefaultInstallDirectoryName,
                     StringComparison.OrdinalIgnoreCase))
@@ -61,7 +126,7 @@ namespace DeepFaceLabSN.Launcher
         public static void AssertInstallTarget(string path)
         {
             AssertSafeInstallPath(path);
-            if (Directory.Exists(path) && !IsEmptyDirectory(path) && !IsProject(path))
+            if (Directory.Exists(path) && !IsEmptyDirectory(path) && !IsProject(path) && !IsInstallWorkspace(path))
                 throw new InvalidOperationException("最终安装目录已有内容，但不是完整项目：" + path + "。请选择其他空文件夹。");
         }
 

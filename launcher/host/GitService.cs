@@ -28,6 +28,8 @@ namespace DeepFaceLabSN.Launcher
         {
             "workspace",
             "workspaces",
+            ".launcher-install",
+            "DeepFaceLab-WEBUI.exe",
             "_internal/config.txt",
             "_internal/CUDA",
             "_internal/CUDNN",
@@ -102,15 +104,11 @@ namespace DeepFaceLabSN.Launcher
         {
             ProjectLocator.AssertSafeInstallPath(destination);
             string fullPath = Path.GetFullPath(destination);
-            if (Directory.Exists(fullPath) && !ProjectLocator.IsEmptyDirectory(fullPath))
-            {
-                throw new InvalidOperationException("安装目录不是空目录；为保护已有文件，已停止克隆。");
-            }
+            ProjectLocator.AssertInstallTarget(fullPath);
 
             string git = RequireGit();
-            string parent = Directory.GetParent(fullPath).FullName;
-            Directory.CreateDirectory(parent);
-            string stagingPath = fullPath + ".cloning-" + Guid.NewGuid().ToString("N");
+            string parent = ProjectLocator.PrepareInstallWorkspace(fullPath);
+            string stagingPath = Path.Combine(parent, "cloning-" + Guid.NewGuid().ToString("N"));
             GitTransportPlan plan = GitNetworkOptions.CreatePlan(settings.Current, attempt);
             IDictionary<string, string> networkEnvironment = GitNetworkOptions.CreateEnvironment(plan);
             logs.Add("git", "正在获取 main 分支（" + plan.Label + "，浅克隆）…", plan.UsesMirror ? "warning" : "info");
@@ -140,15 +138,7 @@ namespace DeepFaceLabSN.Launcher
                 }
                 await AssertRepositoryIdentityAsync(stagingPath);
 
-                if (Directory.Exists(fullPath))
-                {
-                    if (!ProjectLocator.IsEmptyDirectory(fullPath))
-                    {
-                        throw new InvalidOperationException("项目获取完成，但安装目录出现了新文件；为保护这些文件，已停止发布项目。");
-                    }
-                    Directory.Delete(fullPath, false);
-                }
-                Directory.Move(stagingPath, fullPath);
+                ProjectLocator.PublishClone(stagingPath, fullPath);
                 settings.Update(delegate(LauncherSettings value) { value.ProjectRoot = fullPath; });
             }
             finally
@@ -156,7 +146,7 @@ namespace DeepFaceLabSN.Launcher
                 try
                 {
                     string normalizedStaging = Path.GetFullPath(stagingPath);
-                    string requiredPrefix = fullPath + ".cloning-";
+                    string requiredPrefix = Path.Combine(parent, "cloning-");
                     if (normalizedStaging.StartsWith(requiredPrefix, StringComparison.OrdinalIgnoreCase)
                         && String.Equals(Directory.GetParent(normalizedStaging).FullName, parent, StringComparison.OrdinalIgnoreCase)
                         && Directory.Exists(normalizedStaging)

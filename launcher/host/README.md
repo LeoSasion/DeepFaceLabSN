@@ -18,6 +18,22 @@ The canonical GitHub repository is `LeoSasion/DeepFaceLab-WEBUI`. The legacy
 Internal namespaces, local settings locations, executable asset filenames and
 the Gitee mirror retain their legacy names for compatibility.
 
+First-install state now lives under `<project>/.launcher-install`: `runtime`
+holds prepared dependencies, `cloning-<id>` holds private clones, and `logs`
+holds a full UTF-8 session log plus an errors-only log. A workspace marker allows
+retries before `.git` exists. Clone publication preflights collisions, moves
+`.git` last and rolls back moved entries if publication throws. Unrelated
+destination files prevent publication. Logs are appended on every entry; the
+UI buffer limit does not truncate disk logs. Before a project is selected,
+logs use the legacy local application data directory and are copied on attach.
+
+After successful bootstrap, `LauncherInstallation` copies the current executable
+to `<project>/DeepFaceLab-WEBUI.exe`, verifies SHA-256, and starts it with a
+one-time named-event handshake. Only after the installed host loads its UI does
+the original host exit. The new process checks both hashes again before deleting
+the exact original executable. Conflicts, failed startup, or changed files keep
+the original. The release download asset still uses the legacy filename.
+
 Dependency setup never assumes that the freshly cloned GitHub checkout already
 contains launcher source files. A complete project bootstrap is preferred when
 present; otherwise the host runs the integrity-checked bootstrap, manifest,

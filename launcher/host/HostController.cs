@@ -26,6 +26,9 @@ namespace DeepFaceLabSN.Launcher
         {
             this.settings = settings;
             this.logs = logs;
+            string knownRoot = ProjectLocator.Resolve(settings.Current);
+            if (ProjectLocator.IsProject(knownRoot) || ProjectLocator.IsInstallWorkspace(knownRoot))
+                logs.SetDirectory(Path.Combine(ProjectLocator.PrepareInstallWorkspace(knownRoot), "logs"));
             runner = new ProcessRunner(logs);
             git = new GitService(settings, runner, logs);
             terminal = new TerminalBridgeService(logs);
@@ -232,6 +235,9 @@ namespace DeepFaceLabSN.Launcher
                 ReportProgress("environment", "正在检测安装环境…", "active", 0, 4);
                 string projectRoot = ProjectLocator.Resolve(settings.Current);
                 ProjectLocator.AssertInstallTarget(projectRoot);
+                string installState = ProjectLocator.PrepareInstallWorkspace(projectRoot);
+                logs.SetDirectory(Path.Combine(installState, "logs"));
+                logs.Add("launcher", "安装日志目录：" + logs.DirectoryPath, "info");
                 if (!ProjectLocator.IsProject(projectRoot))
                 {
                     await EnsurePortableGitAsync();
@@ -313,7 +319,18 @@ namespace DeepFaceLabSN.Launcher
                 ReportProgress("finish", "正在检查 WebUI 构建…", "active", 3, 4);
                 await BuildWebUiIfPossibleAsync(projectRoot, repair);
                 ReportProgress("finish", "环境检查完成。", "complete", 4, 4);
-                return await GetStateAsync();
+                object state = await GetStateAsync();
+                if (await LauncherInstallation.RelocateAsync(projectRoot, logs))
+                {
+                    MainWindow window = System.Windows.Application.Current.MainWindow as MainWindow;
+                    if (window != null) window.CloseAfterRelocation();
+                }
+                return state;
+            }
+            catch (Exception error)
+            {
+                logs.Add("bootstrap", error.ToString(), "error");
+                throw;
             }
             finally
             {

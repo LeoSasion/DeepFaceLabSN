@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Text;
 
 namespace DeepFaceLabSN.Launcher
 {
@@ -24,6 +26,39 @@ namespace DeepFaceLabSN.Launcher
         private readonly object gate = new object();
         private readonly List<LogEntry> entries = new List<LogEntry>();
         private long nextSequence = 1;
+        private readonly string session = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        private readonly string fallback = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DeepFaceLabSN", "Launcher", "logs");
+        public string DirectoryPath { get; private set; }
+
+        public LogBuffer()
+        {
+            SetDirectory(fallback);
+        }
+
+        public void SetDirectory(string directory)
+        {
+            lock (gate)
+            {
+                string target = Path.GetFullPath(directory);
+                if (String.Equals(target, DirectoryPath, StringComparison.OrdinalIgnoreCase)) return;
+                Directory.CreateDirectory(target);
+                foreach (string suffix in new[] { ".log", ".errors.log" })
+                {
+                    string destination = Path.Combine(target, session + suffix);
+                    if (DirectoryPath == null) File.WriteAllText(destination, String.Empty, new UTF8Encoding(false));
+                    else File.Copy(Path.Combine(DirectoryPath, session + suffix), destination, true);
+                }
+                DirectoryPath = target;
+            }
+        }
+
+        private void Persist(LogEntry entry)
+        {
+            string text = entry.Timestamp + " [" + entry.Level + "] [" + entry.Channel + "] " + entry.Line + Environment.NewLine;
+            File.AppendAllText(Path.Combine(DirectoryPath, session + ".log"), text, new UTF8Encoding(false));
+            if (String.Equals(entry.Level, "error", StringComparison.OrdinalIgnoreCase))
+                File.AppendAllText(Path.Combine(DirectoryPath, session + ".errors.log"), text, new UTF8Encoding(false));
+        }
 
         public event Action<LogEntry> EntryAdded;
 
@@ -45,6 +80,16 @@ namespace DeepFaceLabSN.Launcher
                     Line = line.TrimEnd('\r', '\n'),
                     Level = String.IsNullOrWhiteSpace(level) ? "info" : level
                 };
+                try { Persist(entry); }
+                catch (Exception error)
+                {
+                    // Keep the UI alive and make a project disk failure visible.
+                    DirectoryPath = fallback;
+                    Directory.CreateDirectory(fallback);
+                    entry.Line = "日志写入失败，已回退至 " + fallback + "：" + error.Message + Environment.NewLine + entry.Line;
+                    entry.Level = "error";
+                    Persist(entry);
+                }
                 entries.Add(entry);
                 if (entries.Count > Capacity)
                 {

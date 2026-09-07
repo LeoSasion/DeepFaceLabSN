@@ -12,6 +12,7 @@ namespace DeepFaceLabSN.Launcher
             Application application = null;
             try
             {
+                LauncherInstallation.Initialize();
                 int? applyUpdateResult = LauncherSelfUpdater.TryRunApplyUpdate(args);
                 if (applyUpdateResult.HasValue)
                 {
@@ -38,6 +39,7 @@ namespace DeepFaceLabSN.Launcher
             catch (Exception error)
             {
                 Exception detail = Unwrap(error);
+                try { new LogBuffer().Add("startup", detail.ToString(), "error"); } catch { }
                 if (application != null)
                 {
                     application.Shutdown();

@@ -16,6 +16,40 @@ Describe "first-install destination selection" {
         }
     }
 
+    It "resumes an owned install workspace without adding another folder" {
+        $project = Join-Path $TestDrive 'resume'
+        $state = [InstallPathTests.ProjectLocator]::PrepareInstallWorkspace($project)
+        New-Item -ItemType Directory -Path (Join-Path $state 'runtime'), (Join-Path $state 'logs') -Force | Out-Null
+        [InstallPathTests.ProjectLocator]::SelectInstallPath($project) | Should Be $project
+        [InstallPathTests.ProjectLocator]::AssertInstallTarget($project)
+        [IO.File]::WriteAllText((Join-Path $project 'personal.txt'), 'keep')
+        { [InstallPathTests.ProjectLocator]::AssertInstallTarget($project) } | Should Throw
+    }
+
+    It "publishes a clone alongside runtime and logs, preserving their contents" {
+        $project = Join-Path $TestDrive 'publish'
+        $state = [InstallPathTests.ProjectLocator]::PrepareInstallWorkspace($project)
+        $staging = Join-Path $state 'cloning-fixture'
+        New-TestProject $staging
+        [IO.File]::WriteAllText((Join-Path $state 'install.log'), 'keep log')
+        [IO.File]::WriteAllText((Join-Path $staging 'README.md'), 'source')
+        [InstallPathTests.ProjectLocator]::PublishClone($staging, $project)
+        [InstallPathTests.ProjectLocator]::IsProject($project) | Should Be $true
+        [IO.File]::ReadAllText((Join-Path $state 'install.log')) | Should Be 'keep log'
+        [IO.File]::ReadAllText((Join-Path $project 'README.md')) | Should Be 'source'
+    }
+
+    It "rejects a cloned tree that collides with installer state before moving files" {
+        $project = Join-Path $TestDrive 'publish-conflict'
+        $state = [InstallPathTests.ProjectLocator]::PrepareInstallWorkspace($project)
+        $staging = Join-Path $state 'cloning-fixture'
+        New-TestProject $staging
+        New-Item -ItemType Directory -Path (Join-Path $staging '.launcher-install') | Out-Null
+        { [InstallPathTests.ProjectLocator]::PublishClone($staging, $project) } | Should Throw
+        Test-Path (Join-Path $project '.git') | Should Be $false
+        Test-Path (Join-Path $staging '.git') | Should Be $true
+    }
+
     It "uses an empty selected folder directly and does not create anything" {
         $selected = Join-Path $TestDrive 'empty folder'
         New-Item -ItemType Directory -Path $selected | Out-Null

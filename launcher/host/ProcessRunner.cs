@@ -109,7 +109,9 @@ namespace DeepFaceLabSN.Launcher
                         {
                             stderr.AppendLine(args.Data);
                         }
-                        logs.Add(channel, args.Data, "error");
+                        // Git and package managers also use stderr for progress.
+                        // Confirm failure from the exit code before the error log.
+                        logs.Add(channel, args.Data, "warning");
                     };
 
                     logs.Add(channel, "> " + executable + " " + arguments, "command");
@@ -120,6 +122,12 @@ namespace DeepFaceLabSN.Launcher
                     process.BeginOutputReadLine();
                     process.BeginErrorReadLine();
                     process.WaitForExit();
+
+                    if (process.ExitCode != 0)
+                    {
+                        logs.Add(channel, "进程退出码：" + process.ExitCode + Environment.NewLine
+                            + stderr.ToString() + Environment.NewLine + stdout.ToString(), "error");
+                    }
 
                     return new CommandResult
                     {

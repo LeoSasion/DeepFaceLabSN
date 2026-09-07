@@ -79,6 +79,14 @@ namespace DeepFaceLabSN.Launcher
             Close();
         }
 
+        public void CloseAfterRelocation()
+        {
+            Dispatcher.BeginInvoke(new Action(delegate {
+                allowClose = true;
+                Close();
+            }));
+        }
+
         public void DragWindow()
         {
             try
@@ -157,6 +165,7 @@ namespace DeepFaceLabSN.Launcher
                 return;
             }
             await bridge.PushStateAsync();
+            LauncherInstallation.CompleteStartup(logs);
         }
 
         private void OnNewWindowRequested(object sender, CoreWebView2NewWindowRequestedEventArgs args)
@@ -247,6 +256,7 @@ namespace DeepFaceLabSN.Launcher
 
         private void ShowFatal(string message, Exception error)
         {
+            logs.Add("launcher", message + (error == null ? String.Empty : Environment.NewLine + error.ToString()), "error");
             root.Children.Clear();
             StackPanel panel = new StackPanel();
             panel.HorizontalAlignment = HorizontalAlignment.Center;

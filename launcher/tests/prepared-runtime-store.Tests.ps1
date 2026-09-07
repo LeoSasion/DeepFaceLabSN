@@ -11,10 +11,10 @@ Describe "prepared runtime staging" {
         $script:adopt = $script:storeType.GetMethod("Adopt", [Reflection.BindingFlags]"Public,Static")
     }
 
-    It "keeps the staging area beside the selected project" {
+    It "keeps the staging area inside the selected project" {
         $project = Join-Path $TestDrive "DeepFaceLabSN"
         $root = $script:getRoot.Invoke($null, [object[]]@([string]$project))
-        $root | Should Be (Join-Path $TestDrive ".DeepFaceLabSN.launcher-runtime")
+        $root | Should Be (Join-Path $project ".launcher-install\runtime")
     }
 
     It "moves only launcher-managed entries and never overwrites project files" {

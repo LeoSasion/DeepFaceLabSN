@@ -48,6 +48,17 @@ WebView2 宿主和 ConPTY 终端桥，不需要把 DLL 或前端文件放在 EXE
 4. 从官方 CPython 与固定 PyPI wheel 构建并验证 `_internal/python_common`，随后安装 WebUI 依赖。
 5. 进入常态界面；可启动 WebUI，也可直接使用内嵌的传统 BAT 交互终端。
 
+首次安装的依赖暂存区位于项目内的 `.launcher-install/runtime`，源码克隆暂存区也在
+`.launcher-install` 内；网络失败后可继续重试。每次运行的完整日志与独立错误日志
+分别写入 `.launcher-install/logs/<时间>-<会话>.log` 和 `*.errors.log`。选择安装目录
+之前的启动日志保存在 `%LocalAppData%\DeepFaceLabSN\Launcher\logs`，开始安装时会
+复制该会话日志到项目内。Git 等工具的正常 stderr 进度不会被当作错误；非零退出码
+及异常会记录到两份日志中。
+
+安装成功后，EXE 会以 `DeepFaceLab-WEBUI.exe` 保存到项目根目录并自动重新打开。
+仅在新副本校验通过、启动就绪且旧进程退出后，才清理下载位置的原 EXE。复制失败、
+同名文件冲突或启动失败时会保留原文件并记录错误。以后从项目内的 EXE 启动即可。
+
 所有运行时和镜像配置都保存在项目内，不修改系统 PATH，也不写用户全局 npm/pip
 配置。自动模式会优先探测国内 npm、pip 与 Node 镜像，失败后回退官方源；每个下载
 文件仍必须通过清单中的固定 SHA-256。

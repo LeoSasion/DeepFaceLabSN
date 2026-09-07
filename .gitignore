@@ -64,3 +64,5 @@ data.json
 # Launcher binaries are published as Release assets, never as repository source
 /神农DFL启动器.exe
 /DeepFaceLabSN.Launcher.exe
+/.launcher-install/
+/DeepFaceLab-WEBUI.exe

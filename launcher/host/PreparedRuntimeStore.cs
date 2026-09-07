@@ -26,7 +26,7 @@ namespace DeepFaceLabSN.Launcher
             {
                 throw new InvalidOperationException("无法为项目安装目录创建依赖暂存区。");
             }
-            return Path.Combine(parent.FullName, "." + name + ".launcher-runtime");
+            return Path.Combine(fullProject, ".launcher-install", "runtime");
         }
 
         public static IList<string> Adopt(string projectRoot)
@@ -62,6 +62,7 @@ namespace DeepFaceLabSN.Launcher
                 moved.Add(name);
             }
             TryDeleteEmptyDirectory(preparedInternal);
+            TryDeleteEmptyDirectory(Path.Combine(preparedRoot, "webui"));
             TryDeleteEmptyDirectory(preparedRoot);
             return moved;
         }
