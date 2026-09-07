@@ -405,6 +405,9 @@ try {
 
     $compilerArguments = @(
         "/nologo",
+        # References are resolved above. csc.rsp would additionally load the
+        # runtime assemblies and conflict with SDK reference assemblies on CI.
+        "/noconfig",
         "/target:winexe",
         "/platform:x64",
         "/optimize+",
