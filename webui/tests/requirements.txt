@@ -1,0 +1,9 @@
+# CPU-only fixture environment for Python 3.10 on Linux and Windows.
+# Keep separate from the production CPython 3.7 / TensorFlow runtime.
+numpy==1.26.4
+opencv-python-headless==4.10.0.84
+Pillow==9.5.0
+scipy==1.11.4
+numexpr==2.8.6
+colorama==0.4.6
+tqdm==4.66.5

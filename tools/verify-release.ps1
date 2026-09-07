@@ -53,6 +53,7 @@ function Find-Corepack {
 }
 
 $node = Find-Node
+$env:PATH = (Split-Path -Parent $node) + [IO.Path]::PathSeparator + $env:PATH
 $corepack = Find-Corepack -Node $node
 
 Write-Step "Activating pinned pnpm $($versionSource.pnpmVersion)"

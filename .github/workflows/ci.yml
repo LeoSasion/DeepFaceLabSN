@@ -46,7 +46,10 @@ jobs:
 
       - name: Install deterministic DFL fixture dependencies
         shell: bash
-        run: python -m pip install --disable-pip-version-check numpy==1.26.4 opencv-python-headless==4.10.0.84
+        run: |
+          python -m venv webui/.runtime/test-python
+          webui/.runtime/test-python/bin/python -m pip install --disable-pip-version-check -r webui/tests/requirements.txt
+          echo "DFLSN_TEST_PYTHON=$GITHUB_WORKSPACE/webui/.runtime/test-python/bin/python" >> "$GITHUB_ENV"
 
       - name: Verify versions, translations, and update signatures
         shell: bash
@@ -101,13 +104,24 @@ jobs:
 
       - name: Install deterministic DFL fixture dependencies
         shell: pwsh
-        run: python -m pip install --disable-pip-version-check numpy==1.26.4 opencv-python-headless==4.10.0.84
+        run: |
+          python -m venv webui/.runtime/test-python
+          if ($LASTEXITCODE -ne 0) { throw "Test Python creation failed." }
+          & webui/.runtime/test-python/Scripts/python.exe -m pip install --disable-pip-version-check -r webui/tests/requirements.txt
+          if ($LASTEXITCODE -ne 0) { throw "Test dependencies failed to install." }
+          "DFLSN_TEST_PYTHON=$env:GITHUB_WORKSPACE\webui\.runtime\test-python\Scripts\python.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Install Windows PowerShell test runner
         shell: powershell
+        run: powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File tools\prepare-launcher-tests.ps1
+
+      - name: Prepare launcher build fixtures
+        shell: pwsh
         run: |
-          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-          Install-Module Pester -RequiredVersion 4.10.1 -Scope CurrentUser -Force
+          npm --prefix launcher/ui ci --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw "Launcher UI dependency install failed." }
+          powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File launcher\build-host.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Launcher build failed." }
 
       - name: Run release gates
         shell: powershell

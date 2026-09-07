@@ -94,6 +94,38 @@ workspace/.webui/jobs/<job-id>/
 
 ## 验证
 
+隔离测试使用独立的 Python 3.10 环境，不需要安装生产 TensorFlow 或提供真实素材。
+从仓库根目录准备（Windows PowerShell）：
+
+```powershell
+py -3.10 -m venv webui/.runtime/test-python
+webui/.runtime/test-python/Scripts/python.exe -m pip install -r webui/tests/requirements.txt
+$env:DFLSN_TEST_PYTHON = (Resolve-Path webui/.runtime/test-python/Scripts/python.exe).Path
+_internal/node/bin/node.exe webui/tests/run-isolated.mjs
+```
+
+Linux 使用 `python3.10 -m venv webui/.runtime/test-python`，然后用
+`webui/.runtime/test-python/bin/python` 安装同一依赖清单，并将该解释器的绝对路径
+赋给 `DFLSN_TEST_PYTHON`。显式指定的解释器优先于整合包内的 Python；未指定时才
+依次使用内置 Python 和 PATH 中的 Python。测试在临时仓库内生成几何图像与 DFL
+元数据，结束后清理临时目录，不修改真实 workspace。测试入口会先验证映射后的
+解释器及依赖，支持完整安装、便携 Python 与标准 venv。
+
+Windows 启动器测试需要先准备项目内 Pester 4.10.1、启动器 UI 和固定 WebView2 SDK。
+从仓库根目录执行一次：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/prepare-launcher-tests.ps1
+npm --prefix launcher/ui ci --no-audit --no-fund
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File launcher/build-host.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/verify-release.ps1
+```
+
+完整发布验证需同时保留上面的 `DFLSN_TEST_PYTHON`，并预先安装 WebUI 锁定依赖。
+Pester 保存在 `launcher/vendor/PowerShellModules`，通过绝对路径显式导入；不更改
+全局模块、PSGallery 信任策略或跳过发布者检查。构建回归测试随后使用离线 SDK
+和已构建 UI 检查输出目录保护。真实模型运行时缺失时，相关用例会明确报告跳过。
+
 ```powershell
 pnpm test
 pnpm build

@@ -11,6 +11,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { mapPythonRuntime, probePythonRuntime } from "./python-runtime.mjs";
 
 const testsRoot = path.dirname(fileURLToPath(import.meta.url));
 const sourceWebuiRoot = path.resolve(testsRoot, "..");
@@ -30,44 +31,15 @@ function fail(message, result) {
   throw new Error(details ? `${message}\n${details}` : message);
 }
 
-function discoverPythonExecutable() {
-  const bundled = path.join(sourceRepositoryRoot, "_internal", "python_common");
-  if (process.platform === "win32" && path.isAbsolute(bundled)) {
-    const probe = spawnSync(path.join(bundled, "python.exe"), [
-      "-c",
-      "import sys;print(sys.executable)",
-    ], { encoding: "utf8", timeout: 30_000 });
-    if (probe.status === 0 && probe.stdout.trim()) return path.resolve(probe.stdout.trim());
-  }
-
+async function discoverPythonRuntime() {
+  // An explicit test interpreter must override a bundled production runtime.
   const explicit = process.env.DFLSN_TEST_PYTHON;
-  const executable = explicit || (process.platform === "win32" ? "python.exe" : "python3");
-  const probe = spawnSync(executable, [
-    "-c",
-    "import sys;print(sys.executable)",
-  ], { encoding: "utf8", timeout: 30_000 });
-  if (probe.status !== 0 || !probe.stdout.trim()) {
-    fail(
-      "A Python runtime with numpy and opencv-python is required for isolated DFL fixtures. "
-        + "Set DFLSN_TEST_PYTHON to its executable when it is not on PATH.",
-      probe,
-    );
+  if (explicit) return probePythonRuntime(explicit);
+  const bundled = path.join(sourceRepositoryRoot, "_internal", "python_common");
+  if (process.platform === "win32" && await exists(path.join(bundled, "python.exe"))) {
+    return probePythonRuntime(path.join(bundled, "python.exe"));
   }
-  return path.resolve(probe.stdout.trim());
-}
-
-async function mapPythonRuntime(pythonExecutable, internalRoot) {
-  const pythonCommon = path.join(internalRoot, "python_common");
-  if (process.platform === "win32") {
-    await createJunction(path.dirname(pythonExecutable), pythonCommon);
-    return;
-  }
-
-  // Product paths intentionally point at python_common/python.exe on every
-  // platform. Keep that layout in the hermetic repository while using the
-  // exact interpreter discovered from sys.executable to build the fixture.
-  await mkdir(pythonCommon, { recursive: true });
-  await symlink(pythonExecutable, path.join(pythonCommon, "python.exe"), "file");
+  return probePythonRuntime(process.platform === "win32" ? "python.exe" : "python3");
 }
 
 async function copyWebui(source, destination) {
@@ -93,7 +65,7 @@ async function prepareRepository(testRoot) {
   const internalRoot = path.join(repositoryRoot, "_internal");
   await mkdir(internalRoot, { recursive: true });
   await copyWebui(sourceWebuiRoot, webuiRoot);
-  const pythonExecutable = discoverPythonExecutable();
+  const pythonRuntime = await discoverPythonRuntime();
 
   await Promise.all([
     cp(
@@ -121,8 +93,11 @@ async function prepareRepository(testRoot) {
       path.join(sourceRepositoryRoot, "_internal", "installers"),
       path.join(internalRoot, "installers"),
     ),
-    mapPythonRuntime(pythonExecutable, internalRoot),
+    mapPythonRuntime(pythonRuntime, internalRoot),
   ]);
+  const pythonExecutable = path.join(internalRoot, "python_common", "python.exe");
+  // Validate the actual child-process layout before creating fixtures or jobs.
+  probePythonRuntime(pythonExecutable);
   await Promise.all([
     mkdir(path.join(internalRoot, "_e", "t"), { recursive: true }),
     mkdir(path.join(internalRoot, "_e", "u", "AppData", "Local"), { recursive: true }),
@@ -172,7 +147,11 @@ try {
   ], {
     cwd: layout.webuiRoot,
     stdio: "inherit",
-    env: { ...process.env, DFLSN_ISOLATED_TEST_ROOT: testRoot },
+    env: {
+      ...process.env,
+      DFLSN_TEST_PYTHON: layout.pythonExecutable,
+      DFLSN_ISOLATED_TEST_ROOT: testRoot,
+    },
   });
   if (result.error) throw result.error;
   process.exitCode = result.status ?? 1;
