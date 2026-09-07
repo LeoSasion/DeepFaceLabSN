@@ -8,6 +8,9 @@ When implementing from a selected generated mock, treat that image as the source
 
 ## Durable launcher decisions
 
+- The repository and displayed product name are DeepFaceLab-WEBUI. Preserve legacy internal identifiers and settings locations for existing installations.
+- Folder selection uses an empty folder directly, or DFL-WEBUI under a drive root/non-empty folder. Reuse existing projects, reject occupied non-project destinations, never repeatedly nest DFL-WEBUI, and show the final destination before installation.
+
 - The selected first-run design is `../design/first-run-selected.png`: a four-step rail, component evidence rows, installation terminal, and a compact path/mirror/action footer.
 - The selected normal-use design is `../design/ready-selected.png`: the interactive terminal is the main work area and the action rail is secondary. Normal use is the dominant state.
 - Match the existing DeepFaceLabSN forest-black and emerald workbench visual system. Use the official `brand-mark.png` and Tabler icons; do not invent substitute marks or glyph icons.

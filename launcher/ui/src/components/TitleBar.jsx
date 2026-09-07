@@ -26,7 +26,7 @@ export function TitleBar({ state }) {
     <header className="titlebar" data-drag-region onPointerDown={beginWindowDrag}>
       <div className="titlebar__brand" data-drag-region>
         <img src={BRAND_MARK} alt="" className="brand-mark brand-mark--small" />
-        <strong>DeepFaceLabSN 启动器</strong>
+        <strong>DeepFaceLab-WEBUI 启动器</strong>
         <span className="titlebar__divider" />
         <span className={"titlebar__state " + (healthy ? "is-healthy" : "is-warning")}>
           {healthy ? <IconCircleCheck size={15} /> : <IconTool size={15} />}

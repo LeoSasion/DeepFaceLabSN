@@ -7,7 +7,7 @@
     "sources":  [
                     {
                         "provider":  "github",
-                        "url":  "https://github.com/LeoSasion/DeepFaceLabSN/releases/download/v0.2.0/DeepFaceLabSN.Launcher.exe"
+                        "url":  "https://github.com/LeoSasion/DeepFaceLab-WEBUI/releases/download/v0.2.0/DeepFaceLabSN.Launcher.exe"
                     },
                     {
                         "provider":  "gitee",

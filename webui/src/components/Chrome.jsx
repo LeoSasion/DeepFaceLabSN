@@ -133,7 +133,7 @@ export function ProjectHeader({ projectName, workspacePath, serviceState, teleme
     <header className="project-header">
       <div className="project-copy">
         <div className="project-title-row">
-          <h1>DeepFaceLabSN{projectName ? <small> · {projectName}</small> : null}</h1>
+          <h1>DeepFaceLab-WEBUI{projectName ? <small> · {projectName}</small> : null}</h1>
           <button className="icon-button quiet" type="button" aria-label={t("项目名称来自当前仓库")} disabled>
             <IconPencil size={15} stroke={1.8} />
           </button>

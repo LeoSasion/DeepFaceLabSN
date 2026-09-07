@@ -100,7 +100,7 @@ $sourceOrigin = @(Invoke-ReleaseGit -GitArguments @("-C", $RepositoryRoot, "remo
 if ($sourceOrigin.Count -ne 1 -or
     -not [String]::Equals(
         $sourceOrigin[0].Trim().TrimEnd('/'),
-        "https://github.com/LeoSasion/DeepFaceLabSN.git",
+        "https://github.com/LeoSasion/DeepFaceLab-WEBUI.git",
         [StringComparison]::OrdinalIgnoreCase)) {
     throw "Release packaging requires the fixed public GitHub origin."
 }
@@ -227,7 +227,7 @@ try {
         "--single-branch", "--branch", "main", "--", $RepositoryRoot, $ReleaseGitClone))
     [void](Invoke-ReleaseGit -GitArguments @(
         "-C", $ReleaseGitClone, "remote", "set-url", "origin",
-        "https://github.com/LeoSasion/DeepFaceLabSN.git"))
+        "https://github.com/LeoSasion/DeepFaceLab-WEBUI.git"))
     [void](Invoke-ReleaseGit -GitArguments @(
         "-C", $ReleaseGitClone, "config", "core.logAllRefUpdates", "false"))
     $releaseGitLogs = Join-Path $ReleaseGitClone ".git\logs"

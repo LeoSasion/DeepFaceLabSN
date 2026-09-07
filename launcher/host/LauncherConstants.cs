@@ -4,12 +4,13 @@ namespace DeepFaceLabSN.Launcher
 {
     internal static class LauncherConstants
     {
-        public const string ProductName = "DeepFaceLabSN Launcher";
-        public const string GitRemote = "https://github.com/LeoSasion/DeepFaceLabSN.git";
+        public const string ProductName = "DeepFaceLab-WEBUI Launcher";
+        public const string GitRemote = "https://github.com/LeoSasion/DeepFaceLab-WEBUI.git";
+        public const string LegacyGitRemote = "https://github.com/LeoSasion/DeepFaceLabSN.git";
         public const string GitFallbackMirror = "https://gitee.com/LeoSasion/DeepFaceLabSN.git";
         public const string GitBranch = "main";
         public const string LauncherUpdateManifestGitHub =
-            "https://raw.githubusercontent.com/LeoSasion/DeepFaceLabSN/main/launcher/update-channel.json";
+            "https://raw.githubusercontent.com/LeoSasion/DeepFaceLab-WEBUI/main/launcher/update-channel.json";
         public const string LauncherUpdateManifestGitee =
             "https://gitee.com/LeoSasion/DeepFaceLabSN/raw/main/launcher/update-channel.json";
         public const string VirtualHost = "launcher.local";
@@ -19,6 +20,20 @@ namespace DeepFaceLabSN.Launcher
         public const string DefaultTerminalUrl = "ws://127.0.0.1:4185/terminal";
         public const string RequiredNodeVersion = "24.19.0";
 
+        public static bool IsOfficialGitRemote(string value)
+        {
+            return String.Equals(NormalizeRemote(value), NormalizeRemote(GitRemote), StringComparison.OrdinalIgnoreCase)
+                || String.Equals(NormalizeRemote(value), NormalizeRemote(LegacyGitRemote), StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string NormalizeRemote(string value)
+        {
+            string normalized = (value ?? String.Empty).Trim().TrimEnd('/');
+            return normalized.EndsWith(".git", StringComparison.OrdinalIgnoreCase)
+                ? normalized.Substring(0, normalized.Length - 4) : normalized;
+        }
+
+        // Keep the existing settings location so renamed launchers find prior installations.
         public static readonly string SettingsDirectory = System.IO.Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "DeepFaceLabSN",

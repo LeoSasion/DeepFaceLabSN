@@ -17,7 +17,7 @@ function manifest(version = "0.3.0") {
     size: 2_448_384,
     sources: [{
       provider: "github",
-      url: `https://github.com/LeoSasion/DeepFaceLabSN/releases/download/v${version}/launcher.exe`,
+      url: `https://github.com/LeoSasion/DeepFaceLab-WEBUI/releases/download/v${version}/launcher.exe`,
     }],
   };
 }

@@ -70,7 +70,7 @@ function StepRail({ steps }) {
           );
         })}
       </nav>
-      <img src={BRAND_MARK} alt="DeepFaceLabSN" className="brand-mark brand-mark--large" />
+      <img src={BRAND_MARK} alt="DeepFaceLab-WEBUI" className="brand-mark brand-mark--large" />
     </aside>
   );
 }
@@ -176,7 +176,7 @@ export function InstallView({ state, logs, busy, onAction, onClearLogs }) {
         <div className="install-main__intro">
           <p className="eyebrow">首次运行 · 本地部署</p>
           <h1>准备本地运行环境</h1>
-          <p>启动器将为 DeepFaceLabSN 配置项目文件和必要的本地运行组件。</p>
+          <p>启动器将为 DeepFaceLab-WEBUI 配置项目文件和必要的本地运行组件。</p>
         </div>
 
         <section className="runtime-list panel-line" aria-label="运行环境组件">
@@ -229,9 +229,9 @@ export function InstallView({ state, logs, busy, onAction, onClearLogs }) {
           )}
           <div className="install-setting">
             <IconSettings size={17} />
-            <span>安装路径</span>
+            <span>最终安装目录</span>
             <code title={state.installPath}>{state.installPath}</code>
-            <button onClick={() => onAction("chooseInstallPath")}>更改</button>
+            <button disabled={busy} onClick={() => onAction("chooseInstallPath")}>更改</button>
           </div>
           <div className="install-setting install-setting--network">
             <IconBrandGithub size={17} />
@@ -260,6 +260,7 @@ export function InstallView({ state, logs, busy, onAction, onClearLogs }) {
             {hasError ? "重试安装" : "继续安装"}
             {!busy && <IconArrowRight size={17} />}
           </button>
+          <p className="install-path-hint">项目文件将直接安装到以上目录。选择空文件夹时直接使用；选择磁盘根目录或非空文件夹时，自动使用 DFL-WEBUI 子文件夹。已有项目将继续使用。</p>
         </footer>
       </main>
     </div>

@@ -1,6 +1,6 @@
-# DeepFaceLabSN
+# DeepFaceLab-WEBUI
 
-DeepFaceLabSN 是一套面向 Windows 与 NVIDIA GPU 的本地 DeepFaceLab 工作台。它把素材整理、提帧、切脸、质量检查、XSeg、训练、模型诊断、合成和视频导出放进同一条可视化流程；命令仍在本机运行，素材不会因为使用 WebUI 而上传到云端。
+DeepFaceLab-WEBUI 是一套面向 Windows 与 NVIDIA GPU 的本地 DeepFaceLab 工作台。它把素材整理、提帧、切脸、质量检查、XSeg、训练、模型诊断、合成和视频导出放进同一条可视化流程；命令仍在本机运行，素材不会因为使用 WebUI 而上传到云端。
 
 > 请只处理你拥有或已获授权的素材，并遵守适用的隐私、肖像权和内容标识规定。
 
@@ -32,7 +32,15 @@ WebView2 宿主和 ConPTY 终端桥，不需要把 DLL 或前端文件放在 EXE
 的原生安装窗，只从 Microsoft 官方地址下载安装器，校验 Authenticode 签名后静默
 安装并自动继续。
 
-首次运行时，启动器会在用户选择的空目录中完成以下工作：
+首次运行时，安装页会明确显示“最终安装目录”：选择空文件夹时直接安装到该文件夹；
+选择磁盘根目录或非空文件夹（包括隐藏文件、子文件夹）时，使用其中的 `DFL-WEBUI`
+子文件夹。已有项目直接复用；目标子文件夹若已有无关内容，会提示另选目录，
+不会覆盖文件或继续嵌套。安装时使用界面显示的完整路径。
+
+项目仓库现为 [DeepFaceLab-WEBUI](https://github.com/LeoSasion/DeepFaceLab-WEBUI)。
+旧 GitHub 地址及已有安装配置继续兼容；EXE 文件名与 Gitee 镜像暂保留旧名称。
+
+启动器会在最终安装目录中完成以下工作：
 
 1. 准备经过 SHA-256 校验的便携 MinGit，并从固定 GitHub 地址克隆 `main`。
 2. 把 Node.js 安装到 `_internal/node`。

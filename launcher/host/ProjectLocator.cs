@@ -6,6 +6,8 @@ namespace DeepFaceLabSN.Launcher
 {
     internal static class ProjectLocator
     {
+        public const string DefaultInstallDirectoryName = "DFL-WEBUI";
+
         public static string Resolve(LauncherSettings settings)
         {
             if (settings != null && !String.IsNullOrWhiteSpace(settings.ProjectRoot))
@@ -26,7 +28,41 @@ namespace DeepFaceLabSN.Launcher
             }
 
             string profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            return Path.Combine(profile, "DeepFaceLabSN");
+            return Path.Combine(profile, DefaultInstallDirectoryName);
+        }
+
+        // Resolve once, when the user selects a folder. Installation uses this
+        // exact destination; it must never silently append another directory.
+        public static string SelectInstallPath(string selectedPath)
+        {
+            if (String.IsNullOrWhiteSpace(selectedPath))
+                throw new InvalidOperationException("安装目录不能为空。");
+
+            string selected = Path.GetFullPath(Environment.ExpandEnvironmentVariables(selectedPath));
+            string trimmed = selected.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            bool isRoot = String.Equals(trimmed,
+                Path.GetPathRoot(selected).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                StringComparison.OrdinalIgnoreCase);
+            if (File.Exists(selected))
+                throw new InvalidOperationException("所选安装路径是文件，不是目录。");
+
+            string destination = selected;
+            if (isRoot || (Directory.Exists(selected) && !IsEmptyDirectory(selected) && !IsProject(selected)))
+            {
+                if (!isRoot && String.Equals(Path.GetFileName(trimmed), DefaultInstallDirectoryName,
+                    StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("DFL-WEBUI 文件夹已有内容，但不是完整项目。请选择其他空文件夹。");
+                destination = Path.Combine(selected, DefaultInstallDirectoryName);
+            }
+            AssertInstallTarget(destination);
+            return Path.GetFullPath(destination);
+        }
+
+        public static void AssertInstallTarget(string path)
+        {
+            AssertSafeInstallPath(path);
+            if (Directory.Exists(path) && !IsEmptyDirectory(path) && !IsProject(path))
+                throw new InvalidOperationException("最终安装目录已有内容，但不是完整项目：" + path + "。请选择其他空文件夹。");
         }
 
         public static bool IsProject(string path)

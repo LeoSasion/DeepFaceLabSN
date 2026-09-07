@@ -500,8 +500,32 @@ p { margin: 0; }
   min-width: 0;
   padding-top: 1px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 11px;
+}
+
+.install-path-hint {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--text-3);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.install-footer > .install-setting:first-of-type {
+  flex-basis: 100%;
+  height: auto;
+  align-items: center;
+}
+
+.install-footer > .install-setting:first-of-type code {
+  flex: 1;
+  width: auto;
+  max-width: none;
+  font-size: 12px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .install-setting {

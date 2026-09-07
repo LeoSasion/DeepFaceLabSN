@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://github.com/LeoSasion/DeepFaceLabSN/launcher/runtime-manifest.schema.json",
+  "$id": "https://github.com/LeoSasion/DeepFaceLab-WEBUI/launcher/runtime-manifest.schema.json",
   "title": "DeepFaceLabSN launcher runtime manifest",
   "type": "object",
   "additionalProperties": false,

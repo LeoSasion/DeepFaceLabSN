@@ -254,7 +254,7 @@ namespace DeepFaceLabSN.Launcher
             panel.MaxWidth = 680;
 
             TextBlock title = new TextBlock();
-            title.Text = "DeepFaceLabSN Launcher";
+            title.Text = LauncherConstants.ProductName;
             title.FontSize = 24;
             title.FontWeight = FontWeights.SemiBold;
             title.Foreground = Brushes.White;

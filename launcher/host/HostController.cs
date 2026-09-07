@@ -135,10 +135,11 @@ namespace DeepFaceLabSN.Launcher
             {
                 using (Forms.FolderBrowserDialog dialog = new Forms.FolderBrowserDialog())
                 {
-                    dialog.Description = "选择 DeepFaceLabSN 安装目录（应为空目录）";
+                    dialog.Description = "选择 DeepFaceLab-WEBUI 安装位置：空文件夹直接使用；磁盘根目录或非空文件夹使用 DFL-WEBUI 子文件夹。";
                     dialog.ShowNewFolderButton = true;
                     string current = ProjectLocator.Resolve(settings.Current);
-                    string parent = Directory.GetParent(current) == null ? current : Directory.GetParent(current).FullName;
+                    string parent = Directory.Exists(current) ? current
+                        : (Directory.GetParent(current) == null ? current : Directory.GetParent(current).FullName);
                     if (Directory.Exists(parent))
                     {
                         dialog.SelectedPath = parent;
@@ -151,17 +152,19 @@ namespace DeepFaceLabSN.Launcher
                             { "path", current }
                         };
                     }
-                    selected = Path.Combine(dialog.SelectedPath, "DeepFaceLabSN");
+                    selected = dialog.SelectedPath;
                 }
             }
 
-            ProjectLocator.AssertSafeInstallPath(selected);
-            string fullPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(selected));
+            string fullPath = ProjectLocator.SelectInstallPath(selected);
             settings.Update(delegate(LauncherSettings value) { value.ProjectRoot = fullPath; });
+            logs.Add("launcher", "最终安装目录：" + fullPath + "。", "info");
             return new Dictionary<string, object>
             {
                 { "cancelled", false },
-                { "path", fullPath }
+                { "path", fullPath },
+                { "installPath", fullPath },
+                { "projectDir", fullPath }
             };
         }
 
@@ -228,6 +231,7 @@ namespace DeepFaceLabSN.Launcher
                 }
                 ReportProgress("environment", "正在检测安装环境…", "active", 0, 4);
                 string projectRoot = ProjectLocator.Resolve(settings.Current);
+                ProjectLocator.AssertInstallTarget(projectRoot);
                 if (!ProjectLocator.IsProject(projectRoot))
                 {
                     await EnsurePortableGitAsync();

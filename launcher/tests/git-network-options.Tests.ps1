@@ -18,7 +18,7 @@ namespace DeepFaceLabSN.Launcher
     }
     internal static class LauncherConstants
     {
-        public const string GitRemote = "https://github.com/LeoSasion/DeepFaceLabSN.git";
+        public const string GitRemote = "https://github.com/LeoSasion/DeepFaceLab-WEBUI.git";
         public const string GitFallbackMirror = "https://gitee.com/LeoSasion/DeepFaceLabSN.git";
     }
 }

@@ -21,7 +21,7 @@ Describe "launcher self-update metadata" {
   "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "size": 2419712,
   "sources": [
-    { "provider": "github", "url": "https://github.com/LeoSasion/DeepFaceLabSN/releases/download/v0.2.0/launcher.exe" },
+    { "provider": "github", "url": "https://github.com/LeoSasion/DeepFaceLab-WEBUI/releases/download/v0.2.0/launcher.exe" },
     { "provider": "gitee", "url": "https://gitee.com/LeoSasion/DeepFaceLabSN/releases/download/v0.2.0/launcher.exe" }
   ]
 }
@@ -66,7 +66,7 @@ Describe "launcher self-update metadata" {
         $assemblyInfo = Get-Content -LiteralPath $assemblyInfoPath -Raw -Encoding UTF8
         $assemblyInfo | Should Match ('AssemblyVersion\("' + [Regex]::Escape($manifest.Version.ToString()) + '"\)')
         $manifest.Sources[0].Uri.AbsoluteUri | Should Be (
-            "https://github.com/LeoSasion/DeepFaceLabSN/releases/download/v" +
+            "https://github.com/LeoSasion/DeepFaceLab-WEBUI/releases/download/v" +
             $manifest.VersionText + "/DeepFaceLabSN.Launcher.exe")
         $manifest.Sources[1].Uri.AbsoluteUri | Should Be (
             "https://gitee.com/LeoSasion/DeepFaceLabSN/releases/download/v" +

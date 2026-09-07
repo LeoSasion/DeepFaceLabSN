@@ -1,11 +1,22 @@
 # Native launcher host
 
 This directory contains the C# 5 / .NET Framework 4.8 WPF host for the
-DeepFaceLabSN single-file launcher. It embeds the production launcher UI,
+DeepFaceLab-WEBUI single-file launcher. It embeds the production launcher UI,
 `bootstrap.ps1`, `runtime-artifacts.ps1`, `python-wheelhouse.ps1`, the
 runtime manifest, pinned Python lock and requirements, WebView2 managed
 assemblies, the x64 `WebView2Loader.dll`, and the official brand icon into the
 generated EXE.
+
+Folder selection resolves the final destination once: empty folders are used
+directly, while drive roots and non-empty folders use a `DFL-WEBUI` child.
+Existing projects are reused. Occupied non-project targets are rejected without
+overwriting files or adding another nested directory. The UI shows the full
+destination, and installation validates that same path again before starting.
+
+The canonical GitHub repository is `LeoSasion/DeepFaceLab-WEBUI`. The legacy
+`LeoSasion/DeepFaceLabSN` GitHub remote remains accepted for existing checkouts.
+Internal namespaces, local settings locations, executable asset filenames and
+the Gitee mirror retain their legacy names for compatibility.
 
 Dependency setup never assumes that the freshly cloned GitHub checkout already
 contains launcher source files. A complete project bootstrap is preferred when

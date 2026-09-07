@@ -308,7 +308,7 @@ namespace DeepFaceLabSN.Launcher
         {
             if (!ProjectLocator.IsProject(projectRoot))
             {
-                throw new InvalidOperationException("所选目录不是完整的 DeepFaceLabSN Git 项目。");
+                throw new InvalidOperationException("所选目录不是完整的 DeepFaceLab-WEBUI Git 项目。");
             }
             string git = RequireGit();
             string remote = await ReadGitAsync(git, projectRoot, "remote get-url origin");
@@ -616,21 +616,7 @@ namespace DeepFaceLabSN.Launcher
 
         private static bool IsExpectedRemote(string value)
         {
-            if (String.IsNullOrWhiteSpace(value))
-            {
-                return false;
-            }
-            string normalized = value.Trim().TrimEnd('/');
-            if (normalized.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
-            {
-                normalized = normalized.Substring(0, normalized.Length - 4);
-            }
-            string expected = LauncherConstants.GitRemote.TrimEnd('/');
-            if (expected.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
-            {
-                expected = expected.Substring(0, expected.Length - 4);
-            }
-            return String.Equals(normalized, expected, StringComparison.OrdinalIgnoreCase);
+            return LauncherConstants.IsOfficialGitRemote(value);
         }
 
         private static void EnsureSuccess(CommandResult result, string prefix)

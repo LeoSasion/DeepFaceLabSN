@@ -69,7 +69,7 @@ $manifest = [ordered]@{
     sources = @(
         [ordered]@{
             provider = "github"
-            url = "https://github.com/LeoSasion/DeepFaceLabSN/releases/download/$tagName/$assetName"
+            url = "https://github.com/LeoSasion/DeepFaceLab-WEBUI/releases/download/$tagName/$assetName"
         },
         [ordered]@{
             provider = "gitee"
