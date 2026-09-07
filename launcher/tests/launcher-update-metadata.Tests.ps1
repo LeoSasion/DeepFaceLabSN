@@ -68,8 +68,9 @@ Describe "launcher self-update metadata" {
         $manifest.Sources[0].Uri.AbsoluteUri | Should Be (
             "https://github.com/LeoSasion/DeepFaceLab-WEBUI/releases/download/v" +
             $manifest.VersionText + "/DeepFaceLabSN.Launcher.exe")
-        $manifest.Sources[1].Uri.AbsoluteUri | Should Be (
-            "https://gitee.com/LeoSasion/DeepFaceLabSN/releases/download/v" +
-            $manifest.VersionText + "/DeepFaceLabSN.Launcher.exe")
+        foreach ($source in $manifest.Sources) {
+            $base = if ($source.Provider -eq 'github') { 'https://github.com/LeoSasion/DeepFaceLab-WEBUI' } else { 'https://gitee.com/LeoSasion/DeepFaceLabSN' }
+            $source.Uri.AbsoluteUri | Should Be ($base + '/releases/download/v' + $manifest.VersionText + '/DeepFaceLabSN.Launcher.exe')
+        }
     }
 }

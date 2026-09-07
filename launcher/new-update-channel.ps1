@@ -6,6 +6,8 @@ param(
 
     [string]$Executable,
 
+    [switch]$GitHubOnly,
+
     [string]$SigningPrivateKey,
 
     [ValidatePattern('^[a-zA-Z0-9][a-zA-Z0-9._-]{7,63}$')]
@@ -77,6 +79,8 @@ $manifest = [ordered]@{
         }
     )
 }
+
+$manifest.sources = @($manifest.sources | Where-Object { -not $GitHubOnly -or $_.provider -eq 'github' })
 
 $destination = Join-Path $PSScriptRoot "update-channel.json"
 $temporary = $destination + ".publishing-" + [Guid]::NewGuid().ToString("N") + ".tmp"

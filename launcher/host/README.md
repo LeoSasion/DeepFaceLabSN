@@ -72,11 +72,12 @@ For a release, update `AssemblyInfo.cs`, build the EXE, then generate the pinned
 channel metadata before committing and publishing the matching tag:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File launcher\new-update-channel.ps1 -Version 0.2.0
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File launcher\new-update-channel.ps1 -Version 0.2.1 -GitHubOnly
 ```
 
-Upload `launcher\bin\DeepFaceLabSN.Launcher.exe` to both GitHub and Gitee
-Releases with the unchanged filename. The generated channel uses deterministic
+Use `-GitHubOnly` when publishing only to GitHub; omit it only when the matching
+asset will also be published on Gitee. Upload `launcher\bin\DeepFaceLabSN.Launcher.exe`
+with the unchanged filename. The generated channel uses deterministic
 `releases/download/<tag>/<asset>` URLs. Set `DFLSN_LAUNCHER_SKIP_UPDATE=1` only
 for offline diagnostics; the one-shot replacement restart skips the check
 automatically to prevent an update loop.

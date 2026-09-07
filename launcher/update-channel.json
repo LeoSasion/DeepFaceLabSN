@@ -1,17 +1,13 @@
 {
     "schemaVersion":  1,
-    "version":  "0.2.0",
-    "publishedAt":  "2026-08-22T01:53:10+08:00",
-    "sha256":  "34e3561491d8a46f0217020bd0c4a0b17124f17f5f6e96b0ed50926f58f0dc57",
-    "size":  2448384,
+    "version":  "0.2.1",
+    "publishedAt":  "2026-09-08T01:41:53+08:00",
+    "sha256":  "4973762b9140f3eb5cb582f60867f0c66184f08021505f176bb65e97aa8aff6c",
+    "size":  2459136,
     "sources":  [
                     {
                         "provider":  "github",
-                        "url":  "https://github.com/LeoSasion/DeepFaceLab-WEBUI/releases/download/v0.2.0/DeepFaceLabSN.Launcher.exe"
-                    },
-                    {
-                        "provider":  "gitee",
-                        "url":  "https://gitee.com/LeoSasion/DeepFaceLabSN/releases/download/v0.2.0/DeepFaceLabSN.Launcher.exe"
+                        "url":  "https://github.com/LeoSasion/DeepFaceLab-WEBUI/releases/download/v0.2.1/DeepFaceLabSN.Launcher.exe"
                     }
                 ]
 }

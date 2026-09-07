@@ -17,6 +17,9 @@ DeepFaceLab-WEBUI 是一套面向 Windows 与 NVIDIA GPU 的本地 DeepFaceLab �
 
 ### 单文件下载启动器
 
+[下载最新启动器 EXE](https://github.com/LeoSasion/DeepFaceLab-WEBUI/releases/latest/download/DeepFaceLabSN.Launcher.exe)
+（[版本说明与 SHA-256 校验文件](https://github.com/LeoSasion/DeepFaceLab-WEBUI/releases/latest)）。
+
 仓库提供轻量原生启动器的构建源码，用户使用的 EXE 只放在 GitHub/Gitee
 Release，不再提交到源码根目录。发布产物只有一个 `DeepFaceLabSN.Launcher.exe`；
 它内嵌首次配置页、常态启动页、依赖引导脚本、
