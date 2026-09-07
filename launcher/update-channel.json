@@ -8,6 +8,10 @@
                     {
                         "provider":  "github",
                         "url":  "https://github.com/LeoSasion/DeepFaceLab-WEBUI/releases/download/v0.2.1/DeepFaceLabSN.Launcher.exe"
+                    },
+                    {
+                        "provider":  "gitee",
+                        "url":  "https://gitee.com/LeoSasion/DeepFaceLabSN/releases/download/v0.2.1/DeepFaceLabSN.Launcher.exe"
                     }
                 ]
 }
