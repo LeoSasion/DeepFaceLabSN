@@ -15,8 +15,9 @@ destination, and installation validates that same path again before starting.
 
 The canonical GitHub repository is `LeoSasion/DeepFaceLab-WEBUI`. The legacy
 `LeoSasion/DeepFaceLabSN` GitHub remote remains accepted for existing checkouts.
-Internal namespaces, local settings locations, executable asset filenames and
-the Gitee mirror retain their legacy names for compatibility.
+Internal namespaces, local settings locations and executable asset filenames
+retain their legacy names for compatibility. Both GitHub and Gitee repositories
+now use `DeepFaceLab-WEBUI`; embedded manifest URLs and clone fallbacks use that name.
 
 First-install state now lives under `<project>/.launcher-install`: `runtime`
 holds prepared dependencies, `cloning-<id>` holds private clones, and `logs`
@@ -102,7 +103,7 @@ During first setup, project cloning and runtime installation run concurrently.
 The Git worker performs one clone at a time, retries every 60 seconds while the
 runtime bootstrap is active, and publishes only a fully verified private
 staging clone. Attempts interleave GitHub's default/HTTP/1.1 transports with
-the built-in `https://gitee.com/LeoSasion/DeepFaceLabSN.git` fallback. A
+the built-in `https://gitee.com/LeoSasion/DeepFaceLab-WEBUI.git` fallback. A
 user-configured trusted HTTPS mirror can replace that fallback. Clone traffic
 uses a shallow single-branch checkout and a low-speed timeout so a dead route
 does not block the rest of the installer indefinitely.

@@ -75,7 +75,7 @@ $manifest = [ordered]@{
         },
         [ordered]@{
             provider = "gitee"
-            url = "https://gitee.com/LeoSasion/DeepFaceLabSN/releases/download/$tagName/$assetName"
+            url = "https://gitee.com/LeoSasion/DeepFaceLab-WEBUI/releases/download/$tagName/$assetName"
         }
     )
 }

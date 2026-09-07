@@ -19,7 +19,7 @@ namespace DeepFaceLabSN.Launcher
     internal static class LauncherConstants
     {
         public const string GitRemote = "https://github.com/LeoSasion/DeepFaceLab-WEBUI.git";
-        public const string GitFallbackMirror = "https://gitee.com/LeoSasion/DeepFaceLabSN.git";
+        public const string GitFallbackMirror = "https://gitee.com/LeoSasion/DeepFaceLab-WEBUI.git";
     }
 }
 '@
@@ -48,7 +48,7 @@ namespace DeepFaceLabSN.Launcher
         $first.DirectConnection | Should Be $true
         $first.ForceHttp11 | Should Be $false
         $second.UsesMirror | Should Be $true
-        $second.SourceUrl | Should Be "https://gitee.com/LeoSasion/DeepFaceLabSN.git"
+        $second.SourceUrl | Should Be "https://gitee.com/LeoSasion/DeepFaceLab-WEBUI.git"
         $second.ForceHttp11 | Should Be $false
         $third.UsesMirror | Should Be $false
         $third.ForceHttp11 | Should Be $true

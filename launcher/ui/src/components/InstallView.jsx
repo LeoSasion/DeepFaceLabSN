@@ -220,7 +220,7 @@ export function InstallView({ state, logs, busy, onAction, onClearLogs }) {
                   placeholder="留空使用内置 Gitee 国内仓库"
                 />
               </label>
-              <p>内置后备源：https://gitee.com/LeoSasion/DeepFaceLabSN.git。自定义时只填写由你控制或明确信任的镜像。</p>
+              <p>内置后备源：https://gitee.com/LeoSasion/DeepFaceLab-WEBUI.git。自定义时只填写由你控制或明确信任的镜像。</p>
               <div className="git-network-popover__actions">
                 <button onClick={() => setNetworkOpen(false)}>取消</button>
                 <button className="is-primary" disabled={busy} onClick={saveGitNetwork}>保存策略</button>

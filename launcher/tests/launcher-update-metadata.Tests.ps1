@@ -22,7 +22,7 @@ Describe "launcher self-update metadata" {
   "size": 2419712,
   "sources": [
     { "provider": "github", "url": "https://github.com/LeoSasion/DeepFaceLab-WEBUI/releases/download/v0.2.0/launcher.exe" },
-    { "provider": "gitee", "url": "https://gitee.com/LeoSasion/DeepFaceLabSN/releases/download/v0.2.0/launcher.exe" }
+    { "provider": "gitee", "url": "https://gitee.com/LeoSasion/DeepFaceLab-WEBUI/releases/download/v0.2.0/launcher.exe" }
   ]
 }
 '@
@@ -69,7 +69,7 @@ Describe "launcher self-update metadata" {
             "https://github.com/LeoSasion/DeepFaceLab-WEBUI/releases/download/v" +
             $manifest.VersionText + "/DeepFaceLabSN.Launcher.exe")
         foreach ($source in $manifest.Sources) {
-            $base = if ($source.Provider -eq 'github') { 'https://github.com/LeoSasion/DeepFaceLab-WEBUI' } else { 'https://gitee.com/LeoSasion/DeepFaceLabSN' }
+            $base = if ($source.Provider -eq 'github') { 'https://github.com/LeoSasion/DeepFaceLab-WEBUI' } else { 'https://gitee.com/LeoSasion/DeepFaceLab-WEBUI' }
             $source.Uri.AbsoluteUri | Should Be ($base + '/releases/download/v' + $manifest.VersionText + '/DeepFaceLabSN.Launcher.exe')
         }
     }
