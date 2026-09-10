@@ -6,6 +6,10 @@ const progressPattern =
   /^(.{0,160}?)\s*(\d{1,3})%\|[^|\r\n]*\|\s*([\d,]+)\s*\/\s*([\d,]+)\s*\[\s*([\d:]+|\?)\s*<\s*([\d:?]+)(?:,\s*([^\]]+))?\]/gm;
 
 const promptPatterns = [
+  // DFL input helpers prefix defaults with brackets and use an ASCII colon.
+  // Examples: [n] Save debug images? ( y/n ) : and [128] Resolution :
+  /^\[[^\]\r\n]{0,80}\]\s+.+[:：]\s*$/,
+  /^(?:按\s*(?:Enter|回车)(?:键)?\s*继续|press\s+enter\s+to\s+continue)[.。!！]?\s*$/i,
   /(?:请选择|选择一个|请输入|输入一个|是否|继续\?|确认\?|which .*?\?|choose .*?\?|enter .*?:)\s*$/i,
   /输入一个.+(?:[:：])\s*$/i,
   /\[(?:y\/n|Y\/n|y\/N)\]\s*$/i,

@@ -1,3 +1,10 @@
+import sys
+from pathlib import Path
+
+# Embedded CPython's isolated ._pth excludes the script directory, including
+# when multiprocessing imports this entry point in a child process.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 if __name__ == "__main__":
     # Fix for linux
     import multiprocessing

@@ -1,7 +1,7 @@
-Describe "WebUI dependency validation with pnpm isolation" {
+﻿Describe "WebUI dependency validation with pnpm isolation" {
     BeforeAll {
         $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
-        $source = (Get-Content (Join-Path $repo 'launcher\host\WebUiDependencies.cs') -Raw -Encoding UTF8).Replace('namespace DeepFaceLabSN.Launcher', 'namespace DependencyProbeTests').Replace('internal static class', 'public static class')
+        $source = (Get-Content (Join-Path $repo 'launcher\host\WebUiDependencies.cs') -Raw -Encoding UTF8).Replace('namespace DeepFaceLabSN.Launcher', 'namespace DependencyProbeTests').Replace('internal static class', 'public static class').Replace('internal sealed class', 'public sealed class')
         Add-Type -TypeDefinition $source
         $script:probeNode = Join-Path $repo '_internal\node\bin\node.exe'
         if (-not (Test-Path $script:probeNode)) { $script:probeNode = (Get-Command node.exe -ErrorAction Stop).Source }
@@ -68,4 +68,41 @@ Describe "WebUI dependency validation with pnpm isolation" {
         $result.Output | Should Match 'node-pty: OK'
         $result.Output | Should Match 'vite/esbuild: OK'
     }
+    function Add-ProbeNode([string]$Root) {
+        $bin = Join-Path $Root '_internal\node\bin'
+        New-Item -ItemType Directory -Path $bin -Force | Out-Null
+        Copy-Item -LiteralPath $script:probeNode -Destination (Join-Path $bin 'node.exe')
+    }
+
+    It "does not report a present but unloadable dependency as healthy" {
+        $root = Join-Path $TestDrive '健康检查 broken'
+        $modules = New-IsolatedDependencies $root
+        Add-ProbeNode $root
+        [IO.File]::WriteAllText((Join-Path $modules 'node-pty\index.js'), 'throw new Error("ABI mismatch");')
+        [DependencyProbeTests.WebUiDependencies]::EntryPointsPresent($root) | Should Be $true
+        $health = [DependencyProbeTests.WebUiDependencies]::Inspect($root, $null, 10000)
+        $health.Ready | Should Be $false
+        $health.Detail | Should Match 'ABI mismatch'
+    }
+
+    It "returns promptly when a dependency hangs during loading" {
+        $root = Join-Path $TestDrive 'hung'
+        $modules = New-IsolatedDependencies $root
+        Add-ProbeNode $root
+        [IO.File]::WriteAllText((Join-Path $modules 'node-pty\index.js'), 'while(true){}')
+        $watch = [Diagnostics.Stopwatch]::StartNew()
+        $health = [DependencyProbeTests.WebUiDependencies]::Inspect($root, $null, 500)
+        $watch.Stop()
+        $health.Ready | Should Be $false
+        $health.Detail | Should Match '超时'
+        $watch.ElapsedMilliseconds | Should BeLessThan 5000
+    }
+
+    It "accepts a healthy dependency tree in a path with spaces and Chinese characters" {
+        $root = Join-Path $TestDrive '健康检查 ready'
+        New-IsolatedDependencies $root | Out-Null
+        Add-ProbeNode $root
+        [DependencyProbeTests.WebUiDependencies]::Inspect($root, $null, 10000).Ready | Should Be $true
+    }
+
 }

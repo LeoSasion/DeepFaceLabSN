@@ -1,3 +1,10 @@
+import sys
+from pathlib import Path
+
+# Embedded CPython's isolated ._pth excludes the script directory. Keep this
+# outside __main__ so spawned extraction/training workers resolve DFL too.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 if __name__ == "__main__":
     # 取消注释以在 PDB 中启动 DFL
     # __spec__ = "ModuleSpec(name='builtins', loader=<class '_frozen_importlib.BuiltinImporter'>)"

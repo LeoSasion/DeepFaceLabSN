@@ -78,7 +78,10 @@ namespace DeepFaceLabSN.Launcher
             RuntimeComponentValidation cudaRuntime = runtimeValidation.Get("cuda");
             RuntimeComponentValidation cudnnRuntime = runtimeValidation.Get("cudnn");
             string webuiBuild = Path.Combine(projectRoot, "webui", "dist", "client", "index.html");
-            bool buildReady = WebUiDependencies.EntryPointsPresent(projectRoot) && File.Exists(webuiBuild);
+            WebUiDependencyHealth webUiHealth = projectReady && nodeRuntime.Ready
+                ? await Task.Run(delegate { return WebUiDependencies.Inspect(projectRoot, null); })
+                : new WebUiDependencyHealth { Ready = false, Detail = "等待项目与 Node.js 就绪。" };
+            bool buildReady = File.Exists(webuiBuild);
             bool webUiServicesOnline = await AreWebUiServicesOnlineAsync();
             bool webuiRunning = webUiActivatedInSession && webUiServicesOnline;
             int? webUiPid = webuiRunning ? TryReadManagedWebUiPid(projectRoot) : null;
@@ -92,15 +95,17 @@ namespace DeepFaceLabSN.Launcher
             runtimeItems.Add(RuntimeItem("python", "Python", pythonRuntime.Ready, RuntimeDetail(pythonRuntime), pythonRuntime.TargetPath, "项目运行环境", null));
             runtimeItems.Add(RuntimeItem("cuda", "CUDA 运行库", cudaRuntime.Ready, RuntimeDetail(cudaRuntime), cudaRuntime.TargetPath, mirrorLabel, null));
             runtimeItems.Add(RuntimeItem("cudnn", "cuDNN DLL", cudnnRuntime.Ready, RuntimeDetail(cudnnRuntime), cudnnRuntime.TargetPath, mirrorLabel, null));
+            runtimeItems.Add(RuntimeItem("webui-dependencies", "WebUI 依赖", webUiHealth.Ready, webUiHealth.Detail,
+                Path.Combine(projectRoot, "webui", "node_modules"), "本地检查", null));
             runtimeItems.Add(RuntimeItem("webui", "WebUI build", buildReady, buildReady ? "已构建" : "尚未构建", webuiBuild, "本地构建", null));
 
             bool runtimesReady = runtimeValidation.RequiredComponentsReady;
-            bool dependenciesReady = runtimesReady && buildReady;
+            bool dependenciesReady = runtimesReady && webUiHealth.Ready && buildReady;
             bool environmentReady = projectReady && dependenciesReady;
             List<object> steps = new List<object>();
             steps.Add(Step("environment", "环境检测", "complete"));
             steps.Add(Step("project", "获取项目", projectReady ? "complete" : "active"));
-            steps.Add(Step("dependencies", "安装依赖", runtimesReady ? (projectReady && !buildReady ? "active" : "complete") : "active"));
+            steps.Add(Step("dependencies", "安装依赖", dependenciesReady ? "complete" : "active"));
             steps.Add(Step("finish", "准备完成", environmentReady ? "complete" : "upcoming"));
 
             Dictionary<string, object> result = new Dictionary<string, object>();
@@ -317,9 +322,11 @@ namespace DeepFaceLabSN.Launcher
                 await RunBootstrapScriptAsync(projectRoot, bootstrapResources, repair);
 
                 ReportProgress("finish", "正在检查 WebUI 构建…", "active", 3, 4);
-                await BuildWebUiIfPossibleAsync(projectRoot, repair);
-                ReportProgress("finish", "环境检查完成。", "complete", 4, 4);
+                await BuildWebUiIfPossibleAsync(projectRoot, false);
                 object state = await GetStateAsync();
+                if (!String.Equals(Convert.ToString(((Dictionary<string, object>)state)["environmentStatus"]), "ready", StringComparison.Ordinal))
+                    throw new InvalidOperationException("安装后健康检查未通过，请查看组件检测结果并重试修复依赖。");
+                ReportProgress("finish", "环境检查完成。", "complete", 4, 4);
                 if (await LauncherInstallation.RelocateAsync(projectRoot, logs))
                 {
                     MainWindow window = System.Windows.Application.Current.MainWindow as MainWindow;
@@ -607,9 +614,10 @@ namespace DeepFaceLabSN.Launcher
             bool dependencyTreePresent = Directory.Exists(Path.Combine(webuiRoot, "node_modules"));
             bool dependencyFilesPresent = WebUiDependencies.EntryPointsPresent(projectRoot);
             bool dependenciesLoad = dependencyFilesPresent
-                && await CanLoadWebUiDependenciesAsync(node, webuiRoot, environment);
+                && await CanLoadWebUiDependenciesAsync(webuiRoot, environment);
             if (!force && dependenciesLoad && File.Exists(index))
             {
+                logs.Add("bootstrap", "WebUI 依赖加载通过且构建已存在，无需重复安装。", "success");
                 return;
             }
 
@@ -635,14 +643,15 @@ namespace DeepFaceLabSN.Launcher
                     "bootstrap");
                 EnsureSuccess(install, "WebUI 依赖安装失败");
 
-                if (!await CanLoadWebUiDependenciesAsync(node, webuiRoot, environment))
+                if (!await CanLoadWebUiDependenciesAsync(webuiRoot, environment))
                 {
                     throw new InvalidOperationException(
                         "WebUI 依赖安装后加载验证失败；具体模块及异常见上方检测输出和本地错误日志。");
                 }
             }
 
-            if (force || !File.Exists(index))
+            // A repaired dependency tree also invalidates an existing build.
+            if (force || !dependenciesLoad || !File.Exists(index))
             {
                 CommandResult build = await runner.RunAsync(
                     node,
@@ -655,21 +664,19 @@ namespace DeepFaceLabSN.Launcher
         }
 
         private async Task<bool> CanLoadWebUiDependenciesAsync(
-            string node,
             string webuiRoot,
             IDictionary<string, string> environment)
         {
-            CommandResult validation = await runner.RunAsync(
-                node,
-                "-e " + ProcessRunner.Quote(WebUiDependencies.ProbeScript),
-                webuiRoot,
-                environment,
-                "bootstrap");
-            if (!validation.Success)
+            WebUiDependencyHealth validation = await Task.Run(delegate
             {
+                return WebUiDependencies.Inspect(Directory.GetParent(webuiRoot).FullName, environment);
+            });
+            if (!validation.Ready)
+            {
+                logs.Add("bootstrap", validation.Detail, "error");
                 logs.Add("bootstrap", "检测到未完成的 Node.js 依赖安装，将自动修复。", "warning");
             }
-            return validation.Success;
+            return validation.Ready;
         }
 
         private IDictionary<string, string> MirrorEnvironment(IDictionary<string, string> source)

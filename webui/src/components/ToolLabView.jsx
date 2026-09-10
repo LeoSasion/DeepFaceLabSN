@@ -812,7 +812,7 @@ function ImageToolsPlaceholder({ activeTool, onToolChange, side, toolFocus }) {
   );
 }
 
-export function ToolLabView({ commands, onOpenCommand, onError, onNotice, onNavigateDataset, poseFocus, toolFocus }) {
+export function ToolLabView({ commands, workspaceKey, onWorkspaceChange, onOpenCommand, onError, onNotice, onNavigateDataset, poseFocus, toolFocus }) {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = useState("audit");
   const [activeImageTool, setActiveImageTool] = useState("clarity");
@@ -887,6 +887,8 @@ export function ToolLabView({ commands, onOpenCommand, onError, onNotice, onNavi
       <div className="tool-lab-content">
         {activeTab === "audit" ? (
           <DatasetCleaningPanel
+            workspaceKey={workspaceKey}
+            onWorkspaceChange={onWorkspaceChange}
             side={side}
             refreshVersion={refreshVersion}
             onError={onError}

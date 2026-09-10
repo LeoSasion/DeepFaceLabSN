@@ -529,7 +529,7 @@ export function QualityDiagnosticsView({
           <section className="diagnostic-context-card">
             <header><strong>{t("比较摘要")}</strong><span>{comparison.sharedSampleCount}</span></header>
             <dl>
-              <div><dt>{t("模型键")}</dt><dd>{modelKey.split("-saehd-")[0]}</dd></div>
+              <div><dt>{t("模型键")}</dt><dd title={modelKey}>{modelKey.replace(/-saehd-[a-f0-9]+$/i, "")}</dd></div>
               <div><dt>{t("分辨率")}</dt><dd>{current?.modelSignature?.resolution ? `${current.modelSignature.resolution}px` : "—"}</dd></div>
               <div><dt>{t("改善姿势格")}</dt><dd className="is-improved">{comparison.totals.improved}</dd></div>
               <div><dt>{t("回归姿势格")}</dt><dd className="is-regressed">{comparison.totals.regressed}</dd></div>
@@ -566,8 +566,8 @@ export function QualityDiagnosticsView({
             {selectedSampleId ? (
               [
                 [t("输入"), currentSample?.variants?.includes("input") ? snapshotImageUrl(modelKey, currentId, selectedSampleId, "input") : null],
-                [t("基线重建"), baselineSample?.variants?.includes(mode.imageVariant) ? snapshotImageUrl(modelKey, baselineId, selectedSampleId, mode.imageVariant) : null],
-                [t("当前重建"), currentSample?.variants?.includes(mode.imageVariant) ? snapshotImageUrl(modelKey, currentId, selectedSampleId, mode.imageVariant) : null],
+                [t(mode.channel === "swap" ? "基线换脸" : "基线重建"), baselineSample?.variants?.includes(mode.imageVariant) ? snapshotImageUrl(modelKey, baselineId, selectedSampleId, mode.imageVariant) : null],
+                [t(mode.channel === "swap" ? "当前换脸" : "当前重建"), currentSample?.variants?.includes(mode.imageVariant) ? snapshotImageUrl(modelKey, currentId, selectedSampleId, mode.imageVariant) : null],
               ].map(([label, url]) => (
                 <figure key={label}>
                   <figcaption>{label}</figcaption>

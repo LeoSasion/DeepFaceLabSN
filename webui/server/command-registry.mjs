@@ -139,13 +139,13 @@ const SORT_PARAMETERS = [
 const TRAIN_PARAMETERS = [
   {
     id: "targetIterations",
-    label: "目标迭代数",
+    label: "进度估算目标",
     type: "number",
     default: 100000,
     min: 1,
     max: 100000000,
     integer: true,
-    help: "仅用于 Web 估算剩余时间，不改变 DFL 的训练停止条件。",
+    help: "仅估算进度和剩余时间；达到后仍会继续训练，需要手动安全停止。",
   },
   {
     id: "forceModelName",
@@ -502,19 +502,31 @@ function buildMergeEnvironment(profile, context) {
   });
 }
 
-async function requireFile(target, message) {
+async function requireMergeXseg(context = {}) {
+  // Guided learned/landmark masks never invoke the lazy XSeg predictor.
+  if (context.launchMode === "guided" && Number(context.parameters?.maskMode) >= 1
+      && Number(context.parameters.maskMode) < 6) return;
+  await requireDirectoryMatching(
+    path.join(PATHS.internalRoot, "model_generic_xseg"),
+    /^XSeg_256\.npy$/i,
+    "当前遮罩模式需要内置 XSeg 模型；请补齐模型，或选择 dst / learned 遮罩模式",
+    "BUNDLED_MODEL_MISSING",
+  );
+}
+
+export async function requireFile(target, message, code = "INPUT_MISSING") {
   if (!(await pathExists(target)) || !(await stat(target)).isFile()) {
-    throw new CommandValidationError(message, "INPUT_MISSING", { path: target });
+    throw new CommandValidationError(message, code, { path: target });
   }
 }
 
-async function requireDirectoryWithFiles(target, message) {
+export async function requireDirectoryWithFiles(target, message, code = "INPUT_MISSING") {
   if (!(await pathExists(target)) || !(await stat(target)).isDirectory()) {
-    throw new CommandValidationError(message, "INPUT_MISSING", { path: target });
+    throw new CommandValidationError(message, code, { path: target });
   }
   const entries = await readdir(target);
   if (!entries.some((entry) => !entry.startsWith("."))) {
-    throw new CommandValidationError(message, "INPUT_EMPTY", { path: target });
+    throw new CommandValidationError(message, code === "INPUT_MISSING" ? "INPUT_EMPTY" : code, { path: target });
   }
 }
 
@@ -528,11 +540,11 @@ async function requireNonEmptyFile(target, message) {
   }
 }
 
-async function requireDirectoryMatching(target, pattern, message) {
-  await requireDirectoryWithFiles(target, message);
+async function requireDirectoryMatching(target, pattern, message, code = "INPUT_MISSING") {
+  await requireDirectoryWithFiles(target, message, code);
   const entries = await readdir(target);
   if (!entries.some((entry) => pattern.test(entry))) {
-    throw new CommandValidationError(message, "INPUT_MISSING", { path: target });
+    throw new CommandValidationError(message, code, { path: target });
   }
 }
 
@@ -584,8 +596,8 @@ function buildDatasetUtility({
     controls: [],
     locks: locks ?? [`workspace:data_${side}_aligned`],
     async preflight() {
-      await requireFile(PATHS.python, "内置 Python 不存在");
-      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在");
+      await requireFile(PATHS.python, "内置 Python 不存在，请在启动器中修复依赖", "RUNTIME_MISSING");
+      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在，请检查项目更新", "PROJECT_INCOMPLETE");
       await requireDirectoryWithFiles(
         datasetDirectory(side),
         `${side.toUpperCase()} aligned 人脸集不存在或为空`,
@@ -697,8 +709,8 @@ function buildXsegUtility({ id, label, shortLabel, side, action, modelDirectory 
       ...(requiresModel ? [modelDirectory === "custom" ? "workspace:xseg_model" : "gpu"] : []),
     ],
     async preflight() {
-      await requireFile(PATHS.python, "内置 Python 不存在");
-      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在");
+      await requireFile(PATHS.python, "内置 Python 不存在，请在启动器中修复依赖", "RUNTIME_MISSING");
+      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在，请检查项目更新", "PROJECT_INCOMPLETE");
       await requireDirectoryWithFiles(
         datasetDirectory(side),
         `${side.toUpperCase()} aligned 人脸集不存在或为空`,
@@ -711,6 +723,7 @@ function buildXsegUtility({ id, label, shortLabel, side, action, modelDirectory 
           directory,
           /^XSeg_(?:256|data)/i,
           `${modelDirectory === "custom" ? "自定义" : "内置"} XSeg 模型不存在`,
+          modelDirectory === "custom" ? "MODEL_MISSING" : "BUNDLED_MODEL_MISSING",
         );
       }
     },
@@ -770,7 +783,7 @@ function buildCurrentTrainer(model, label, pretrainedDirectory) {
     id,
     label: `训练 ${label}`,
     shortLabel: label,
-    description: `使用 current DFL 训练 ${label}；完整 CLI 问答保留在 Web 终端。`,
+    description: `训练 ${label} 模型；需要补充设置时，会在终端提示。`,
     profile: "current",
     category: "training",
     stage: "train",
@@ -780,8 +793,8 @@ function buildCurrentTrainer(model, label, pretrainedDirectory) {
     controls: [],
     locks: ["workspace:model", "gpu"],
     async preflight() {
-      await requireFile(PATHS.python, "内置 Python 不存在");
-      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在");
+      await requireFile(PATHS.python, "内置 Python 不存在，请在启动器中修复依赖", "RUNTIME_MISSING");
+      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在，请检查项目更新", "PROJECT_INCOMPLETE");
       await requireDirectoryWithFiles(datasetDirectory("src"), "SRC aligned 人脸集不存在或为空");
       await requireDirectoryWithFiles(datasetDirectory("dst"), "DST aligned 人脸集不存在或为空");
     },
@@ -840,15 +853,17 @@ function buildModelExport(model, profile, label) {
     controls: [],
     locks: ["workspace:model", "gpu"],
     async preflight() {
-      await requireFile(PATHS.python, "内置 Python 不存在");
+      await requireFile(PATHS.python, "内置 Python 不存在，请在启动器中修复依赖", "RUNTIME_MISSING");
       await requireFile(
         profile === "legacy" ? PATHS.legacyMain : PATHS.currentMain,
-        `${profile} DeepFaceLab 入口不存在`,
+        `${profile} DeepFaceLab 入口不存在，请检查项目更新`,
+        "PROJECT_INCOMPLETE",
       );
       await requireDirectoryMatching(
         path.join(PATHS.workspaceRoot, "model"),
         new RegExp(`_${model}_`, "i"),
         `未找到 ${label} 模型`,
+        "MODEL_MISSING",
       );
     },
     build() {
@@ -890,11 +905,12 @@ function buildModelMerge(model, profile, label) {
     parameters: MERGE_PARAMETERS,
     controls: [],
     locks: ["workspace:model", "workspace:data_dst_merged", "gpu"],
-    async preflight() {
-      await requireFile(PATHS.python, "内置 Python 不存在");
+    async preflight(context = {}) {
+      await requireFile(PATHS.python, "内置 Python 不存在，请在启动器中修复依赖", "RUNTIME_MISSING");
       await requireFile(
         profile === "legacy" ? PATHS.legacyMain : PATHS.currentMain,
-        `${profile} DeepFaceLab 入口不存在`,
+        `${profile} DeepFaceLab 入口不存在，请检查项目更新`,
+        "PROJECT_INCOMPLETE",
       );
       await requireDirectoryWithFiles(path.join(PATHS.workspaceRoot, "data_dst"), "DST 视频帧不存在");
       await requireDirectoryWithFiles(datasetDirectory("dst"), "DST aligned 人脸集不存在或为空");
@@ -902,12 +918,9 @@ function buildModelMerge(model, profile, label) {
         path.join(PATHS.workspaceRoot, "model"),
         new RegExp(`_${model}_`, "i"),
         `未找到 ${label} 模型`,
+        "MODEL_MISSING",
       );
-      await requireDirectoryMatching(
-        path.join(PATHS.internalRoot, "model_generic_xseg"),
-        /^XSeg_(?:256|data)/i,
-        "内置 XSeg 模型不存在",
-      );
+      await requireMergeXseg(context);
     },
     build(context) {
       const args = [
@@ -965,8 +978,8 @@ function buildAdditionalEncode(id, label, mode, extension) {
     controls: [],
     locks: ["workspace:data_dst_merged", "workspace:result"],
     async preflight() {
-      await requireFile(PATHS.python, "内置 Python 不存在");
-      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在");
+      await requireFile(PATHS.python, "内置 Python 不存在，请在启动器中修复依赖", "RUNTIME_MISSING");
+      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在，请检查项目更新", "PROJECT_INCOMPLETE");
       if (!(await findWorkspaceVideo("data_dst"))) {
         throw new CommandValidationError("未找到 workspace/data_dst.* 参考视频", "INPUT_MISSING");
       }
@@ -1015,8 +1028,8 @@ function buildVideoCut(side) {
     controls: [],
     locks: [`workspace:data_${side}`],
     async preflight() {
-      await requireFile(PATHS.python, "内置 Python 不存在");
-      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在");
+      await requireFile(PATHS.python, "内置 Python 不存在，请在启动器中修复依赖", "RUNTIME_MISSING");
+      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在，请检查项目更新", "PROJECT_INCOMPLETE");
       if (!(await findWorkspaceVideo(`data_${side}`))) {
         throw new CommandValidationError(`未找到 ${upper} 视频`, "INPUT_MISSING");
       }
@@ -1048,6 +1061,25 @@ function buildVideoCut(side) {
 }
 
 const definitions = Object.freeze({
+  "runtime.prepare_vision": {
+    id: "runtime.prepare_vision", label: "准备视觉依赖", shortLabel: "视觉依赖",
+    description: "下载并校验提帧、切脸与角色分组需要的固定版本依赖，仅写入项目目录。",
+    profile: "current", category: "utility", stage: "clean", interactive: false,
+    parameters: [], controls: [], locks: ["runtime:vision", "gpu", "workspace:model", "workspace:data_src", "workspace:data_dst", "workspace:data_dst_merged", "workspace:result"],
+    async preflight() {
+      await requireFile(path.join(PATHS.repositoryRoot, "tools", "prepare-vision-runtime.ps1"), "视觉依赖准备脚本缺失", "PROJECT_INCOMPLETE");
+    },
+    build() { return {
+      executable: "powershell.exe",
+      args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path.join(PATHS.repositoryRoot, "tools", "prepare-vision-runtime.ps1"), "-ProjectRoot", PATHS.repositoryRoot],
+      env: buildDflEnvironment("current"),
+    }; },
+    async postflight() {
+      for (const target of [PATHS.ffmpeg, PATHS.ffprobe, path.join(PATHS.internalRoot, "vision_models", "face_recognition_sface_2021dec.onnx")]) {
+        await requireFile(target, "视觉依赖准备未完成", "RUNTIME_MISSING");
+      }
+    },
+  },
   "src.extract_frames": {
     id: "src.extract_frames",
     label: "提取 SRC 视频帧",
@@ -1062,8 +1094,8 @@ const definitions = Object.freeze({
     controls: [],
     locks: ["workspace:data_src"],
     async preflight() {
-      await requireFile(PATHS.python, "内置 Python 不存在");
-      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在");
+      await requireFile(PATHS.python, "内置 Python 不存在，请在启动器中修复依赖", "RUNTIME_MISSING");
+      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在，请检查项目更新", "PROJECT_INCOMPLETE");
       const sourceVideo = await findWorkspaceVideo("data_src");
       if (!sourceVideo) {
         throw new CommandValidationError(
@@ -1112,8 +1144,8 @@ const definitions = Object.freeze({
     controls: [],
     locks: ["workspace:data_src_aligned", "gpu"],
     async preflight() {
-      await requireFile(PATHS.python, "内置 Python 不存在");
-      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在");
+      await requireFile(PATHS.python, "内置 Python 不存在，请在启动器中修复依赖", "RUNTIME_MISSING");
+      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在，请检查项目更新", "PROJECT_INCOMPLETE");
       await requireDirectoryWithFiles(
         path.join(PATHS.workspaceRoot, "data_src"),
         "workspace/data_src 不存在或没有帧",
@@ -1162,8 +1194,8 @@ const definitions = Object.freeze({
     controls: [],
     locks: ["workspace:data_dst"],
     async preflight() {
-      await requireFile(PATHS.python, "内置 Python 不存在");
-      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在");
+      await requireFile(PATHS.python, "内置 Python 不存在，请在启动器中修复依赖", "RUNTIME_MISSING");
+      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在，请检查项目更新", "PROJECT_INCOMPLETE");
       const targetVideo = await findWorkspaceVideo("data_dst");
       if (!targetVideo) {
         throw new CommandValidationError(
@@ -1212,8 +1244,8 @@ const definitions = Object.freeze({
     controls: [],
     locks: ["workspace:data_dst_aligned", "gpu"],
     async preflight() {
-      await requireFile(PATHS.python, "内置 Python 不存在");
-      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在");
+      await requireFile(PATHS.python, "内置 Python 不存在，请在启动器中修复依赖", "RUNTIME_MISSING");
+      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在，请检查项目更新", "PROJECT_INCOMPLETE");
       await requireDirectoryWithFiles(
         path.join(PATHS.workspaceRoot, "data_dst"),
         "workspace/data_dst 不存在或没有帧",
@@ -1252,7 +1284,7 @@ const definitions = Object.freeze({
     id: "train.saehd",
     label: "训练 SAEHD",
     shortLabel: "SAEHD",
-    description: "使用 legacy DFL 训练 SAEHD，在 Web 中提供模型控制和预览。",
+    description: "训练 SAEHD 模型，可查看预览、保存模型并继续训练。",
     profile: "legacy",
     category: "training",
     stage: "train",
@@ -1262,8 +1294,8 @@ const definitions = Object.freeze({
     controls: ["save", "backup", "preview", "evaluate", "close"],
     locks: ["workspace:model", "gpu"],
     async preflight(context = {}) {
-      await requireFile(PATHS.python, "内置 Python 不存在");
-      await requireFile(PATHS.legacyMain, "legacy DeepFaceLab 入口不存在");
+      await requireFile(PATHS.python, "内置 Python 不存在，请在启动器中修复依赖", "RUNTIME_MISSING");
+      await requireFile(PATHS.legacyMain, "legacy DeepFaceLab 入口不存在，请检查项目更新", "PROJECT_INCOMPLETE");
       await requireDirectoryWithFiles(
         path.join(PATHS.workspaceRoot, "data_src", "aligned"),
         "SRC aligned 人脸集不存在或为空",
@@ -1394,8 +1426,8 @@ const definitions = Object.freeze({
     controls: [],
     locks: ["workspace:data_src_aligned"],
     async preflight() {
-      await requireFile(PATHS.python, "内置 Python 不存在");
-      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在");
+      await requireFile(PATHS.python, "内置 Python 不存在，请在启动器中修复依赖", "RUNTIME_MISSING");
+      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在，请检查项目更新", "PROJECT_INCOMPLETE");
       await requireDirectoryWithFiles(
         path.join(PATHS.workspaceRoot, "data_src", "aligned"),
         "SRC aligned 人脸集不存在或为空",
@@ -1436,8 +1468,8 @@ const definitions = Object.freeze({
     controls: [],
     locks: ["workspace:data_dst_aligned"],
     async preflight() {
-      await requireFile(PATHS.python, "内置 Python 不存在");
-      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在");
+      await requireFile(PATHS.python, "内置 Python 不存在，请在启动器中修复依赖", "RUNTIME_MISSING");
+      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在，请检查项目更新", "PROJECT_INCOMPLETE");
       await requireDirectoryWithFiles(
         path.join(PATHS.workspaceRoot, "data_dst", "aligned"),
         "DST aligned 人脸集不存在或为空",
@@ -1478,8 +1510,8 @@ const definitions = Object.freeze({
     controls: ["save", "backup", "preview", "close"],
     locks: ["workspace:xseg_model", "gpu"],
     async preflight() {
-      await requireFile(PATHS.python, "内置 Python 不存在");
-      await requireFile(PATHS.legacyMain, "legacy DeepFaceLab 入口不存在");
+      await requireFile(PATHS.python, "内置 Python 不存在，请在启动器中修复依赖", "RUNTIME_MISSING");
+      await requireFile(PATHS.legacyMain, "legacy DeepFaceLab 入口不存在，请检查项目更新", "PROJECT_INCOMPLETE");
       await requireDirectoryWithFiles(
         path.join(PATHS.workspaceRoot, "data_src", "aligned"),
         "SRC aligned 人脸集不存在或为空",
@@ -1544,8 +1576,8 @@ const definitions = Object.freeze({
     controls: [],
     locks: ["workspace:data_src_aligned", "workspace:xseg_model", "gpu"],
     async preflight() {
-      await requireFile(PATHS.python, "内置 Python 不存在");
-      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在");
+      await requireFile(PATHS.python, "内置 Python 不存在，请在启动器中修复依赖", "RUNTIME_MISSING");
+      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在，请检查项目更新", "PROJECT_INCOMPLETE");
       await requireDirectoryWithFiles(
         path.join(PATHS.workspaceRoot, "data_src", "aligned"),
         "SRC aligned 人脸集不存在或为空",
@@ -1554,6 +1586,7 @@ const definitions = Object.freeze({
         path.join(PATHS.workspaceRoot, "xseg_model"),
         /^XSeg_(?:256|data)/i,
         "XSeg 模型目录不存在或为空",
+        "MODEL_MISSING",
       );
     },
     build() {
@@ -1592,8 +1625,8 @@ const definitions = Object.freeze({
     controls: [],
     locks: ["workspace:data_dst_aligned", "workspace:xseg_model", "gpu"],
     async preflight() {
-      await requireFile(PATHS.python, "内置 Python 不存在");
-      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在");
+      await requireFile(PATHS.python, "内置 Python 不存在，请在启动器中修复依赖", "RUNTIME_MISSING");
+      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在，请检查项目更新", "PROJECT_INCOMPLETE");
       await requireDirectoryWithFiles(
         path.join(PATHS.workspaceRoot, "data_dst", "aligned"),
         "DST aligned 人脸集不存在或为空",
@@ -1602,6 +1635,7 @@ const definitions = Object.freeze({
         path.join(PATHS.workspaceRoot, "xseg_model"),
         /^XSeg_(?:256|data)/i,
         "XSeg 模型目录不存在或为空",
+        "MODEL_MISSING",
       );
     },
     build() {
@@ -1639,9 +1673,9 @@ const definitions = Object.freeze({
     parameters: MERGE_PARAMETERS,
     controls: [],
     locks: ["workspace:model", "workspace:data_dst_merged", "gpu"],
-    async preflight() {
-      await requireFile(PATHS.python, "内置 Python 不存在");
-      await requireFile(PATHS.legacyMain, "legacy DeepFaceLab 入口不存在");
+    async preflight(context = {}) {
+      await requireFile(PATHS.python, "内置 Python 不存在，请在启动器中修复依赖", "RUNTIME_MISSING");
+      await requireFile(PATHS.legacyMain, "legacy DeepFaceLab 入口不存在，请检查项目更新", "PROJECT_INCOMPLETE");
       await requireDirectoryWithFiles(
         path.join(PATHS.workspaceRoot, "data_dst"),
         "DST 视频帧目录不存在或为空",
@@ -1653,11 +1687,9 @@ const definitions = Object.freeze({
       await requireDirectoryWithFiles(
         path.join(PATHS.workspaceRoot, "model"),
         "SAEHD 模型目录不存在或为空",
+        "MODEL_MISSING",
       );
-      await requireDirectoryWithFiles(
-        path.join(PATHS.internalRoot, "model_generic_xseg"),
-        "内置 XSeg 模型目录不存在或为空",
-      );
+      await requireMergeXseg(context);
     },
     build(context) {
       const args = [
@@ -1723,11 +1755,12 @@ const definitions = Object.freeze({
     controls: [],
     locks: ["workspace:data_dst_merged", "workspace:result"],
     async preflight() {
-      await requireFile(PATHS.python, "内置 Python 不存在");
-      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在");
+      await requireFile(PATHS.python, "内置 Python 不存在，请在启动器中修复依赖", "RUNTIME_MISSING");
+      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在，请检查项目更新", "PROJECT_INCOMPLETE");
       await requireFile(
         path.join(PATHS.serverDirectory, "encode-mp4.mjs"),
         "Web Runtime 编码器入口不存在",
+        "PROJECT_INCOMPLETE",
       );
       const targetVideo = await findWorkspaceVideo("data_dst");
       if (!targetVideo) {
@@ -1813,8 +1846,8 @@ const definitions = Object.freeze({
     controls: [],
     locks: ["workspace:data_dst"],
     async preflight() {
-      await requireFile(PATHS.python, "内置 Python 不存在");
-      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在");
+      await requireFile(PATHS.python, "内置 Python 不存在，请在启动器中修复依赖", "RUNTIME_MISSING");
+      await requireFile(PATHS.currentMain, "current DeepFaceLab 入口不存在，请检查项目更新", "PROJECT_INCOMPLETE");
       await requireDirectoryWithFiles(
         path.join(PATHS.workspaceRoot, "data_dst"),
         "DST 图片帧不存在或为空",

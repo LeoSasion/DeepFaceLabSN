@@ -69,8 +69,8 @@ class WebTrainerBridge:
             return
         try:
             self.preview_path.parent.mkdir(parents=True, exist_ok=True)
-            preview_rgb = np.clip(previews[0][1], 0, 1)
-            preview_bgr = (preview_rgb[:, :, ::-1] * 255).astype(np.uint8)
+            # DFL samples and model previews already use OpenCV's BGR order.
+            preview_bgr = (np.clip(previews[0][1], 0, 1) * 255).astype(np.uint8)
             success, encoded = cv2.imencode('.png', preview_bgr)
             if not success:
                 return
@@ -330,6 +330,10 @@ def trainerThread (s2c, c2s, e,
 
                 if debug:
                     time.sleep(0.005)
+                elif is_reached_goal:
+                    # Keep Web controls responsive without spinning a CPU core
+                    # while a completed model waits for save/close actions.
+                    time.sleep(0.05)
 
                 while not s2c.empty():
                     input = s2c.get()

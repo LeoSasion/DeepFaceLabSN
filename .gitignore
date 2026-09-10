@@ -5,6 +5,7 @@ _internal/doc/
 _internal/EbSynth/
 _internal/ffmpeg/
 _internal/model_generic_xseg/
+_internal/vision_models/
 _internal/node/
 _internal/installers/*
 !_internal/installers/README.md

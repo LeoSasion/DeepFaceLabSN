@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { recordExport } from "./export-history.mjs";
 import { appendFile, mkdir, open, readdir, rename, stat } from "node:fs/promises";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
@@ -430,6 +431,10 @@ export class JobManager extends EventEmitter {
       : exitCode === 0 && !job.error
         ? "succeeded"
         : "failed";
+    try { await recordExport(job); }
+    catch (error) {
+      this.record(job, "terminal.output", { data: `\r\n[WEB] 导出记录保存失败：${error.message}\r\n` });
+    }
     if (job.previewTimer) clearInterval(job.previewTimer);
     job.previewTimer = null;
     if (job.stopTimer) clearTimeout(job.stopTimer);

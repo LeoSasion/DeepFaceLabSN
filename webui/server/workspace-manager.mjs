@@ -19,6 +19,8 @@ import { Transform } from "node:stream";
 import { promisify } from "node:util";
 import { PATHS, assertWithin, pathExists } from "./paths.mjs";
 import { inspectStorage } from "./system-diagnostics.mjs";
+import { listExportHistory } from "./export-history.mjs";
+import { inspectRoleLabels } from "./role-assignment-manager.mjs";
 
 const execFileAsync = promisify(execFile);
 const VIDEO_EXTENSIONS = new Set([".avi", ".mkv", ".mov", ".mp4", ".m4v", ".webm"]);
@@ -90,8 +92,15 @@ async function findMaterial(side) {
     ));
   if (!entry) return null;
   const target = path.join(PATHS.workspaceRoot, entry.name);
+  return describeVideo(target);
+}
+
+const videoMetadataCache = new Map();
+async function describeVideo(target) {
   const material = await describeFile(target);
   if (!material || !(await pathExists(PATHS.ffprobe))) return material;
+  const key = `${target}:${material.bytes}:${material.modifiedAt}`;
+  if (videoMetadataCache.has(key)) return videoMetadataCache.get(key);
   try {
     const { stdout } = await execFileAsync(PATHS.ffprobe, [
       "-v",
@@ -104,13 +113,16 @@ async function findMaterial(side) {
     ], { windowsHide: true, timeout: 15000, maxBuffer: 1024 * 1024 });
     const probe = JSON.parse(stdout);
     const video = probe.streams?.find((stream) => stream.codec_type === "video");
-    return {
+    const result = {
       ...material,
       durationSeconds: Number(probe.format?.duration) || null,
       width: Number(video?.width) || null,
       height: Number(video?.height) || null,
       frameRate: video?.avg_frame_rate ?? null,
     };
+    if (videoMetadataCache.size >= 24) videoMetadataCache.clear();
+    videoMetadataCache.set(key, result);
+    return result;
   } catch {
     return material;
   }
@@ -301,55 +313,44 @@ export async function restoreWorkspaceMaterial(side, token) {
   };
 }
 
-async function discoverModels() {
-  const modelDirectory = path.join(PATHS.workspaceRoot, "model");
-  const xsegDirectory = path.join(PATHS.workspaceRoot, "xseg_model");
+export async function discoverModels(workspaceRoot = PATHS.workspaceRoot) {
+  const modelDirectory = path.join(workspaceRoot, "model");
+  const xsegDirectory = path.join(workspaceRoot, "xseg_model");
   const [modelStats, saehdStats, xsegStats] = await Promise.all([
     directFileStats(modelDirectory, (name) => /_(?:SAEHD|ME|AMP|Q384|Q512)_/i.test(name)),
     directFileStats(modelDirectory, (name) => /_SAEHD_/i.test(name)),
-    directFileStats(xsegDirectory, (name) => !/\.(?:bat|cmd|ps1|txt)$/i.test(name)),
+    directFileStats(xsegDirectory, (name) => /^XSeg_\d+\.npy$/i.test(name)),
   ]);
-  const entries = (await pathExists(modelDirectory))
-    ? await readdir(modelDirectory, { withFileTypes: true })
-    : [];
   const grouped = new Map();
-  for (const entry of entries) {
-    if (!entry.isFile()) continue;
-    const match = entry.name.match(/^(.+)_(SAEHD|ME|AMP|Q384|Q512)_/i);
-    if (!match) continue;
-    const name = match[1];
-    const type = match[2].toUpperCase();
-    const key = `${type}:${name}`;
-    const current = grouped.get(key) ?? {
-      name,
-      type,
-      fileCount: 0,
-      bytes: 0,
-      modifiedAt: null,
-      files: [],
-    };
-    const fileStat = await stat(path.join(modelDirectory, entry.name));
-    current.fileCount += 1;
-    current.bytes += fileStat.size;
-    current.files.push(entry.name);
-    current.modifiedAt = !current.modifiedAt || fileStat.mtime.toISOString() > current.modifiedAt
-      ? fileStat.mtime.toISOString()
-      : current.modifiedAt;
-    grouped.set(key, current);
-  }
+  await Promise.all([
+    [modelDirectory, /^(.+)_(SAEHD|ME|AMP|Q384|Q512)_/i],
+    [xsegDirectory, /^(.+)_(XSeg)_/i],
+  ].map(async ([directory, pattern]) => {
+    const entries = await pathExists(directory) ? await readdir(directory, { withFileTypes: true }) : [];
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const match = entry.name.match(pattern);
+      if (!match) continue;
+      const name = match[1];
+      const type = match[2].toUpperCase() === "XSEG" ? "XSeg" : match[2].toUpperCase();
+      const key = `${type}:${name}`;
+      const current = grouped.get(key) ?? {
+        name, type, fileCount: 0, bytes: 0, modifiedAt: null, files: [], ready: false,
+      };
+      const fileStat = await stat(path.join(directory, entry.name));
+      current.fileCount += 1;
+      current.bytes += fileStat.size;
+      current.files.push(entry.name);
+      if (/_data\.dat$/i.test(entry.name) && fileStat.size > 0) current.ready = true;
+      current.modifiedAt = !current.modifiedAt || fileStat.mtime.toISOString() > current.modifiedAt
+        ? fileStat.mtime.toISOString() : current.modifiedAt;
+      grouped.set(key, current);
+    }
+  }));
   const models = [...grouped.values()].sort((a, b) => (
     (b.modifiedAt ?? "").localeCompare(a.modifiedAt ?? "")
   ));
-  if (xsegStats.count) {
-    models.push({
-      name: "xseg_model",
-      type: "XSeg",
-      fileCount: xsegStats.count,
-      bytes: xsegStats.bytes,
-      modifiedAt: xsegStats.modifiedAt,
-    });
-  }
-  return { models, modelStats, saehdStats, xsegStats };
+  return { models, modelStats, saehdStats, xsegStats: xsegStats.bytes > 0 ? xsegStats : { ...xsegStats, count: 0 } };
 }
 
 export async function inspectExportReadiness() {
@@ -490,7 +491,7 @@ export async function inspectWorkspace() {
     directFileStats(path.join(PATHS.workspaceRoot, "data_dst", "merged")),
     directFileStats(path.join(PATHS.workspaceRoot, "data_dst", "merged_mask")),
     discoverModels(),
-    Promise.all(Object.values(ARTIFACTS).map(describeFile)),
+    Promise.all(Object.values(ARTIFACTS).map(describeVideo)),
     inspectStorage(PATHS.workspaceRoot).catch((error) => ({
       ready: null,
       error: error?.code ?? "STORAGE_UNAVAILABLE",
@@ -499,6 +500,8 @@ export async function inspectWorkspace() {
   ]);
   return {
     root: PATHS.workspaceRoot,
+    exportHistory: await listExportHistory(),
+    roles: await inspectRoleLabels(),
     materials: { src: srcMaterial, dst: dstMaterial },
     datasets: {
       srcFrames,

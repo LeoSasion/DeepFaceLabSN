@@ -28,6 +28,8 @@ import {
 import { runtimeApi } from "../runtime/api.js";
 import { useI18n } from "../i18n.jsx";
 import { LoadingProgress } from "./ProgressFeedback.jsx";
+import { ProjectManagerPanel } from "./ProjectManagerPanel.jsx";
+import { jobPresentation, isFailedJob } from "../domain/job-presentation.js";
 
 const categoryLabels = {
   dataset: "数据集工具",
@@ -120,6 +122,7 @@ export function CommandCenterView({
   filter,
   onOpenCommand,
   aside,
+  actions,
 }) {
   const { t } = useI18n();
   const visibleCommands = useMemo(
@@ -135,6 +138,7 @@ export function CommandCenterView({
         </div>
         <span className="operation-count">{t("{count} 个已接入功能", { count: visibleCommands.length })}</span>
       </header>
+      {actions}
       <div className={`operation-layout ${aside ? "has-aside" : ""}`}>
         <CommandRows commands={visibleCommands} onOpenCommand={onOpenCommand} />
         {aside}
@@ -880,6 +884,7 @@ export function DatasetView({
   onError,
   onNotice,
   editMasks = false,
+  onOpenRoles,
   onSideChange,
   onMaskDirtyChange,
 }) {
@@ -994,6 +999,7 @@ export function DatasetView({
 
   useEffect(() => {
     if (!focusItem || !focusNonce || !assets || assets.side !== side) return;
+    if (focusItem.recovery) { setDatasetMode("recovery"); onFocusConsumed?.(); return; }
     setAssets((current) => {
       if (!current || current.items.some((item) => item.name === focusItem.name)) return current;
       return { ...current, items: [focusItem, ...current.items] };
@@ -1056,6 +1062,9 @@ export function DatasetView({
     if (result) setMaskDirty(false);
   };
   const selectAsset = (item) => {
+    // Re-selecting the same file must preserve its annotation and unsaved draft.
+    // Resetting here would cancel the reader without changing its dependencies.
+    if (datasetAssetKey(item) === selectedKey) return;
     if (!confirmDiscardMask()) return;
     resetAnnotation();
     if (datasetMode === "recovery") {
@@ -1242,6 +1251,7 @@ export function DatasetView({
       {!editMasks && (
         <div className="dataset-command-strip" role="toolbar" aria-label={t("数据集操作")}>
           <div className="dataset-command-primary">
+            {onOpenRoles ? <button type="button" className="dataset-person-entry" onClick={() => onOpenRoles(side)}><IconPhoto size={16}/>{t("选择人物")}</button> : null}
             {datasetMode === "workspace" ? (
               <>
                 {sideCommands.slice(0, 6).map((command) => (
@@ -1461,45 +1471,13 @@ export function ModelSummaryAside({ workspace }) {
   );
 }
 
-export function SettingsView({ health, jobs, onRetry, onError, onNotice }) {
+export function SettingsView({ health, jobs, onRetry, onError, onNotice, onSwitchProject }) {
   const { language, t } = useI18n();
-  const [projects, setProjects] = useState(null);
-  const [projectName, setProjectName] = useState("");
-  const [projectId, setProjectId] = useState("");
-  const [projectBusy, setProjectBusy] = useState(null);
   const [retryBusy, setRetryBusy] = useState(null);
   const [diagnosticBusy, setDiagnosticBusy] = useState(false);
   const [diagnosticMeta, setDiagnosticMeta] = useState(null);
-  useEffect(() => {
-    let cancelled = false;
-    void runtimeApi.projects().then((value) => { if (!cancelled) setProjects(value); }).catch(onError);
-    return () => { cancelled = true; };
-  }, [onError]);
   const recoverable = jobs.filter((job) => terminalStates.has(job.state));
   const activeJobCount = jobs.filter((job) => ["queued", "starting", "running", "waiting_input", "stopping"].includes(job.state)).length;
-  const createProject = async () => {
-    setProjectBusy("create");
-    try {
-      await runtimeApi.createProject({ name: projectName, id: projectId });
-      setProjects(await runtimeApi.projects());
-      setProjectName("");
-      setProjectId("");
-      onNotice(t("新项目已创建；可在任务停止后切换。"));
-    } catch (error) { onError(error); } finally { setProjectBusy(null); }
-  };
-  const activateProject = async (id, name) => {
-    if (!window.confirm(t("切换到项目“{name}”吗？本地服务会重启，当前页面随后自动刷新。", { name }))) return;
-    setProjectBusy("activate");
-    try {
-      const result = await runtimeApi.activateProject(id);
-      if (!result.restartRequired) {
-        setProjectBusy(null);
-        return;
-      }
-      onNotice(t("正在切换项目并重启本地服务…"));
-      window.setTimeout(() => window.location.reload(), 1600);
-    } catch (error) { setProjectBusy(null); onError(error); }
-  };
   const exportDiagnostics = async () => {
     setDiagnosticBusy(true);
     try {
@@ -1534,23 +1512,16 @@ export function SettingsView({ health, jobs, onRetry, onError, onNotice }) {
         </div>
         <span className="operation-count">{health?.loopbackOnly ? t("仅本机访问") : t("状态未知")}</span>
       </header>
-      {!projects ? (
-        <LoadingProgress compact label={t("正在读取受管项目…")} detail={t("正在确认当前工作区与切换安全性")} operationKey="settings-projects-load" />
-      ) : projectBusy ? (
-        <LoadingProgress
-          compact
-          tone={projectBusy === "activate" ? "amber" : "green"}
-          label={projectBusy === "activate" ? t("正在切换项目并重启本地服务…") : t("正在创建受管项目…")}
-          detail={projectBusy === "activate" ? t("当前页面会在服务恢复后自动刷新") : t("新项目只会写入受管工作区目录")}
-          operationKey={`settings-project:${projectBusy}`}
-        />
-      ) : retryBusy ? (
-        <LoadingProgress compact label={t("正在从历史记录创建安全副本…")} detail={retryBusy} operationKey="settings-job-retry" />
-      ) : null}
+      {retryBusy ? <LoadingProgress compact label={t("正在从历史记录创建安全副本…")} detail={retryBusy} operationKey="settings-job-retry"/> : null}
+      <p role="note">{t("缺少 Python 或运行库：停止 WebUI 后，在项目启动器中选择“修复依赖”。缺少 DeepFaceLab 入口：检查项目更新；缺少内置模型：补齐整合包资源。")}</p>
       <div className="settings-runtime">
         {["current", "legacy"].map((profile) => (
           <section key={profile}>
             <span>{profileLabel(profile)}</span>
+            <small>{!health?.runtime ? t("未检测")
+              : !health.runtime.pythonAvailable ? t("缺少 Python，请修复依赖")
+                : !health.runtime[`${profile}Available`] ? t("缺少项目入口，请检查项目更新")
+                  : t("入口文件存在；运行能力需由启动器进一步检查")}</small>
             <strong>{health?.runtime?.[profile]?.dflRoot ?? t("未检测")}</strong>
             <code>{health?.runtime?.[profile]?.python ?? t("Python 未检测")}</code>
           </section>
@@ -1584,31 +1555,7 @@ export function SettingsView({ health, jobs, onRetry, onError, onNotice }) {
           <IconDownload size={15} />{diagnosticBusy ? t("正在生成…") : t("导出诊断摘要")}
         </button>
       </section>
-      <section className="project-manager-section">
-        <header>
-          <div><IconBoxModel2 size={19} /><div><h3>{t("受管项目工作区")}</h3><p>{t("每个项目独立保存素材、模型、任务日志、诊断与恢复记录。")}</p></div></div>
-          <span className={activeJobCount ? "is-warning" : "is-ok"}>{activeJobCount ? t("{count} 个任务阻止切换", { count: activeJobCount }) : t("可以安全切换")}</span>
-        </header>
-        <div className="project-manager-grid">
-          <div className="project-list">
-            {projects?.projects.map((project) => (
-              <article className={project.active ? "is-active" : ""} key={project.id}>
-                <span>{project.active ? <IconCheck size={15} /> : <IconBoxModel2 size={15} />}</span>
-                <div><strong>{project.name}</strong><small>{project.id} · {project.managed ? t("受管目录") : t("兼容默认工作区")}</small></div>
-                <button className="button secondary" type="button" disabled={project.active || activeJobCount > 0 || projectBusy} onClick={() => void activateProject(project.id, project.name)}>{project.active ? t("当前") : t("切换")}</button>
-              </article>
-            ))}
-            {!projects ? <div className="operation-empty">{t("项目清单准备中")}</div> : null}
-          </div>
-          <form className="project-create-form" onSubmit={(event) => { event.preventDefault(); void createProject(); }}>
-            <strong>{t("新建项目")}</strong>
-            <label><span>{t("项目名称")}</span><input value={projectName} maxLength={64} onChange={(event) => setProjectName(event.target.value)} placeholder={t("例如：访谈片 A")}/></label>
-            <label><span>{t("项目标识")}</span><input value={projectId} maxLength={48} onChange={(event) => setProjectId(event.target.value)} placeholder="interview-a" /></label>
-            <small>{t("仅在仓库的 workspaces 目录中创建，不接受任意磁盘路径。创建不会自动切换。")}</small>
-            <button className="button primary" type="submit" disabled={!projectName.trim() || !projectId.trim() || projectBusy}>{projectBusy ? t("处理中…") : t("创建受管项目")}</button>
-          </form>
-        </div>
-      </section>
+      <ProjectManagerPanel health={health} activeJobCount={activeJobCount} onSwitchProject={onSwitchProject} onNotice={onNotice}/>
       <section className="recovery-section">
         <header>
           <div>
@@ -1621,11 +1568,11 @@ export function SettingsView({ health, jobs, onRetry, onError, onNotice }) {
           {recoverable.slice(0, 20).map((job) => (
             <div key={job.id}>
               <span className={`recovery-state is-${job.state}`}>
-                {job.state === "orphaned" ? <IconAlertTriangle size={15} /> : <IconCheck size={15} />}
+                {isFailedJob(job) || jobPresentation(job).tone === "amber" ? <IconAlertTriangle size={15} /> : <IconCheck size={15} />}
               </span>
               <div>
                 <strong>{job.label}</strong>
-                <small>{job.id} · {job.state}</small>
+                <small>{job.id} · {t(jobPresentation(job).label)}</small>
               </div>
               <button
                 className="button secondary"
@@ -1641,7 +1588,7 @@ export function SettingsView({ health, jobs, onRetry, onError, onNotice }) {
                     setRetryBusy(null);
                   }
                 }}
-                disabled={Boolean(retryBusy) || Boolean(projectBusy)}
+                disabled={Boolean(retryBusy)}
               >
                 <IconRefresh size={15} />{t("重试")}
               </button>

@@ -10,7 +10,7 @@ import {
   stat,
   unlink,
 } from "node:fs/promises";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -547,6 +547,64 @@ export async function buildAlignedSimilarityGroups(
   };
 }
 
+export async function roleDatasetSnapshot(side) {
+  const directory = await verifyAlignedDirectory(side);
+  if (!directory) return { names: [], fingerprint: createHash("sha256").update("[]").digest("hex") };
+  const entries = (await readdir(directory, { withFileTypes: true }))
+    .filter((entry) => IMAGE_NAME.test(entry.name)).sort((a, b) => a.name.localeCompare(b.name, "en"));
+  const records = [];
+  for (const entry of entries) {
+    const target = await resolveExistingAlignedImage(side, encodeURIComponent(entry.name));
+    const info = await lstat(target, { bigint: true });
+    records.push([entry.name, String(info.size), String(info.mtimeNs), String(info.ctimeNs)]);
+  }
+  return { names: records.map((record) => record[0]),
+    fingerprint: createHash("sha256").update(JSON.stringify(records)).digest("hex") };
+}
+
+export async function buildAlignedRoleGroups(side, { threshold = 0.5, signal, onProgress } = {}) {
+  const value = Number(threshold);
+  if (!Number.isFinite(value) || value < 0.3 || value > 0.85) {
+    throw new AssetError("角色相似阈值需要在 0.30–0.85 之间", "ROLE_THRESHOLD_INVALID");
+  }
+  const before = await roleDatasetSnapshot(side);
+  const directory = await verifyAlignedDirectory(side);
+  const result = directory ? await runAssetHelper([
+    "roles", "--directory", directory, "--threshold", String(value), "--limit", "2000",
+  ], undefined, { signal, onProgress, timeoutMs: 600_000 }) : {
+    total: 0, analyzedCount: 0, invalidCount: 0, invalid: [], groupCount: 0, groups: [], truncated: false,
+  };
+  const after = await roleDatasetSnapshot(side);
+  if (before.fingerprint !== after.fingerprint) {
+    throw new AssetError("分析期间素材已变化，请重新分析", "ROLE_DATASET_CHANGED", 409);
+  }
+  return { ...result, side, fingerprint: after.fingerprint,
+    groups: result.groups.map((group) => ({ ...group, members: group.members.map((member) => ({
+      ...member, imageUrl: `/api/assets/${side}/aligned/${encodeURIComponent(member.name)}`,
+    })) })) };
+}
+
+export async function retainAlignedRoles(side, { names, fingerprint } = {}) {
+  if (!Array.isArray(names) || !names.length || names.length > 2000
+      || names.some((name) => typeof name !== "string" || !IMAGE_NAME.test(name))) {
+    throw new AssetError("请先选择要保留的角色图片（最多 2000 张）", "ROLE_SELECTION_INVALID");
+  }
+  const snapshot = await roleDatasetSnapshot(side);
+  if (snapshot.names.length > 2000 || snapshot.fingerprint !== fingerprint) {
+    throw new AssetError("素材已变化或超过单次分析上限，请重新分批分析", "ROLE_DATASET_CHANGED", 409);
+  }
+  const available = new Set(snapshot.names);
+  if (names.some((name) => !available.has(name))) {
+    throw new AssetError("所选图片不属于当前数据集", "ROLE_SELECTION_INVALID");
+  }
+  const keep = new Set(names);
+  const excluded = snapshot.names.filter((name) => !keep.has(name));
+  const result = excluded.length
+    ? await quarantineAlignedImages(side, excluded, { maximum: 2000 })
+    : { side, count: 0, token: null, recoverable: true };
+  return { ...result, keptCount: keep.size };
+}
+
 export async function buildAlignedPoseProbe(side) {
   const directory = await verifyAlignedDirectory(side);
   if (!directory) {
@@ -839,9 +897,9 @@ export async function quarantineAlignedImage(side, encodedName) {
   return { side, token, name: path.basename(target), recoverable: true };
 }
 
-export async function quarantineAlignedImages(side, names) {
-  if (!Array.isArray(names) || !names.length || names.length > 500) {
-    throw new AssetError("批量隔离需要 1–500 个文件", "QUARANTINE_BATCH_INVALID");
+export async function quarantineAlignedImages(side, names, { maximum = 500 } = {}) {
+  if (!Array.isArray(names) || !names.length || names.length > maximum) {
+    throw new AssetError(`批量隔离需要 1–${maximum} 个文件`, "QUARANTINE_BATCH_INVALID");
   }
   const uniqueNames = [...new Set(names.map((name) => String(name)))];
   const targets = await Promise.all(uniqueNames.map((name) => (

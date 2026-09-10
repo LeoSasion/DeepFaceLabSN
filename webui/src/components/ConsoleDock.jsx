@@ -19,6 +19,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { useI18n } from "../i18n.jsx";
+import { jobPresentation } from "../domain/job-presentation.js";
 import {
   findAdjacentTerminalJobId,
   isTerminalSession,
@@ -39,29 +40,11 @@ function readHiddenTerminalJobIds() {
   }
 }
 
-const stateLabels = {
-  queued: "排队中",
-  starting: "启动中",
-  running: "运行中",
-  waiting_input: "等待输入",
-  stopping: "安全停止中",
-  succeeded: "已完成",
-  failed: "失败",
-  cancelled: "已停止",
-  orphaned: "连接已丢失",
-};
-
 const interactiveStates = new Set(["starting", "running", "waiting_input"]);
 const progressingStates = new Set(["queued", "starting", "running", "stopping"]);
 
 function jobStateLabel(job) {
-  if (job?.state === "cancelled" && job.stopReason === "safe-stop-before-start") {
-    return "启动前已停止";
-  }
-  if (job?.state === "cancelled" && job.stopReason?.startsWith("safe-stop")) {
-    return "已安全停止";
-  }
-  return stateLabels[job?.state] ?? job?.state;
+  return jobPresentation(job).label;
 }
 
 function formatClock(value, language) {
@@ -331,7 +314,7 @@ function ConsoleDockComponent({
         <ConnectionBadge serviceState={serviceState} socketState={socketState} hasJob={Boolean(selectedJob)} />
         {selectedJob ? (
           <>
-            <span className={`job-state-badge is-${selectedJob.state}`}>
+            <span className={`job-state-badge is-${selectedJob.state} tone-${jobPresentation(selectedJob).tone}`}>
               <i aria-hidden="true" />
               {t(jobStateLabel(selectedJob))}
             </span>
@@ -365,7 +348,7 @@ function ConsoleDockComponent({
                     aria-selected={selectedJob?.id === job.id}
                     onClick={() => onSelectJob(job.id)}
                   >
-                    <i className={`session-dot is-${job.state}`} aria-hidden="true" />
+                    <i className={`session-dot is-${job.state} tone-${jobPresentation(job).tone}`} aria-hidden="true" />
                     <span>{job.shortLabel ?? job.label}</span>
                     <small>{t(jobStateLabel(job))}</small>
                   </button>

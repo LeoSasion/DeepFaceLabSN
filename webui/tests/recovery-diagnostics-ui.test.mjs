@@ -4,12 +4,14 @@ import test from "node:test";
 
 test("workspace recovery UI lists sanitized archive metadata and refreshes after restore", async () => {
   const source = await readFile(new URL("../src/components/WorkspaceView.jsx", import.meta.url), "utf8");
-  assert.match(source, /runtimeApi\.materialArchives\(side\)/);
-  assert.match(source, /runtimeApi\.restoreMaterialArchive\(side, archive\.token\)/);
+  assert.match(source, /runtimeApi\.materialArchives\("src"\)/);
+  assert.match(source, /runtimeApi\.materialArchives\("dst"\)/);
+  assert.match(source, /runtimeApi\.restoreMaterialArchive\(action\.side, action\.archive\.token\)/);
   assert.match(source, /archive\.archivedAt/);
   assert.match(source, /archiveFormat\(archive\).*formatBytes\(archive\.bytes\)/s);
-  assert.match(source, /window\.confirm/);
-  assert.match(source, /Promise\.all\(\[refresh\(\), refreshArchives\(side\)\]\)/);
+  assert.doesNotMatch(source, /window\.confirm/);
+  assert.match(source, /aria-labelledby="workspace-action-title"/);
+  assert.match(source, /await refreshEverything\(\)/);
   assert.doesNotMatch(source, /archive\.(?:path|directory|archivedPath)/);
   assert.doesNotMatch(source, /material\.path/);
 });

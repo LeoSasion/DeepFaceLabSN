@@ -121,6 +121,38 @@ test("DeepFaceLabSN browser E2E", { timeout: 240000 }, async (suite) => {
     }
   });
 
+  await suite.test("重复选择当前人脸保留预览与未保存的 XSeg 标注", async (t) => {
+    const { context, page } = await openApp(browser);
+    try {
+      await page.getByRole("button", { name: "SRC 数据", exact: true }).click();
+      await page.getByRole("heading", { name: "SRC 数据集", exact: true }).waitFor();
+      const first = page.locator(".asset-thumbnail.is-active").first();
+      if (!await first.count()) {
+        await page.locator(".asset-thumbnail.is-active, .asset-browser-empty").first().waitFor();
+        if (!await first.count()) return t.skip("requires an aligned SRC image");
+      }
+      await page.locator(".asset-preview-canvas").waitFor();
+      await first.click();
+      await page.locator(".asset-preview-canvas").waitFor();
+      assert.equal(await page.locator(".asset-detail-loading").count(), 0);
+
+      await page.getByRole("button", { name: "XSeg 编辑", exact: true }).click();
+      const canvas = page.locator(".annotation-canvas");
+      await canvas.waitFor();
+      const annotation = await canvas.getAttribute("aria-label");
+      const box = await canvas.boundingBox();
+      await canvas.click({ position: { x: box.width / 2, y: box.height / 2 } });
+      await page.getByText("1 点待闭合", { exact: true }).waitFor();
+      let askedToDiscard = false;
+      page.on("dialog", async dialog => { askedToDiscard = true; await dialog.dismiss(); });
+      await page.locator(".asset-thumbnail.is-active").click();
+      assert.equal(await canvas.getAttribute("aria-label"), annotation);
+      await page.getByText("1 点待闭合", { exact: true }).waitFor();
+      assert.equal(askedToDiscard, false);
+      // The draft remains in memory only; closing this context never writes JPG.
+    } finally { await context.close(); }
+  });
+
   await suite.test("真实 CLI 输入与 SAEHD 保存式停止", { skip: !mutating }, async () => {
     const { context, page } = await openApp(browser);
     try {

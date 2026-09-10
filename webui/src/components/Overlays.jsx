@@ -1,3 +1,5 @@
+import { preflightRecovery } from "../domain/preflight-recovery.js";
+import { commandModelFamily, createTaskConfiguration, displayWorkspacePath, modelNameIssue, searchTaskCommands, taskModels, taskOutputLocations } from "../domain/task-configuration.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   IconAlertTriangle,
@@ -16,9 +18,11 @@ import { taskTypes } from "../data/dashboard.js";
 import { useI18n } from "../i18n.jsx";
 import { LoadingProgress } from "./ProgressFeedback.jsx";
 
-function useDialogFocus(open, onClose) {
+export function useDialogFocus(open, onClose) {
   const dialogRef = useRef(null);
   const initialFocusRef = useRef(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
 
   useEffect(() => {
     if (!open) return undefined;
@@ -30,20 +34,23 @@ function useDialogFocus(open, onClose) {
     const handleKeyDown = (event) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        closeRef.current();
         return;
       }
 
       if (event.key !== "Tab" || !dialog) return;
 
       const focusable = [...dialog.querySelectorAll(
-        "button:not(:disabled), select:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex='-1'])",
-      )];
-      if (!focusable.length) return;
+        "button:not(:disabled), select:not(:disabled), input:not(:disabled), textarea:not(:disabled), a[href], summary, [tabindex]:not([tabindex='-1'])",
+      )].filter(element => element.getClientRects().length && !element.closest('[hidden], [inert]'));
+      if (!focusable.length) { event.preventDefault(); return; }
 
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
+      if (!dialog.contains(document.activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && document.activeElement === first) {
         event.preventDefault();
         last.focus();
       } else if (!event.shiftKey && document.activeElement === last) {
@@ -57,38 +64,9 @@ function useDialogFocus(open, onClose) {
       document.removeEventListener("keydown", handleKeyDown);
       previousFocus?.focus();
     };
-  }, [onClose, open]);
+  }, [open]);
 
   return { dialogRef, initialFocusRef };
-}
-
-function preflightRecovery(error, command, t) {
-  if (!error || !command) return null;
-  if (["PARAMETER_INVALID", "PARAMETERS_INVALID", "PARAMETER_NOT_ALLOWED"].includes(error.code)) {
-    return { target: "parameters", label: t("返回修改参数") };
-  }
-  if (error.code === "XSEG_LABELS_MISSING") {
-    return { target: "xseg", label: t("打开 XSeg 标注") };
-  }
-  if (error.code === "RESOURCE_LOCKED") {
-    return { target: "console", label: t("查看占用任务") };
-  }
-  if (["INPUT_MISSING", "INPUT_EMPTY", "OUTPUT_MISSING", "OUTPUT_EMPTY"].includes(error.code)) {
-    const targetByStage = {
-      material: ["workspace", "打开工作区导入素材"],
-      frames: ["workspace", "打开工作区导入素材"],
-      faces: ["frames", "先提取视频帧"],
-      sort: ["faces", "检查 aligned 人脸"],
-      mask: ["xseg", "打开 XSeg 标注"],
-      train: ["faces", "检查 aligned 人脸"],
-      training: ["faces", "检查 aligned 人脸"],
-      merge: ["training", "检查训练模型"],
-      encode: ["merge", "先完成模型合成"],
-    };
-    const [target, label] = targetByStage[command.stage] ?? ["workspace", "检查工作区素材"];
-    return { target, label: t(label) };
-  }
-  return { target: "workspace", label: t("检查工作区状态") };
 }
 
 export function Toast({ message, tone = "success", onDismiss }) {
@@ -116,14 +94,28 @@ export function NewTaskDialog({
   onResolvePreflight,
   onClose,
   onCreate,
+  workspace,
+  telemetry,
+  initialParameters,
+  recommendedCommandId,
 }) {
   const { t } = useI18n();
-  const { dialogRef, initialFocusRef } = useDialogFocus(open, onClose);
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const { dialogRef, initialFocusRef } = useDialogFocus(open, () => {
+    if (!submittingRef.current) onClose();
+  });
+  const stepPanelRef = useRef(null);
+  const preflightRef = useRef(onPreflight);
+  preflightRef.current = onPreflight;
   const [step, setStep] = useState(1);
   const [parameters, setParameters] = useState({});
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [preflight, setPreflight] = useState({ state: "idle", data: null, error: null });
-  const [submitting, setSubmitting] = useState(false);
+  const [launchError, setLaunchError] = useState(null);
+  const [preflightAttempt, setPreflightAttempt] = useState(0);
+  const [newModel, setNewModel] = useState(false);
+  const [commandSearch, setCommandSearch] = useState("");
   const availableCommands = useMemo(
     () => commands?.length
       ? commands
@@ -141,32 +133,58 @@ export function NewTaskDialog({
     [availableCommands, taskType],
   );
   const parameterSchemas = selectedCommand?.parameters ?? [];
+  const models = taskModels(selectedCommand, workspace?.models);
+  const selectedModel = models.find(model => model.name === parameters.forceModelName);
+  const modelIssue = modelNameIssue(parameters.forceModelName, newModel,
+    (workspace?.models ?? []).filter(model => model.type?.toUpperCase() === commandModelFamily(selectedCommand)));
+  const matchingCommands = searchTaskCommands(availableCommands, commandSearch);
+  const outputLocations = taskOutputLocations(selectedCommand, workspace);
+  const hasModelChoice = parameterSchemas.some(schema => schema.id === "forceModelName");
+  const hasDeviceChoice = parameterSchemas.some(schema => schema.id === "gpuIndexes");
   const visibleParameters = parameterSchemas.filter(
-    (parameter) => showAdvanced || !parameter.advanced,
+    (parameter) => !["forceModelName", "gpuIndexes", "cpuOnly"].includes(parameter.id)
+      && (parameter.id !== "silentStart" || (showAdvanced && !newModel))
+      && (showAdvanced || !parameter.advanced),
   );
 
   useEffect(() => {
     if (!open) return;
     setStep(1);
     setShowAdvanced(false);
+    setCommandSearch("");
     setPreflight({ state: "idle", data: null, error: null });
+    setLaunchError(null);
   }, [open]);
 
   useEffect(() => {
-    setParameters(Object.fromEntries(
-      parameterSchemas.map((parameter) => [parameter.id, parameter.default]),
-    ));
+    if (!open) return;
+    const configuration = createTaskConfiguration(selectedCommand, initialParameters, workspace?.models);
+    setParameters(configuration.parameters);
+    setNewModel(configuration.newModel);
     setPreflight({ state: "idle", data: null, error: null });
-  }, [selectedCommand?.id]);
+    setLaunchError(null);
+  }, [selectedCommand?.id, open, initialParameters]);
+
+  useEffect(() => {
+    if (!open) return;
+    const panel = stepPanelRef.current;
+    if (step === 1) initialFocusRef.current?.focus();
+    else if (step === 2) (panel?.querySelector("input:not(:disabled), select:not(:disabled)") ?? panel?.querySelector("button:not(:disabled)"))?.focus();
+    else panel?.focus();
+  }, [open, step]);
+
+  useEffect(() => {
+    if (open && launchError) stepPanelRef.current?.focus();
+  }, [open, launchError]);
 
   useEffect(() => {
     if (!open || step !== 3 || !selectedCommand) return undefined;
     let cancelled = false;
     setPreflight({ state: "checking", data: null, error: null });
-    void onPreflight(selectedCommand.id, {
+    void Promise.resolve().then(() => preflightRef.current(selectedCommand.id, {
       launchMode: "guided",
       parameters,
-    }).then((data) => {
+    })).then((data) => {
       if (!cancelled) setPreflight({ state: "ready", data, error: null });
     }).catch((error) => {
       if (!cancelled) setPreflight({ state: "failed", data: null, error });
@@ -174,7 +192,7 @@ export function NewTaskDialog({
     return () => {
       cancelled = true;
     };
-  }, [onPreflight, open, parameters, selectedCommand, step]);
+  }, [open, parameters, selectedCommand?.id, step, preflightAttempt]);
 
   if (!open) return null;
 
@@ -214,13 +232,21 @@ export function NewTaskDialog({
   };
 
   const launch = async (launchMode) => {
+    if (submittingRef.current || !serviceOnline || (launchMode === "guided" && preflight.state !== "ready")) return;
+    submittingRef.current = true;
     setSubmitting(true);
+    setLaunchError(null);
     try {
       await onCreate({
         launchMode,
         parameters: launchMode === "guided" ? parameters : {},
       });
+    } catch (error) {
+      setLaunchError(error);
+      setPreflight({ state: "failed", data: null, error });
+      setStep(3);
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -229,7 +255,7 @@ export function NewTaskDialog({
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => {
-      if (event.target === event.currentTarget) onClose();
+      if (event.target === event.currentTarget && !submittingRef.current) onClose();
     }}>
       <section
         className="modal-card task-wizard"
@@ -244,10 +270,10 @@ export function NewTaskDialog({
             <span className="modal-icon"><IconPlus size={20} stroke={2} /></span>
             <div>
               <h2 id="new-task-title">{t("新建任务")}</h2>
-              <p id="new-task-description">{t("用表单处理常用参数；高级或意外问答仍在终端继续。")}</p>
+              <p id="new-task-description">{t("选择任务、确认素材和保存位置，再开始处理。")}</p>
             </div>
           </div>
-          <button className="icon-button quiet" type="button" aria-label={t("关闭")} onClick={onClose}>
+          <button className="icon-button quiet" type="button" aria-label={t("关闭")} onClick={onClose} disabled={submitting}>
             <IconX size={19} />
           </button>
         </header>
@@ -273,19 +299,27 @@ export function NewTaskDialog({
         ) : null}
 
         <div className="wizard-body">
-          <section className="wizard-main">
+          <section className="wizard-main" ref={stepPanelRef} tabIndex={-1} aria-label={stepLabels[step - 1]} aria-busy={submitting} inert={submitting || undefined}>
             {step === 1 && (
               <div className="wizard-step-panel">
+                {recommendedCommandId && availableCommands.some(command => command.id === recommendedCommandId) ? <button type="button" className="button secondary" onClick={() => { onTaskType(recommendedCommandId); setCommandSearch(""); }}>
+                  {t("当前项目建议")} · {availableCommands.find(command => command.id === recommendedCommandId)?.label}
+                </button> : null}
+                <label className="wizard-field"><span>{t("搜索任务")}</span><input ref={initialFocusRef} type="search" value={commandSearch} onChange={event => setCommandSearch(event.target.value)} placeholder={t("输入任务名称")} /></label>
+                {commandSearch.trim() ? <div className="wizard-search-feedback" role="status">
+                  <span>{matchingCommands.length ? t("找到 {count} 个任务", { count: matchingCommands.length }) : t("没有匹配任务，当前选择仍保留。")}</span>
+                  <button className="text-button" type="button" onClick={() => { setCommandSearch(""); initialFocusRef.current?.focus(); }}>{t("清除搜索")}</button>
+                </div> : null}
                 <label className="wizard-field">
                   <span>{t("任务类型")}</span>
                   <select
-                    ref={initialFocusRef}
                     value={selectedCommand?.id ?? ""}
                     onChange={(event) => onTaskType(event.target.value)}
                   >
-                    {availableCommands.map((command) => (
-                      <option key={command.id} value={command.id}>{command.label}</option>
-                    ))}
+                    {selectedCommand && !matchingCommands.some(command => command.id === selectedCommand.id) ? <optgroup label={t("当前选择（不在搜索结果中）")}><option value={selectedCommand.id}>{selectedCommand.label}</option></optgroup> : null}
+                    {[...new Set(matchingCommands.map(command => command.category ?? "other"))].map(category => <optgroup key={category} label={t(({extract:"素材提取",dataset:"数据集工具",training:"模型训练",sort:"排序清洗",mask:"XSeg 遮罩",merge:"模型应用",encode:"视频封装",model:"模型导出",video:"视频处理",utility:"环境维护",other:"其他任务"})[category] ?? category)}>
+                      {matchingCommands.filter(command => (command.category ?? "other") === category).map(command => <option key={command.id} value={command.id}>{command.label}</option>)}
+                    </optgroup>)}
                   </select>
                 </label>
                 <div className="command-profile">
@@ -293,11 +327,11 @@ export function NewTaskDialog({
                   <div className="preflight-copy">
                     <strong>{selectedCommand?.label}</strong>
                     <p>{selectedCommand?.description}</p>
-                    <div className="command-tags">
+                    <details className="command-tags"><summary>{t("技术详情")}</summary>
                       <span>{selectedCommand?.profile === "legacy" ? "DFL legacy" : "DFL current"}</span>
                       <span>{selectedCommand?.stage ?? "workflow"}</span>
                       <span>{selectedCommand?.side?.toUpperCase?.() ?? "LOCAL"}</span>
-                    </div>
+                    </details>
                   </div>
                 </div>
               </div>
@@ -308,7 +342,7 @@ export function NewTaskDialog({
                 <div className="wizard-section-heading">
                   <div>
                     <strong>{selectedCommand?.label}</strong>
-                    <p>{t("只显示该固定命令允许的参数。")}</p>
+                    <p>{hasModelChoice || hasDeviceChoice ? t("先选择模型和设备，其余参数可按需调整。") : t("检查以下设置，再确认运行。")}</p>
                   </div>
                   {parameterSchemas.some((parameter) => parameter.advanced) && (
                     <button
@@ -320,6 +354,37 @@ export function NewTaskDialog({
                     </button>
                   )}
                 </div>
+                {hasModelChoice ? <div className="model-choice">
+                  <label className="wizard-field"><span>{t("使用模型")}</span>
+                    <select value={newModel ? "__new__" : parameters.forceModelName ?? ""} onChange={event => {
+                      const creating = event.target.value === "__new__"; setNewModel(creating);
+                      setParameters(current => ({ ...current, forceModelName: creating ? "" : event.target.value,
+                        ...(parameterSchemas.some(schema => schema.id === "silentStart") ? { silentStart: !creating && Boolean(event.target.value) } : {}) }));
+                    }}>
+                      <option value="">{t("由终端选择模型")}</option>
+                      {models.map(model => <option key={model.name} value={model.name}>{model.name}</option>)}
+                      {parameters.forceModelName && !newModel && !models.some(model => model.name === parameters.forceModelName) ? <option value={parameters.forceModelName}>{parameters.forceModelName}</option> : null}
+                      {selectedCommand.category === "training" ? <option value="__new__">{t("新建模型")}</option> : null}
+                    </select>
+                  </label>
+                  {newModel ? <label className="wizard-field"><span>{t("新模型名称")}</span><input value={parameters.forceModelName ?? ""} maxLength={64} required aria-invalid={modelIssue && modelIssue !== "empty" ? true : undefined} aria-describedby="new-model-help" onChange={event => setParameters(current => ({...current,forceModelName:event.target.value}))} />
+                    <small id="new-model-help" className={modelIssue && modelIssue !== "empty" ? "wizard-field-error" : ""}>
+                      {modelIssue === "duplicate" ? t("同名模型已存在；请选择已有模型继续训练，或使用新名称。") : modelIssue === "invalid" ? t("模型名称不能包含路径符号、首尾空格，且不能超过 64 个字符。") : t("使用独立名称创建模型；首次配置会在终端继续。")}
+                    </small>
+                  </label>
+                    : selectedModel?.modifiedAt ? <p>{t("保存时间")} · {new Date(selectedModel.modifiedAt).toLocaleString()}</p> : null}
+                  {!newModel && selectedModel && selectedCommand.category === "training" ? <p>{t("继续所选模型的训练；已有进度和模型设置会保留。")}</p> : null}
+                </div> : null}
+                {hasDeviceChoice ? <label className="wizard-field device-choice"><span>{t("运行设备")}</span>
+                  <select value={parameters.cpuOnly ? "cpu" : parameters.gpuIndexes ?? ""} onChange={event => setParameters(current => ({...current,cpuOnly:event.target.value === "cpu",gpuIndexes:event.target.value === "cpu" ? "" : event.target.value}))}>
+                    <option value="">{t("自动选择 GPU")}</option>
+                    {(telemetry?.gpus ?? []).map(gpu => <option key={gpu.index} value={String(gpu.index)}>{gpu.name ?? `GPU ${gpu.index}`}{Number.isFinite(gpu.memoryTotalMiB) ? ` · ${(gpu.memoryTotalMiB / 1024).toFixed(1)} GB` : ""}</option>)}
+                    {parameters.gpuIndexes && !(telemetry?.gpus ?? []).some(gpu => String(gpu.index) === parameters.gpuIndexes) ? <option value={parameters.gpuIndexes}>GPU {parameters.gpuIndexes}</option> : null}
+                    <option value="cpu">{t("CPU（较慢）")}</option>
+                  </select>
+                  <small>{t("自动模式由 DFL 沿用或询问设备；指定 GPU 可避免设备选择问答。")}</small>
+                  {showAdvanced && !parameters.cpuOnly ? <input aria-label={t("多 GPU 索引")} placeholder="0,1" value={parameters.gpuIndexes ?? ""} onChange={event => setParameters(current => ({...current,gpuIndexes:event.target.value}))} /> : null}
+                </label> : null}
                 {visibleParameters.length ? (
                   <div className="wizard-form-grid">
                     {visibleParameters.map((schema) => (
@@ -366,19 +431,20 @@ export function NewTaskDialog({
                       )
                     ))}
                   </div>
-                ) : (
+                ) : !hasModelChoice && !hasDeviceChoice ? (
                   <div className="wizard-empty">
                     <IconChecks size={24} />
                     <strong>{t("此任务无需额外参数")}</strong>
                     <p>{t("继续后会检查素材、模型与资源锁。")}</p>
                   </div>
-                )}
+                ) : null}
               </div>
             )}
 
             {step === 3 && (
               <div className="wizard-step-panel">
-                <div className={`preflight-banner is-${preflight.state}`}>
+                {launchError ? <div className="preflight-banner is-failed" role="alert"><IconAlertTriangle size={18} /><div><strong>{t("创建任务遇到问题")}</strong><p>{t(launchError.message ?? "创建任务失败，请重新检查后重试。")}</p></div></div> : null}
+                <div className={`preflight-banner is-${preflight.state}`} role="status" aria-live="polite">
                   {preflight.state === "checking" && <span className="status-pulse" />}
                   {preflight.state === "ready" && <IconCheck size={18} />}
                   {preflight.state === "failed" && <IconAlertTriangle size={18} />}
@@ -403,6 +469,7 @@ export function NewTaskDialog({
                       {recovery.label}<IconArrowRight size={15} />
                     </button>
                   ) : null}
+                  {preflight.state === "failed" ? <button className="button secondary" type="button" onClick={() => { setLaunchError(null); setPreflightAttempt(current => current + 1); }}>{t("重新检查")}</button> : null}
                 </div>
                 {resourceAdvice ? (
                   <section
@@ -434,7 +501,8 @@ export function NewTaskDialog({
                 ) : null}
                 <dl className="wizard-review">
                   <div><dt>{t("任务")}</dt><dd>{selectedCommand?.label}</dd></div>
-                  {parameterSchemas.map((schema) => (
+                  {hasDeviceChoice ? <div><dt>{t("运行设备")}</dt><dd>{parameters.cpuOnly ? t("CPU（较慢）") : parameters.gpuIndexes ? `GPU ${parameters.gpuIndexes}` : t("自动选择 GPU")}</dd></div> : null}
+                  {parameterSchemas.filter(schema => !["gpuIndexes","cpuOnly","silentStart"].includes(schema.id)).map((schema) => (
                     <div key={schema.id}><dt>{schema.label}</dt><dd>{formatParameter(schema)}</dd></div>
                   ))}
                 </dl>
@@ -445,32 +513,38 @@ export function NewTaskDialog({
           <aside className="wizard-summary">
             <h3>{t("执行摘要")}</h3>
             <dl>
-              <div><dt>{t("运行时")}</dt><dd>{selectedCommand?.profile === "legacy" ? "DFL legacy" : "DFL current"}</dd></div>
+              <div><dt>{t("任务")}</dt><dd>{selectedCommand?.label}</dd></div>
               <div><dt>{t("工作区")}</dt><dd title={workspacePath}>{workspacePath}</dd></div>
+              <div><dt>{t("保存位置")}</dt><dd>{outputLocations.paths.length ? outputLocations.paths.map(location => <span className="wizard-output-path" key={location} title={displayWorkspacePath(workspacePath, location)}>{displayWorkspacePath(workspacePath, location)}</span>) : t("项目运行环境与缓存目录")}</dd></div>
+            </dl>
+            {outputLocations.note === "merge-back" ? <p className="wizard-summary-note">{t("先生成到此目录；处理完成后，终端会询问是否合并回原人脸集。")}</p> : null}
+            {selectedCommand?.category === "encode" ? <p className="wizard-summary-note">{t("导出会更新同名成片和遮罩文件。请先备份需要保留的视频；生成记录会保留。")}</p> : null}
+            <details><summary>{t("技术详情")}</summary><dl>
+              <div><dt>{t("运行时")}</dt><dd>{selectedCommand?.profile === "legacy" ? "DFL legacy" : "DFL current"}</dd></div>
               <div>
                 <dt><IconLock size={13} />{t("资源锁")}</dt>
                 <dd>{selectedCommand?.locks?.length ? t("{count} 项", { count: selectedCommand.locks.length }) : t("无")}</dd>
               </div>
               <div><dt>{t("终端")}</dt><dd>{t("可交互 ConPTY")}</dd></div>
-            </dl>
+            </dl></details>
             <div className="wizard-summary-note">
               <IconCode size={16} />
-              <p>{t("表单只生成服务端白名单参数。DFL 出现额外问题时，终端会自动等待你的输入。")}</p>
+              <p>{t("如有额外问题，任务会等待你的回答，并在终端提示。")}</p>
             </div>
           </aside>
         </div>
 
         <footer>
           <div className="wizard-footer-start">
-            <button className="button secondary" type="button" onClick={onClose}>{t("取消")}</button>
+            <button className="button secondary" type="button" onClick={onClose} disabled={submitting}>{t("取消")}</button>
             {step > 1 && (
-              <button className="button secondary" type="button" onClick={() => setStep((current) => current - 1)}>
+              <button className="button secondary" type="button" onClick={() => { setLaunchError(null); setStep((current) => current - 1); }} disabled={submitting}>
                 <IconArrowLeft size={16} />{t("上一步")}
               </button>
             )}
           </div>
           <div className="wizard-footer-end">
-            {step >= 2 && (
+            {step >= 2 && showAdvanced && (
               <button
                 className="button cli-button"
                 type="button"
@@ -484,8 +558,12 @@ export function NewTaskDialog({
               <button
                 className="button primary"
                 type="button"
-                onClick={() => setStep((current) => current + 1)}
-                disabled={!selectedCommand}
+                onClick={() => {
+                  const invalid = [...(stepPanelRef.current?.querySelectorAll("input, select") ?? [])].find(field => !field.checkValidity());
+                  if (step === 2 && invalid) { invalid.reportValidity(); return; }
+                  setStep((current) => current + 1);
+                }}
+                disabled={!selectedCommand || submitting || (step === 2 && Boolean(modelIssue))}
               >
                 {t("下一步")}<IconArrowRight size={16} />
               </button>

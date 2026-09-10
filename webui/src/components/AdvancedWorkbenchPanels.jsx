@@ -22,6 +22,7 @@ import { useI18n } from "../i18n.jsx";
 import { runtimeApi } from "../runtime/api.js";
 import { DatasetAuditPanel } from "./ToolWorkbenchPanels.jsx";
 import { LoadingProgress } from "./ProgressFeedback.jsx";
+import { RoleGroupingPanel } from "./RoleGroupingPanel.jsx";
 
 const REVIEW_PAGE_SIZE = 60;
 const LANDMARK_GROUPS = {
@@ -59,9 +60,11 @@ export function DatasetCleaningPanel(props) {
         <button className={mode === "similarity" ? "is-active" : ""} type="button" role="tab" aria-selected={mode === "similarity"} onClick={() => setMode("similarity")}>
           <IconSparkles size={15} />{t("相似组清洗")}
         </button>
-        <span>{t("相似度只用于生成候选组，不代表身份识别结论")}</span>
+        <button className={mode === "roles" ? "is-active" : ""} type="button" role="tab" aria-selected={mode === "roles"} onClick={() => setMode("roles")}>
+          <IconPhoto size={15} />{t("按角色分组")}
+        </button>
       </div>
-      {mode === "quality" ? <DatasetAuditPanel {...props} /> : <SimilarityAuditPanel {...props} />}
+      {mode === "quality" ? <DatasetAuditPanel {...props} /> : mode === "roles" ? <RoleGroupingPanel {...props} /> : <SimilarityAuditPanel {...props} />}
     </div>
   );
 }

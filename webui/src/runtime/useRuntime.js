@@ -23,6 +23,20 @@ function preserveEqualSnapshot(current, incoming) {
   return JSON.stringify(current) === JSON.stringify(incoming) ? current : incoming;
 }
 
+// A list response is authoritative for jobs known when the request began. Keep
+// only newly created jobs that arrived during the request, and preserve newer
+// websocket sequences for jobs that are still present in the server snapshot.
+export function reconcileJobs(current, incoming, knownIds = new Set(current.map(job => job.id))) {
+  const incomingIds = new Set(incoming.map(job => job.id));
+  return mergeJobs(current.filter(job => incomingIds.has(job.id) || !knownIds.has(job.id)), incoming);
+}
+
+export function selectAvailableJob(jobs, selectedId) {
+  return jobs.some(job => job.id === selectedId) ? selectedId
+    : jobs.find(job => ["running", "waiting_input", "starting", "stopping", "queued"].includes(job.state))?.id
+      ?? jobs[0]?.id ?? null;
+}
+
 function appendUniqueEvents(current, incoming) {
   if (!incoming.length) return current;
   const sequences = new Set(current.map((event) => event.sequence));
@@ -85,25 +99,32 @@ export function useRuntime() {
   const [socketState, setSocketState] = useState("disconnected");
   const [lastError, setLastError] = useState(null);
   const socketRef = useRef(null);
+  const jobsRef = useRef(jobs);
+  jobsRef.current = jobs;
+  const refreshPending = useRef(null);
+  const scopeRef = useRef(null);
 
-  const refresh = useCallback(async ({ quiet = false } = {}) => {
+  const refresh = useCallback(({ quiet = false } = {}) => {
+    if (refreshPending.current) return refreshPending.current;
+    const knownIds = new Set(jobsRef.current.map(job => job.id));
     if (!quiet) setServiceState("loading");
-    try {
+    const pending = (async () => { try {
       const nextHealth = await runtimeApi.health();
       const [nextCommands, nextJobs] = await Promise.all([
         runtimeApi.commands(),
         runtimeApi.jobs(),
       ]);
+      const nextScope = nextHealth.runtime?.current?.workspace ?? nextHealth.project?.id;
+      const scopeChanged = scopeRef.current !== null && scopeRef.current !== nextScope;
+      scopeRef.current = nextScope;
+      if (scopeChanged) {
+        setEventsByJob({});
+        setSelectedJobId(null);
+        setTelemetry(null);
+      }
       setHealth((current) => preserveEqualSnapshot(current, nextHealth));
       setCommands((current) => preserveEqualSnapshot(current, nextCommands));
-      setJobs((current) => mergeJobs(current, nextJobs));
-      setSelectedJobId((current) => (
-        current && nextJobs.some((job) => job.id === current)
-          ? current
-          : nextJobs.find((job) => ["running", "waiting_input", "starting", "stopping"].includes(job.state))?.id
-            ?? nextJobs[0]?.id
-            ?? null
-      ));
+      setJobs((current) => reconcileJobs(scopeChanged ? [] : current, nextJobs, knownIds));
       setServiceState("online");
       setLastError(null);
       return nextJobs;
@@ -112,8 +133,18 @@ export function useRuntime() {
       setSocketState("disconnected");
       setLastError(error);
       return [];
-    }
+    } })();
+    refreshPending.current = pending;
+    void pending.finally(() => { if (refreshPending.current === pending) refreshPending.current = null; });
+    return pending;
   }, []);
+
+  useEffect(() => {
+    setSelectedJobId(current => selectAvailableJob(jobs, current));
+    const ids = new Set(jobs.map(job => job.id));
+    setEventsByJob(current => Object.keys(current).every(id => ids.has(id)) ? current
+      : Object.fromEntries(Object.entries(current).filter(([id]) => ids.has(id))));
+  }, [jobs]);
 
   useEffect(() => {
     void refresh();
@@ -148,7 +179,7 @@ export function useRuntime() {
   }, [serviceState]);
 
   const applyEvent = useCallback((event) => {
-    if (!event?.jobId) return;
+    if (!event?.jobId || !jobsRef.current.some(job => job.id === event.jobId)) return;
     setEventsByJob((current) => ({
       ...current,
       [event.jobId]: appendUniqueEvents(current[event.jobId] ?? [], [event]),
@@ -183,20 +214,27 @@ export function useRuntime() {
         after = Math.max(after, backlog.at(-1)?.sequence ?? 0);
       } catch (error) {
         if (!cancelled) setLastError(error);
+        if ([404, 410].includes(error?.status)) {
+          if (!cancelled) { setSocketState("disconnected"); void refresh({ quiet: true }); }
+          return;
+        }
       }
 
       if (cancelled) return;
       const socket = new WebSocket(runtimeWebSocketUrl(selectedJobId, after));
       socketRef.current = socket;
       socket.addEventListener("open", () => {
+        if (cancelled) return;
         retry = 0;
         setSocketState("connected");
       });
       socket.addEventListener("message", (message) => {
+        if (cancelled) return;
         try {
           const data = JSON.parse(message.data);
           if (data.type === "snapshot") {
-            setJobs((current) => mergeJobs(current, [data.payload]));
+            setJobs((current) => current.some(job => job.id === data.payload.id)
+              ? mergeJobs(current, [data.payload]) : current);
           } else {
             applyEvent(data);
           }
@@ -223,7 +261,7 @@ export function useRuntime() {
     };
     // Events are intentionally excluded: the connection owns its sequence cursor.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [applyEvent, selectedJobId, serviceState]);
+  }, [applyEvent, selectedJobId, serviceState, refresh, health?.runtime?.current?.workspace]);
 
   const startJob = useCallback(async (commandId, options = {}) => {
     const job = await runtimeApi.start(commandId, options);

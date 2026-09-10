@@ -84,6 +84,7 @@ test("runtime exposes fixed operations, system snapshots, material recovery, and
     "asset-audit",
     "pose-atlas",
     "similarity",
+    "roles",
     "pack",
     "coverage",
     "detect-scenes",
@@ -99,6 +100,16 @@ test("runtime exposes fixed operations, system snapshots, material recovery, and
   const health = await jsonRequest(baseUrl, "/api/health");
   assert.equal(health.status, 200);
   assert.ok(health.cookie);
+
+  for (const endpoint of ["/api/tools/assets/src/roles/assign", "/api/roles/assignments/20260908000000-abcdef0123/restore"]) {
+    const unauthorized = await jsonRequest(baseUrl,endpoint,{method:"POST",body:{}});
+    assert.equal(unauthorized.status,403);
+    server.jobManager.list = () => [{id:"active-test",state:"running"}];
+    const busy = await jsonRequest(baseUrl,endpoint,{method:"POST",cookie:health.cookie,body:{}});
+    assert.equal(busy.status,409);
+    assert.equal(busy.body.error.code,"WORKSPACE_JOB_BUSY");
+    server.jobManager.list = () => [];
+  }
 
   const invalidOperation = await jsonRequest(baseUrl, "/api/operations", {
     method: "POST",

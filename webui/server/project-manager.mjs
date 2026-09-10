@@ -1,8 +1,9 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PATHS, assertWithin, pathExists } from "./paths.mjs";
+import { PROJECT_ID_PATTERN, normalizeProjectName, normalizeProjectId, projectIdentityIssues } from "../shared/project-identity.mjs";
 
-const PROJECT_ID = /^[a-z0-9][a-z0-9-]{0,47}$/;
+const PROJECT_ID = PROJECT_ID_PATTERN;
 const ACTIVE_JOB_STATES = new Set(["queued", "starting", "running", "waiting_input", "stopping"]);
 const PROJECT_DIRECTORIES = ["data_src", "data_dst", "model", "xseg_model", ".webui"];
 const registryMutationLocks = new Map();
@@ -36,21 +37,16 @@ export class ProjectError extends Error {
 }
 
 function normalizeName(value) {
-  const name = String(value ?? "").trim().replace(/\s+/g, " ");
-  if (!name || name.length > 64 || /[<>:"/\\|?*\u0000-\u001f]/.test(name)) {
+  const name = normalizeProjectName(value);
+  if (projectIdentityIssues(name, "valid").name) {
     throw new ProjectError("项目名称需为 1–64 个安全字符", "PROJECT_NAME_INVALID");
   }
   return name;
 }
 
 function normalizeId(value) {
-  const id = String(value ?? "")
-    .trim()
-    .toLocaleLowerCase("en-US")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48);
-  if (!PROJECT_ID.test(id) || id === "default") {
+  const id = normalizeProjectId(value);
+  if (projectIdentityIssues("valid", id).id) {
     throw new ProjectError("项目标识需由小写字母、数字和连字符组成", "PROJECT_ID_INVALID");
   }
   return id;
@@ -100,15 +96,30 @@ export class ProjectManager {
     await mkdir(this.registryRoot, { recursive: true });
     await mkdir(this.managedRoot, { recursive: true });
     await withRegistryMutation(this.registryFile, async () => {
-      if (!(await pathExists(this.registryFile))) await this.writeRegistry(defaultRegistry());
+      let file;
+      try {
+        // Exclusive creation must never replace an existing unreadable registry.
+        file = await open(this.registryFile, "wx");
+        await file.writeFile(`${JSON.stringify(defaultRegistry(), null, 2)}\n`, "utf8");
+      } catch (error) {
+        if (error.code !== "EEXIST") throw new ProjectError("项目清单无法读取；请检查清单文件或权限后重试，现有项目不会被覆盖", "PROJECT_REGISTRY_UNREADABLE", 500);
+      } finally { await file?.close(); }
     });
   }
 
   async readRegistry() {
     try {
-      return normalizeRegistry(JSON.parse(await readFile(this.registryFile, "utf8")));
-    } catch {
-      return defaultRegistry();
+      const registry = JSON.parse(await readFile(this.registryFile, "utf8"));
+      if (!Array.isArray(registry?.projects) || typeof registry.activeId !== "string" || !PROJECT_ID.test(registry.activeId)
+        || !registry.projects.some(project => project?.id === registry.activeId)
+        || registry.projects.some(project => typeof project?.id !== "string" || !PROJECT_ID.test(project.id))
+        || new Set(registry.projects.map(project => project.id)).size !== registry.projects.length) {
+        throw new Error("Invalid project registry");
+      }
+      return normalizeRegistry(registry);
+    } catch (error) {
+      if (error.code === "ENOENT") return defaultRegistry();
+      throw new ProjectError("项目清单无法读取；请检查清单文件或权限后重试，现有项目不会被覆盖", "PROJECT_REGISTRY_UNREADABLE", 500);
     }
   }
 

@@ -146,7 +146,7 @@ function ProgressHudCard({ entry, compact = false }) {
   const expandable = Boolean(entry.detail || entry.countText);
   const metaText = [entry.countText, entry.timingText].filter(Boolean).join(" · ");
   const accessibleValueText = [
-    determinate ? `${Math.round(entry.progress)}%` : t("进行中"),
+    entry.statusText || (determinate ? `${Math.round(entry.progress)}%` : t("进行中")),
     entry.countText,
     entry.timingText,
   ].filter(Boolean).join(" · ");
@@ -168,8 +168,8 @@ function ProgressHudCard({ entry, compact = false }) {
           <strong id={labelId} title={entry.label}>{entry.label}</strong>
           {entry.detail ? <span title={entry.detail}>{entry.detail}</span> : null}
         </div>
-        <b className={determinate ? "is-value" : "is-state"}>
-          {determinate ? `${Math.round(entry.progress)}%` : t("进行中")}
+        <b className={determinate && !entry.statusText ? "is-value" : "is-state"}>
+          {entry.statusText || (determinate ? `${Math.round(entry.progress)}%` : t("进行中"))}
         </b>
         <div className="progress-hud-actions">
           {entry.onCancel ? (
@@ -277,6 +277,8 @@ export function LoadingProgress({
   showDelayMs,
   onCancel,
   cancelPending = false,
+  statusText,
+  estimateRemaining = true,
 }) {
   const { language, t } = useI18n();
   const store = useContext(ProgressFeedbackContext);
@@ -292,7 +294,7 @@ export function LoadingProgress({
     [label, operationKey, rememberDuration],
   );
   const { elapsedSeconds, history } = useProgressClock(historyKey, startedAt);
-  const measuredEta = Number.isFinite(etaSeconds) && etaSeconds >= 0
+  const measuredEta = !estimateRemaining ? null : Number.isFinite(etaSeconds) && etaSeconds >= 0
     ? etaSeconds
     : determinate && progress > 0 && progress < 100 && elapsedSeconds >= 1
       ? Math.min(MAX_RECORDED_DURATION_MS / 1000, elapsedSeconds * ((100 - progress) / progress))
@@ -311,7 +313,7 @@ export function LoadingProgress({
     ? `${Number(current).toLocaleString(language === "zh" ? "zh-CN" : "en-US")} / ${Number(total).toLocaleString(language === "zh" ? "zh-CN" : "en-US")}`
     : null;
   const supportText = [detail, countText].filter(Boolean).join(" · ");
-  const ariaValueText = [percent ?? t("进行中"), timingText].filter(Boolean).join(" · ");
+  const ariaValueText = [statusText || percent || t("进行中"), timingText].filter(Boolean).join(" · ");
   const entry = useMemo(() => ({
     label,
     detail,
@@ -323,7 +325,8 @@ export function LoadingProgress({
     showDelayMs,
     onCancel,
     cancelPending,
-  }), [cancelPending, countText, detail, label, onCancel, operationKey, progress, showDelayMs, timingText, tone]);
+    statusText,
+  }), [cancelPending, countText, detail, label, onCancel, operationKey, progress, showDelayMs, statusText, timingText, tone]);
   const entryRef = useRef(entry);
   entryRef.current = entry;
 
@@ -351,7 +354,7 @@ export function LoadingProgress({
         <strong id={labelId}>{label}</strong>
         {supportText ? <span title={supportText}>{supportText}</span> : null}
         <div className="loading-progress-measure" aria-hidden="true">
-          {percent ? <b>{percent}</b> : null}
+          {statusText || percent ? <b>{statusText || percent}</b> : null}
           <small>{timingText}</small>
         </div>
       </div>

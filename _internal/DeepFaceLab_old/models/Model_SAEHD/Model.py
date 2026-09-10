@@ -1298,8 +1298,12 @@ class SAEHDModel(ModelBase):
             )
 
             cpu_count = multiprocessing.cpu_count()
-            src_generators_count = cpu_count // 2
-            dst_generators_count = cpu_count // 2
+            # CPU training shares the processor with TensorFlow. Spawning one
+            # sample process per logical core exhausts RAM on large workstations.
+            if not len(devices):
+                cpu_count = min(cpu_count, 4)
+            src_generators_count = max(1, cpu_count // 2)
+            dst_generators_count = max(1, cpu_count // 2)
             if ct_mode is not None:
                 src_generators_count = int(src_generators_count * 1.5)
 

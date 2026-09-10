@@ -53,6 +53,7 @@ test("command registry exposes the approved fixed workflows", () => {
   assert.deepEqual(
     commands.map((command) => command.id),
     [
+      "runtime.prepare_vision",
       "src.extract_frames",
       "src.extract_faces",
       "dst.extract_frames",
@@ -114,6 +115,21 @@ test("command registry exposes the approved fixed workflows", () => {
   assert.deepEqual(training.controls, ["save", "backup", "preview", "evaluate", "close"]);
   assert.equal(commands.find((command) => command.id === "merge.saehd").profile, "legacy");
   assert.equal(commands.find((command) => command.id === "encode.mp4").stage, "encode");
+});
+
+test("guided learned-mask merge does not require the optional XSeg predictor", {
+  skip: process.env.DFLSN_ISOLATED_TEST_ROOT ? false : "requires isolated fixture",
+}, async (t) => {
+  const model = path.join(PATHS.workspaceRoot, "model", "mask-preflight_SAEHD_data.dat");
+  await writeFile(model, "isolated preflight fixture");
+  t.after(() => rm(model, { force: true }));
+  await prepareCommand("merge.saehd", { launchMode: "guided", parameters: { maskMode: 4 } });
+  await assert.rejects(prepareCommand("merge.saehd", {
+    launchMode: "guided", parameters: { maskMode: 7 },
+  }), { code: "BUNDLED_MODEL_MISSING" });
+  await assert.rejects(prepareCommand("merge.saehd", {
+    launchMode: "cli", parameters: {},
+  }), { code: "BUNDLED_MODEL_MISSING" });
 });
 
 test("XSeg training preflight rejects datasets without labels", () => {

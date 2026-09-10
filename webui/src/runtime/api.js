@@ -1,3 +1,5 @@
+import { withRequestDeadline } from "./request-deadline.js";
+
 async function request(path, options = {}) {
   let response;
   try {
@@ -95,44 +97,69 @@ function operationError(operation) {
   return error;
 }
 
-async function runOperation(kind, side, parameters = {}, {
-  onProgress,
-  pollIntervalMs = 350,
-  maxPollIntervalMs = 5_000,
-  maxConsecutiveErrors = 5,
-  signal,
+function observationLost(error, operation) {
+  return Object.assign(new Error("操作结果尚未确认，请检查后台进度后再重试。"), {
+    code: "OPERATION_OBSERVATION_LOST", operation, cause: error,
+  });
+}
+
+async function followOperation(operation, {
+  onProgress, pollIntervalMs = 350, maxPollIntervalMs = 5_000,
+  maxConsecutiveErrors = 5, signal, requestTimeoutMs = 10_000,
 } = {}) {
   const baseInterval = boundedInterval(pollIntervalMs, 350, { maximum: 5_000 });
-  const maximumInterval = boundedInterval(maxPollIntervalMs, 5_000, {
-    minimum: baseInterval,
-    maximum: 30_000,
-  });
+  const maximumInterval = boundedInterval(maxPollIntervalMs, 5_000, { minimum: baseInterval, maximum: 30_000 });
   const retryLimit = Math.max(0, Math.min(20, Number.isFinite(Number(maxConsecutiveErrors))
-    ? Math.floor(Number(maxConsecutiveErrors))
-    : 5));
-  throwIfAborted(signal);
-  let operation = await request("/api/operations", {
-    method: "POST",
-    body: JSON.stringify({ kind, side, parameters }),
-    signal,
-  });
+    ? Math.floor(Number(maxConsecutiveErrors)) : 5));
   let progressFingerprint = notifyProgress(onProgress, operation, null);
   let consecutiveErrors = 0;
   while (ACTIVE_OPERATION_STATES.has(operation.status)) {
     const retryMultiplier = consecutiveErrors > 0 ? 2 ** Math.min(consecutiveErrors, 6) : 1;
     await wait(Math.min(maximumInterval, baseInterval * retryMultiplier), { signal });
     try {
-      operation = await request(`/api/operations/${encodeURIComponent(operation.id)}`, { signal });
+      operation = await withRequestDeadline(activeSignal => request(`/api/operations/${encodeURIComponent(operation.id)}`, { signal: activeSignal }), { signal, timeoutMs: requestTimeoutMs });
       consecutiveErrors = 0;
       progressFingerprint = notifyProgress(onProgress, operation, progressFingerprint);
     } catch (error) {
+      throwIfAborted(signal);
       if (error?.name === "AbortError") throw error;
       consecutiveErrors += 1;
-      if (!error?.retryable || consecutiveErrors > retryLimit) throw error;
+      if (!error?.retryable || consecutiveErrors > retryLimit) throw observationLost(error, operation);
     }
   }
   if (operation.status !== "succeeded") throw operationError(operation);
   return operation.result;
+}
+
+async function runOperation(kind, side, parameters = {}, options = {}) {
+  const { signal, requestTimeoutMs = 10_000 } = options;
+  throwIfAborted(signal);
+  let operation;
+  try {
+    operation = await withRequestDeadline(activeSignal => request("/api/operations", {
+      method: "POST", body: JSON.stringify({ kind, side, parameters }), signal: activeSignal,
+    }), { signal, timeoutMs: requestTimeoutMs });
+  } catch (error) {
+    throwIfAborted(signal);
+    if (error.status >= 400 && error.status < 500 && ![408, 425].includes(error.status)) throw error;
+    throw Object.assign(new Error("后台操作提交结果未确认，请先检查后台进度。"), {
+      code: "OPERATION_START_UNCONFIRMED", cause: error,
+    });
+  }
+  return followOperation(operation, options);
+}
+
+async function resumeOperation(id, options = {}) {
+  const { signal, requestTimeoutMs = 10_000 } = options;
+  throwIfAborted(signal);
+  let operation;
+  try {
+    operation = await withRequestDeadline(activeSignal => request(`/api/operations/${encodeURIComponent(id)}`, { signal: activeSignal }), { signal, timeoutMs: requestTimeoutMs });
+  } catch (error) {
+    throwIfAborted(signal);
+    throw observationLost(error, { id });
+  }
+  return followOperation(operation, options);
 }
 
 function operationListFingerprint(records) {
@@ -143,6 +170,9 @@ export function watchOperations({
   fetchOperations = ({ signal } = {}) => request("/api/operations", { signal }),
   onUpdate,
   onError,
+  onConnectionChange,
+  onSettled,
+  requestTimeoutMs = 10_000,
   pollIntervalMs = 750,
   maxPollIntervalMs = 8_000,
   setTimer = (callback, delay) => globalThis.setTimeout(callback, delay),
@@ -159,57 +189,88 @@ export function watchOperations({
   let consecutiveErrors = 0;
   let errorReported = false;
   let previousFingerprint = null;
+  let observed = new Map();
+  let inFlight = null;
+  let connection = null;
+  const notify = (callback, ...args) => { try { callback?.(...args); } catch { /* Keep monitoring. */ } };
+  const setConnection = state => {
+    if (state === connection) return;
+    connection = state;
+    notify(onConnectionChange, state);
+  };
 
-  const refresh = async () => {
+  const refresh = () => {
+    if (disposed) return Promise.resolve();
+    if (inFlight) return inFlight;
+    if (timer != null) { clearTimer(timer); timer = null; }
     requestController = new AbortController();
-    try {
-      const records = await fetchOperations({ signal: requestController.signal });
-      if (disposed) return;
-      if (!Array.isArray(records)) {
-        const error = new Error("后台操作列表格式无效");
-        error.code = "INVALID_OPERATION_LIST";
-        throw error;
-      }
-      const activeRecords = records.filter((item) => ACTIVE_OPERATION_STATES.has(item?.status));
-      const fingerprint = operationListFingerprint(activeRecords);
-      if (fingerprint !== previousFingerprint) {
-        previousFingerprint = fingerprint;
-        try {
-          onUpdate?.(activeRecords);
-        } catch {
-          // A presentation callback must not stop monitoring.
+    const controller = requestController;
+    const pending = (async () => {
+      try {
+        const records = await withRequestDeadline(signal => fetchOperations({ signal }), { signal: controller.signal, timeoutMs: requestTimeoutMs });
+        if (disposed) return;
+        if (!Array.isArray(records) || records.some(item => typeof item?.id !== "string" || !item.id
+          || !["queued", "running", "cancelling", "succeeded", "failed", "cancelled", "interrupted"].includes(item.status))) {
+          const error = new Error("后台操作列表格式无效");
+          error.code = "INVALID_OPERATION_LIST";
+          throw error;
+        }
+        const activeRecords = records.filter((item) => ACTIVE_OPERATION_STATES.has(item?.status));
+        const byId = new Map(records.map(item => [item.id, item]));
+        for (const [id, previous] of observed) {
+          const current = byId.get(id);
+          if (!current || !ACTIVE_OPERATION_STATES.has(current.status)) {
+            notify(onSettled, current ?? { ...previous, status: "unknown" });
+          }
+        }
+        observed = new Map(activeRecords.map(item => [item.id, item]));
+        const fingerprint = operationListFingerprint(activeRecords);
+        if (fingerprint !== previousFingerprint) {
+          previousFingerprint = fingerprint;
+          try {
+            onUpdate?.(activeRecords);
+          } catch {
+            // A presentation callback must not stop monitoring.
+          }
+        }
+        consecutiveErrors = 0;
+        errorReported = false;
+        setConnection("online");
+      } catch (error) {
+        if (disposed || error?.name === "AbortError") return;
+        consecutiveErrors += 1;
+        setConnection("reconnecting");
+        if (!errorReported) {
+          errorReported = true;
+          try {
+            onError?.(error);
+          } catch {
+            // Error presentation is isolated from the monitor lifecycle.
+          }
+        }
+      } finally {
+        requestController = null;
+        if (!disposed) {
+          const retryMultiplier = consecutiveErrors > 1
+            ? 2 ** Math.min(consecutiveErrors - 1, 6)
+            : 1;
+          timer = setTimer(refresh, Math.min(maximumInterval, baseInterval * retryMultiplier));
         }
       }
-      consecutiveErrors = 0;
-      errorReported = false;
-    } catch (error) {
-      if (disposed || error?.name === "AbortError") return;
-      consecutiveErrors += 1;
-      if (!errorReported) {
-        errorReported = true;
-        try {
-          onError?.(error);
-        } catch {
-          // Error presentation is isolated from the monitor lifecycle.
-        }
-      }
-    } finally {
-      requestController = null;
-      if (!disposed) {
-        const retryMultiplier = consecutiveErrors > 1
-          ? 2 ** Math.min(consecutiveErrors - 1, 6)
-          : 1;
-        timer = setTimer(refresh, Math.min(maximumInterval, baseInterval * retryMultiplier));
-      }
-    }
+    })();
+    inFlight = pending;
+    void pending.finally(() => { if (inFlight === pending) inFlight = null; });
+    return pending;
   };
 
   void refresh();
-  return () => {
+  const dispose = () => {
     disposed = true;
     requestController?.abort();
     if (timer != null) clearTimer(timer);
   };
+  dispose.refresh = refresh;
+  return dispose;
 }
 
 async function uploadVideoWithFetch(side, file, replace) {
@@ -230,6 +291,7 @@ async function uploadVideoWithFetch(side, file, replace) {
   if (!response.ok || payload.ok === false) {
     const error = new Error(payload.error?.message ?? `视频导入失败（HTTP ${response.status}）`);
     error.code = payload.error?.code ?? "IMPORT_FAILED";
+    error.status = response.status;
     error.details = payload.error?.details;
     throw error;
   }
@@ -267,6 +329,7 @@ async function uploadVideo(side, file, { replace = false, onProgress } = {}) {
       if (request.status < 200 || request.status >= 300 || payload.ok === false) {
         const error = new Error(payload.error?.message ?? `视频导入失败（HTTP ${request.status}）`);
         error.code = payload.error?.code ?? "IMPORT_FAILED";
+        error.status = request.status;
         error.details = payload.error?.details;
         reject(error);
         return;
@@ -281,10 +344,14 @@ async function uploadVideo(side, file, { replace = false, onProgress } = {}) {
 }
 
 export const runtimeApi = {
-  health: () => request("/api/health"),
+  health: (options = {}) => request("/api/health", options),
   telemetry: () => request("/api/telemetry"),
   commands: () => request("/api/commands"),
   workspace: () => request("/api/workspace"),
+  revealWorkspace: () => request("/api/workspace/reveal", { method: "POST" }),
+  assignRole: (side, data) => request(`/api/tools/assets/${side}/roles/assign`,{method:"POST",body:JSON.stringify(data)}),
+  roleAssignments: () => request("/api/roles/assignments"),
+  restoreRoleAssignment: token => request(`/api/roles/assignments/${encodeURIComponent(token)}/restore`,{method:"POST"}),
   storage: (requiredBytes = 0) => request(
     `/api/system/storage?requiredBytes=${encodeURIComponent(requiredBytes)}`,
   ),
@@ -298,6 +365,8 @@ export const runtimeApi = {
   }),
   runOperation,
   watchOperations,
+  resumeOperation,
+  operation: (id, options = {}) => request(`/api/operations/${encodeURIComponent(id)}`, options),
   cancelOperation: (id, options = {}) => request(`/api/operations/${encodeURIComponent(id)}/cancel`, {
     ...options,
     method: "POST",
@@ -310,12 +379,14 @@ export const runtimeApi = {
     `/api/workspace/material-archives/${encodeURIComponent(side)}/${encodeURIComponent(token)}/restore`,
     { ...options, method: "POST" },
   ),
-  projects: () => request("/api/projects"),
-  createProject: (payload) => request("/api/projects", {
+  projects: (options = {}) => request("/api/projects", options),
+  createProject: (payload, options = {}) => request("/api/projects", {
+    ...options,
     method: "POST",
     body: JSON.stringify(payload),
   }),
-  activateProject: (id) => request(`/api/projects/${encodeURIComponent(id)}/activate`, {
+  activateProject: (id, options = {}) => request(`/api/projects/${encodeURIComponent(id)}/activate`, {
+    ...options,
     method: "POST",
   }),
   alignedAssets: (side, { offset = 0, limit = 60 } = {}) => request(
@@ -340,6 +411,10 @@ export const runtimeApi = {
     { refresh, offset, limit },
     operationOptions,
   ),
+  alignedRoles: (side, { threshold = 0.5, ...options } = {}) => runOperation("roles", side, { threshold }, options),
+  retainAlignedRoles: (side, names, fingerprint) => request(`/api/tools/assets/${side}/roles/retain`, {
+    method: "POST", body: JSON.stringify({ names, fingerprint }),
+  }),
   alignedSimilarity: (side, {
     refresh = false, threshold = 0.86, limit = 500, ...operationOptions
   } = {}) => runOperation(

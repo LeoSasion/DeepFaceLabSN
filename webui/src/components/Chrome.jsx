@@ -133,10 +133,7 @@ export function ProjectHeader({ projectName, workspacePath, serviceState, teleme
     <header className="project-header">
       <div className="project-copy">
         <div className="project-title-row">
-          <h1>DeepFaceLab-WEBUI{projectName ? <small> · {projectName}</small> : null}</h1>
-          <button className="icon-button quiet" type="button" aria-label={t("项目名称来自当前仓库")} disabled>
-            <IconPencil size={15} stroke={1.8} />
-          </button>
+          <h1 title={`DeepFaceLab-WEBUI${projectName ? ` · ${projectName}` : ""}`}>{projectName || "DeepFaceLab-WEBUI"}</h1>
         </div>
         <div className="workspace-path">
           <span>{t("工作区路径")}</span>
@@ -179,7 +176,7 @@ export function ProjectHeader({ projectName, workspacePath, serviceState, teleme
           <IconPlus size={18} stroke={2} />
           {t("新建任务")}
         </button>
-        <button className="icon-button menu-button" type="button" aria-label={t("打开项目菜单")} onClick={onMenu}>
+        <button className="icon-button menu-button" type="button" aria-label={t("打开工作区")} onClick={onMenu}>
           <IconMenu2 size={21} stroke={1.8} />
         </button>
       </div>
@@ -195,12 +192,12 @@ export function WorkflowBar({ selectedStage, stageStates = {}, onSelectStage }) 
         const actualState = stageStates[stage.id] ?? stage.state;
         const selected = selectedStage === stage.id;
         const stateLabel = actualState === "done"
-          ? t("完成")
+          ? t(["train","merge","encode"].includes(stage.id) ? "成果可用" : "完成")
           : actualState === "active"
             ? t("进行中")
             : actualState === "failed"
               ? t("失败")
-              : t("未运行");
+              : t(stage.id === "mask" ? "可选" : stage.id === "clean" ? "待复核" : "未运行");
         return (
           <div className="workflow-segment" key={stage.id}>
             <button
@@ -216,7 +213,7 @@ export function WorkflowBar({ selectedStage, stageStates = {}, onSelectStage }) 
               <span className="stage-copy">
                 <strong>{t(stage.label)}</strong>
                 <small>
-                  {selected ? `${t("当前视图")} · ${stateLabel}` : stateLabel}
+                  {stateLabel}
                 </small>
               </span>
             </button>

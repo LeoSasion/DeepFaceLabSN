@@ -72,14 +72,16 @@ test("training summary metrics live in the status panel instead of the preview w
   assert.match(source, /label=\{t\("DST 损失"\)\}/);
 });
 
-test("training preview only renders real Trainer output while training is active", async () => {
+test("training preview preserves real Trainer output after a safe stop and labels it as history", async () => {
   const source = await readFile(new URL("../src/components/TrainingView.jsx", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(
     source,
     /previewEligibleStates = new Set\(\["starting", "running", "waiting_input", "stopping"\]\)/,
   );
-  assert.match(source, /const showPreview = trainingHasStarted && Boolean\(previewUrl\)/);
+  assert.match(source, /const showPreview = Boolean\(previewUrl\)/);
+  assert.match(source, /t\("上次训练预览"\)/);
+  assert.match(source, /t\("继续训练"\)/);
   assert.match(source, /data-preview-state=\{trainingHasStarted \? "waiting" : "inactive"\}/);
   assert.match(source, /t\("当前没有运行中的训练"\)/);
   assert.match(source, /t\("正在等待首张训练预览"\)/);
@@ -111,7 +113,7 @@ test("pipeline status derives failures from each command's latest run", async ()
   );
   assert.ok(
     workflowSource.indexOf('job.state === "succeeded" || artifactReady')
-      < workflowSource.indexOf('["failed", "cancelled", "orphaned"].includes(job.state)'),
+      < workflowSource.indexOf('isFailedJob(job)'),
     "workflow state must prefer artifact truth over historical failure",
   );
   assert.ok(

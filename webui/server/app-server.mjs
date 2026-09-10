@@ -1,15 +1,19 @@
 import { createServer } from "node:http";
 import { createReadStream } from "node:fs";
+import { spawn } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 import { releaseVersion } from "../../release/version.mjs";
+import { assignRole, listRoleAssignments, restoreRoleAssignment } from "./role-assignment-manager.mjs";
 import {
   auditAlignedAssets,
   applyAlignedRepair,
   buildAlignedPoseAtlas,
   buildAlignedSimilarityGroups,
+  buildAlignedRoleGroups,
+  retainAlignedRoles,
   inspectAlignedPack,
   inspectAlignedAnnotation,
   inspectQuarantinedAnnotation,
@@ -64,6 +68,7 @@ export const SUPPORTED_OPERATION_KINDS = Object.freeze([
   "asset-audit",
   "pose-atlas",
   "similarity",
+  "roles",
   "pack",
   "coverage",
   "detect-scenes",
@@ -77,6 +82,8 @@ const OPERATION_STAGE_LABELS = Object.freeze({
   "similarity-features": "提取相似度特征",
   "similarity-pairs": "比较相似样本",
   "similarity-groups": "整理相似样本组",
+  "role-features": "提取角色特征",
+  "role-clusters": "整理角色候选",
 });
 const RUNTIME_VERSION = releaseVersion.version;
 const SESSION_COOKIE = "dfl_web_session";
@@ -522,6 +529,13 @@ export class RuntimeServer {
           onProgress,
         }),
       },
+      roles: {
+        label: `${side.toUpperCase()} 角色分组`,
+        stage: "分析角色候选",
+        run: ({ signal, onProgress }) => buildAlignedRoleGroups(side, {
+          threshold: parameters.threshold ?? 0.5, signal, onProgress,
+        }),
+      },
       pack: {
         label: `${side.toUpperCase()} 对齐包检查`,
         stage: "检查对齐包",
@@ -738,7 +752,11 @@ export class RuntimeServer {
       return sendJson(response, 200, { ok: true, data: operation });
     }
     if (request.method === "GET" && url.pathname === "/api/projects") {
-      return sendJson(response, 200, { ok: true, data: await this.projectManager.list() });
+      return sendJson(response, 200, { ok: true, data: {
+        ...await this.projectManager.list(),
+        runningId: PATHS.activeProject.id,
+        restartPending: this.projectRestartPending,
+      } });
     }
     if (request.method === "POST" && url.pathname === "/api/projects") {
       return sendJson(response, 201, {
@@ -845,6 +863,21 @@ export class RuntimeServer {
           threshold: url.searchParams.get("threshold"),
           limit: url.searchParams.get("limit"),
         }),
+      });
+    }
+    if (request.method === "GET" && url.pathname === "/api/roles/assignments") return sendJson(response,200,{ok:true,data:await listRoleAssignments()});
+    const restoreRoleMatch = url.pathname.match(/^\/api\/roles\/assignments\/([a-z0-9-]+)\/restore$/);
+    if (request.method === "POST" && restoreRoleMatch) return sendJson(response,200,{ok:true,data:await this.withWorkspaceMutation("恢复角色分配",()=>restoreRoleAssignment(restoreRoleMatch[1]))});
+    const assignRoleMatch = url.pathname.match(/^\/api\/tools\/assets\/(src|dst)\/roles\/assign$/);
+    if (request.method === "POST" && assignRoleMatch) {
+      const body = await readJsonBody(request);
+      return sendJson(response,200,{ok:true,data:await this.withWorkspaceMutation("分配角色",()=>assignRole(assignRoleMatch[1],body))});
+    }
+    const retainRolesMatch = url.pathname.match(/^\/api\/tools\/assets\/(src|dst)\/roles\/retain$/);
+    if (request.method === "POST" && retainRolesMatch) {
+      const body = await readJsonBody(request);
+      return sendJson(response, 200, { ok: true,
+        data: await this.withWorkspaceMutation("保留选中角色", () => retainAlignedRoles(retainRolesMatch[1], body)),
       });
     }
     const toolPackMatch = url.pathname.match(/^\/api\/tools\/assets\/(src|dst)\/pack$/);
@@ -1141,6 +1174,16 @@ export class RuntimeServer {
         })
       ));
       return sendJson(response, 201, { ok: true, data: imported });
+    }
+    if (request.method === "POST" && url.pathname === "/api/workspace/reveal") {
+      if (process.platform !== "win32") throw apiError("当前系统不支持打开资源管理器", "REVEAL_UNSUPPORTED", 400);
+      // No client path or command is accepted. Only this project's fixed root is revealed.
+      await new Promise((resolve, reject) => {
+        const child = spawn("explorer.exe", [PATHS.workspaceRoot], { windowsHide: true, stdio: "ignore" });
+        child.once("error", reject);
+        child.once("spawn", () => { child.unref(); resolve(); });
+      });
+      return sendJson(response, 200, { ok: true, data: { opened: true } });
     }
     const workspaceArtifactMatch = url.pathname.match(
       /^\/api\/workspace\/artifacts\/(result(?:_mask)?\.(?:mp4|avi|mov))$/,

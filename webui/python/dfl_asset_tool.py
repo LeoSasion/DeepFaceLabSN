@@ -15,6 +15,8 @@ from collections import Counter
 from pathlib import Path
 from statistics import median
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import cv2
 import numpy as np
 
@@ -1414,6 +1416,7 @@ def main():
             "coverage",
             "probe-manifest",
             "similarity",
+            "roles",
             "alignment-preview",
             "alignment-apply",
         ),
@@ -1490,6 +1493,14 @@ def main():
         if args.directory is None or not args.directory.is_dir():
             raise ValueError("aligned directory does not exist")
         emit(group_similar_images(args.directory, args.threshold, args.limit))
+        return
+
+    if args.action == "roles":
+        from role_grouping import group_directory, MODEL_NAME
+        if args.directory is None or not args.directory.is_dir():
+            raise ValueError("aligned 目录不存在")
+        emit(group_directory(args.directory, DFL_ROOT.parent / "vision_models" / MODEL_NAME,
+                             load_dfl_image, emit_progress, args.threshold, args.limit))
         return
 
     if args.file is None or not args.file.is_file():
