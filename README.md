@@ -2,11 +2,19 @@
 
 DeepFaceLab-WEBUI 是一套面向 Windows 与 NVIDIA GPU 的本地 DeepFaceLab 工作台。它把素材整理、提帧、切脸、质量检查、XSeg、训练、模型诊断、合成和视频导出放进同一条可视化流程；命令仍在本机运行，素材不会因为使用 WebUI 而上传到云端。
 
+## 📖 [操作手册 · User Interface Guide（中文 / English）](docs/USER_INTERFACE_GUIDE.md)
+
+**首次使用请从这里开始：** 15 节中英双语说明、48 张真实界面截图，按创建项目、导入素材、提帧切脸、人物复核、XSeg、训练与续训、质量诊断、合成、视频导出的顺序逐步操作，并附故障恢复说明。
+
+Start with the **[bilingual User Interface Guide](docs/USER_INTERFACE_GUIDE.md)** for the complete workflow, illustrated with 48 real screenshots.
+
+[开始使用](docs/USER_INTERFACE_GUIDE.md#step-01) · [训练与续训](docs/USER_INTERFACE_GUIDE.md#step-08) · [视频导出](docs/USER_INTERFACE_GUIDE.md#step-12) · [故障恢复](docs/USER_INTERFACE_GUIDE.md#step-14)
+
+[![DeepFaceLab-WEBUI 界面总览与真实训练预览](docs/images/user-interface-guide/25-training-live.png)](docs/USER_INTERFACE_GUIDE.md)
+
+上图来自操作手册的实际录制；短时训练用于演示流程，画质不代表最终效果。完整截图、示例素材和验证范围见手册。
+
 > 请只处理你拥有或已获授权的素材，并遵守适用的隐私、肖像权和内容标识规定。
-
-本手册与演示工作区中的人物均为文生图生成的虚构成年人，不对应真实公众人物或可识别个人。生成提示词和资产说明见 [虚拟身份演示素材](docs/demo-assets/fictional-identities/README.md)。下列界面图均取自当前 WebUI 的 1920 × 1080 中文界面；Trainer 区域只展示真实训练输出，未运行训练时保持空状态。
-
-![DeepFaceLabSN 产品总览](docs/images/product-overview.png)
 
 ## 下载与启动
 
@@ -95,8 +103,6 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File launcher\build-host.ps1
 
 启动器会优先使用整合包内的便携 Node.js 24。若运行时缺失或版本不兼容，会自动从整合包内置的离线安装包补齐；离线安装包也不存在时，才从 Node.js 官方站下载并校验 SHA-256。整个过程不需要管理员权限，也不会修改系统 PATH。首次使用精简版整合包时需要联网下载约 37 MB。
 
-![新建任务向导](docs/images/product-new-task.png)
-
 如果 WebUI 无法启动，可使用 `传统命令菜单.bat` 进入兼容菜单。传统 BAT 已集中到 `legacy-cli`，日常使用不需要运行初始化 BAT。
 
 ## 先理解 SRC 与 DST
@@ -107,8 +113,6 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File launcher\build-host.ps1
 | DST | 提供最终视频中的动作、表情、镜头和身体 | 使用最终要制作的视频，优先保证画面稳定、分辨率一致 |
 
 工作区会直接预览两段素材并显示时长、分辨率、大小和修改时间；同时汇总视频帧、aligned 人脸、XSeg、训练模型、merged 序列和输出文件的就绪状态。更换 SRC 或 DST 时，旧素材会自动进入各自的“恢复历史”，恢复旧版本前也会先归档当前素材，因此可以继续撤回。顶部磁盘条显示空闲空间、固定 5 GB 安全余量和实际可用于任务的容量；已知大小的导入若会突破余量，会在写入前拒绝。“归档已完成任务”只整理已结束任务的日志，不会删除素材、模型或输出。
-
-![SRC 与 DST 工作区](docs/images/product-workspace.png)
 
 ## 完整工作流
 
@@ -124,7 +128,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File launcher\build-host.ps1
 | 2 提帧 | 把视频拆成帧 | `data_src` 与 `data_dst` 中产生帧图 |
 | 3 切脸 | 检测、对齐并提取人脸 | aligned 目录出现清晰、方向正确的人脸 |
 | 4 清洗 | 审计模糊、遮挡、重复和异常样本 | 问题样本已隔离或确认保留 |
-| 5 遮罩 | 训练并应用 XSeg | 关键边界和遮挡区域覆盖正确 |
+| 5 遮罩（可选） | 按需要标注、训练并应用 XSeg | 所选遮罩方案的边界和遮挡覆盖正确 |
 | 6 训练 | 训练 SAEHD 等模型 | 预览持续改善，损失与显存状态正常 |
 | 7 诊断 | 对比训练快照，检查质量回归 | 至少保存两个可比较的评估快照 |
 | 8 合成 | 将模型应用到 DST 人脸 | 合成帧边缘、颜色和遮挡可接受 |
@@ -136,11 +140,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File launcher\build-host.ps1
 
 “隔离”和“恢复区”位于数据集命令栏右侧。恢复区与工作区采用相同的“缩略图列表 + 大图属性”结构，可先隔离问题样本再复核恢复。大图下方还提供 XSeg 编辑入口，以及处于“规划中”的清晰增强、单图合成和 AI 图像编辑入口。
 
-![人脸数据检查](docs/images/product-dataset.png)
-
 进一步进入“工具 → 数据审计”，可按清晰度、曝光、重复、姿态与遮罩状态筛选。审计页会显示样本总量、可用数量、问题数量和高风险数量，并允许逐张检查原图、质量指标、源帧、遮罩判定和姿态信息。
-
-![数据质量审计](docs/images/product-quality-audit.png)
 
 ### 2. XSeg 遮罩
 
@@ -148,15 +148,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File launcher\build-host.ps1
 
 未闭合多边形不会被写入 JPG；刷新、切换素材、切换页面或关闭窗口前若有未保存修改，界面会请求确认，避免静默丢失标注。
 
-![XSeg 遮罩编辑器](docs/images/product-xseg-editor.png)
-
 ### 3. 模型训练
 
 “模型训练”页集中列出 SAEHD、XSeg、ME、Quick384 和 Quick512 五个入口，并标明使用 DFL legacy 还是 DFL current。点击模型后仍通过统一的三步任务向导配置参数；SAEHD 提供 Web 控制桥，ME、Quick384 与 Quick512 的完整 DFL 问答保留在底部终端。
 
-训练真正运行后，“总览”才会显示 Trainer 生成的真实预览，以及迭代、速度、SRC / DST 损失、显存、温度和损失曲线。没有运行中的训练时预览区保持明确的空状态，不使用演示图冒充训练结果。首次只想验证流程时，可在 DFL 问答中选择较低模型分辨率（例如 128）；正式项目再根据显存、脸部占比和目标质量逐步提高。
-
-![模型训练入口](docs/images/product-training.png)
+训练真正运行后，“总览”才会显示 Trainer 生成的真实预览，以及迭代、速度、SRC / DST 损失、显存、温度和损失曲线。安全停止后会保留真实预览与损失记录；尚无训练记录时显示空状态。首次只想验证流程时，可在 DFL 问答中选择较低模型分辨率（例如 128）；正式项目再根据显存、脸部占比和目标质量逐步提高。
 
 训练期间建议：
 
@@ -176,17 +172,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File launcher\build-host.ps1
 
 尚未建立训练评估上下文时，诊断页会直接说明缺少的前置条件，并提供返回模型训练的入口，避免新手面对空白页面。
 
-![训练诊断前置条件提示](docs/images/product-diagnostics.png)
-
-![SRC 与 DST 姿态覆盖图谱](docs/images/product-pose-atlas.png)
-
 ### 5. 合成与视频导出
 
 完成训练诊断后再进入“模型应用”。先生成少量合成帧检查边缘、肤色、遮挡和运动稳定性，再运行全量合成。最后在“视频导出”中封装 MP4，并核对音频、帧率与时长。
 
 长视频可在“工具 → 视频时间线”中按场景拆分处理，减少失败后的重跑范围。
-
-![视频时间线与分段处理](docs/images/product-video-timeline.png)
 
 ## 常用工具
 
@@ -194,7 +184,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File launcher\build-host.ps1
 
 - 数据质量审计：筛查模糊、遮挡、重复、异常姿态与遮罩问题。
 - 提取覆盖复核：确认视频各时间段和角度都有足够人脸样本。
-- 合成复核：以 SRC、DST、合成结果三联画检查质量。
+- 合成复核：对照 DST 原帧、合成结果和遮罩三联图检查质量。
 - 视频时间线：场景识别、分段提帧、失败片段重跑。
 - 元数据与打包：检查 DFL 图片元数据和 PackedFaceset。
 - 模型导出：DFM 导出前检查模型、空间和依赖条件。
@@ -233,7 +223,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File launcher\build-host.ps1
 
 **Trainer 区域为什么是空的？**
 
-这是正常的空闲状态。WebUI 只显示 Trainer 实际生成的预览；先从“模型训练”启动 SAEHD，任务进入运行状态后再回到“总览”查看。
+尚未生成真实训练预览时会显示空状态。先从“模型训练”启动 SAEHD，完成终端中的配置问答，再回到“总览”查看；安全停止后仍可查看上次预览并继续训练。
 
 **合成结果在哪里？**
 
